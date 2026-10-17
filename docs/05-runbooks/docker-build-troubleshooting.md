@@ -3,7 +3,7 @@ title: Docker Build & Boot Troubleshooting
 tags: [runbook, docker, troubleshooting]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-07
+updated: 2026-10-14
 ---
 
 # Runbook — Docker build & boot troubleshooting
@@ -81,8 +81,9 @@ The async worker broker (Valkey, ADR-0053) is unreachable. Almost always `REDIS_
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs api | grep -i valkey
 ```
 
-Fix it (the api no longer floods — reconnection is bounded and import POSTs return a clean **503**
-instead of hanging — but async import stays down until this is set):
+Fix it (the api no longer floods — it keeps reconnecting every few seconds with at most one "still
+failing" log line a minute, and import POSTs return a clean **503** instead of hanging — but async import
+stays down until this is set):
 
 ```sh
 grep -q '^REDIS_URL=' infra/env/.env.prod || echo 'REDIS_URL=redis://valkey:6379' >> infra/env/.env.prod
@@ -93,6 +94,12 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
 `api depends_on valkey: service_healthy` guarantees Valkey is *up*, but not that the api has the right
 *URL* — Valkey is reachable as `valkey:6379` on the internal network, never `localhost`. See the
 upgrade note in [[deploy-self-hosted]] §4.
+
+When the URL is right and Valkey was only restarted or briefly down, there is nothing to do: the api
+reconnects on its own within a few seconds of Valkey coming back, and queued and scheduled jobs resume.
+Until then `/health/ready` reports `checks.valkey.status: "down"` with `status: "degraded"` — still
+HTTP 200, because readiness gates on Postgres only ([[0053-async-workers-bullmq-valkey]], amendment
+2026-10-14). The probe body says only `unreachable`; the cause is in the api log.
 
 ## Postgres container won't start
 

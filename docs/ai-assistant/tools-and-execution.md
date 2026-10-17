@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-05
+updated: 2026-10-16
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -44,7 +44,9 @@ CEO decisions (settled, not re-litigated here):
   append-only audit log.
 - New permission `ai:use` (ADMIN + MEMBER by default) in the [[0046-roles-permissions-v2]] catalog gates
   chat and headless use; MCP is gated by its own `ai:connect` (ADMIN + MEMBER by default; CEO, round 2).
-- OIDC/Zitadel is being removed (#1310): nothing here depends on it.
+- Nothing here depends on an external IdP. (At design time all OIDC was to be removed, #1310; it was
+  later narrowed by [[0102-remove-bundled-zitadel]]: only the bundled Zitadel was removed, and generic
+  OIDC stays opt-in.)
 
 ## 2. Repository facts
 
@@ -183,10 +185,12 @@ Legend:
 | locations | create | location:write | W | v1 `location_create` (built, W2-5) |
 | locations | update | location:write | W | v1 `location_update` (built, #1390) |
 | locations | delete / restore | location:delete | D | v1 `location_archive` / `location_restore` (built, #1390) |
+| locations | export CSV | location:read | R | EXCL (bulk file; use search) |
 | applications | list / get | application:read | R | v1 |
 | applications | `:id/access-grants`, `:id/articles` | accessGrant:read, article:read | R | v1 facets |
 | applications | create / update | application:write | W | v1 |
 | applications | delete / restore | application:delete | D | v1.1 |
+| applications | export CSV | application:read | R | EXCL (bulk file; use search) |
 | workflows | list (headers only) | workflow:read | R | facet of the grant / revoke / approve previews (W2-6: whether an automatic (de)provisioning workflow runs); never a tool |
 | access-grants | list / get | accessGrant:read | R | v1 `access_grant_list` |
 | access-grants | `mine` | self | R | v1 (`session_context`) |
@@ -197,14 +201,18 @@ Legend:
 | access-requests | create | accessRequest:create, human-only | W | v1 |
 | access-requests | approve / deny | accessGrant:grant, human-only | W (+ext) | v1 `access_request_decide` |
 | access-requests | `mine` | human-only | R | v1 facet |
+| access-requests | export CSV | accessRequest:read | R | EXCL (bulk file; use `access_request_list`) |
 | consumables | list / get / movements | consumable:read | R | v1 `consumable_search` / `consumable_get` (built, W2-7) |
 | consumables | create / update / movement | consumable:write | W | v1 `consumable_create` / `consumable_update` / `consumable_record_movement` (built, W2-7) |
 | consumables | delete / restore | consumable:delete | D | v1.1 |
+| consumables | export CSV | consumable:read | R | EXCL (bulk file; use search) |
+| consumables | movements / deliveries export CSV | consumable:read (+ the target kind read for deliveries) | R | EXCL (bulk file; use `consumable_get`) |
 | articles | list / by-slug / get | article:read | R | v1 |
 | articles | versions / links / backlinks / aliases | article:read | R | v1.1 |
 | articles | create / update / publish / unpublish | article:write | W | v1 (SA create → 403, [R25]) |
 | articles | version restore, links / aliases writes | article:write | W | v1.1 |
 | articles | import (multipart) | article:write | W | EXCL (binary) |
+| articles | export CSV | article:read | R | EXCL (bulk file; use search) |
 | articles | delete / restore | article:delete | D | v1.1 |
 | users | list, get, `:id/assignments` | user:read | R | v1 `user_search`, `user_get` (built, W2-9) |
 | users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
@@ -216,7 +224,7 @@ Legend:
 | users | restore | user:manage | W | v1 `user_restore`, `elevated` (built, W2-9) |
 | users | clone | user:manage | W | v1.1 |
 | users | provision-local-account | user:manage | W | EXCL (returns a temporary password in cleartext, [R24]; CEO round 2) |
-| users | reset-password, provision-account, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
+| users | reset-password, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
 | dashboard | summary | dashboard:read | R | v1 `dashboard_summary` (built, W2-9) |
 | dashboard | activity | logs:read | R | v1 `activity_list` (built, W2-9) |
 | dashboard | activity filters (the Reports select menus) | logs:read | R | not in the v1 cut (`activity_list` filters by actor and action directly) |
@@ -227,6 +235,7 @@ Legend:
 | notifications | list, unread-count, mark read | self (service-scoped) | R / W | v1.1 |
 | account | preferences — language and theme (#1422) | self (human-only) | R / W | not in the v1 cut (set from the UI, where the browser value wins) |
 | infra | nodes (paged), node, edges, impact | infra:read | R | v1 `infra_node_search` / `infra_node_get` (built, W2-10) |
+| infra | nodes export CSV | infra:read | R | EXCL (bulk file; `infra_node_search` is the paged equivalent) |
 | infra | changes, identity-matches, auto-confirm rules | infra:read | R | v1.1 (with the curation surface they serve) |
 | infra | graph nodes / edges (canvas bulk reads) | infra:read | R | EXCL (unpaged, up to 10,000 rows; the two v1 tools are the paged equivalents) |
 | infra | agent fleet | infra:read (+settings:manage for the credential inventory) | R | not in v1 (carries the agent credential inventory) |
@@ -478,12 +487,12 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
 | 16a | `category_create` ✅ built (#1390; kind: assetCategory, applicationCategory, consumableCategory) | AssetCategoriesController.create (primary), the other two kinds' `create`, the three `findAll` | category:write | write | category created |
 | 16b | `category_update` ✅ built (#1390; rename, description, order, the asset-category attribute dictionary) | AssetCategoriesController.update (primary), the other two kinds' `update`, the three `findAll` | category:write | write·D | category updated |
-| 16c | `category_archive` ✅ built (#1390) | AssetCategoriesController.remove (primary), the other two kinds' `remove`, the three `findAll`; impact from AssetModelsController / AssetsController / ApplicationsController / ConsumablesController `findAll` | category:delete | write·D | category archived |
+| 16c | `category_archive` ✅ built (#1390; `strategy` + `moveTo` for a category in use — application / consumable AUD-085, asset SEC-041) | AssetCategoriesController.remove (primary), the other two kinds' `remove`, the three `findAll`; the impact of every kind from its `deleteImpact` | category:delete | write·D | category archived |
 | 16d | `asset_model_update` ✅ built (#1390) | AssetModelsController.update (+findOne / findAll, AssetCategoriesController.findAll) | assetModel:write | write·D | assetModel updated |
-| 16e | `asset_model_archive` ✅ built (#1390) | AssetModelsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | assetModel:delete | write·D | assetModel archived |
+| 16e | `asset_model_archive` ✅ built (#1390; `strategy` + `moveTo` when in use, SEC-041) | AssetModelsController.remove (+deleteImpact for the impact and the in-use check, findOne / findAll) | assetModel:delete | write·D | assetModel archived |
 | 16f | `asset_model_restore` ✅ built (#1390) | AssetModelsController.restore (+findAll `deleted=only`) | assetModel:delete | write (idempotent) | assetModel restored |
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
-| 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
+| 16h | `location_archive` ✅ built (#1390; `strategy` + `moveTo` when in use, AUD-024) | LocationsController.remove (+deleteImpact for the impact and the in-use check, findOne / findAll) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
 | 16l | `asset_status_label_create` ✅ built (#1524) | AssetStatusLabelsController.create (+findAll) | category:write | write | assetStatusLabel created |
 | 16m | `asset_status_label_update` ✅ built (#1524; rename, colour, description, order; kind only while unused) | AssetStatusLabelsController.update (+findAll) | category:write | write·D | assetStatusLabel updated |
@@ -614,6 +623,12 @@ Warning rules for these tools (§9 has the step-up rule):
   - references: a workflow is `{ id }` or `{ application, trigger }` (at most one live workflow per
     application and trigger); a connection, a sample grant and a credential are taken by id only, so the
     stored input is exactly what the card showed.
+  - a connection a **saved** graph still calls may have been archived since (the archive allows it): the
+    replaced version on a `workflow_author_version` card, the graph an enable card describes and the
+    other workflows a re-point lists read it tolerantly — a 403 or 404 shows that step's destination as
+    "archived or not readable" instead of refusing the card, as `workflows.tools.ts` does (AUD-078). The
+    steps of a **new** version stay strict: a connection that is not live is refused before the card, as
+    the route would refuse it.
 - **`CRITICAL_APPLICATION`** — every AI write on an application with `isCritical = true`: any workflow
   write (authoring, retry, replay, task resolve) and any access grant or revoke (CEO: "Toda
   escritura"). Core requires step-up in the chat; MCP and headless refuse it (below).
@@ -694,7 +709,15 @@ path unit (W2-0, #1315):
 - `tools/index.ts` — imports every per-domain file (pre-wired once)
 - `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
-  built yet);
+  built yet). `lazyit_search` returns each index only to a caller holding its `<domain>:read` (users: a
+  person whose role may read them) — the route drops the others (AUD-015). A person's first and last name
+  is wrapped with `untrusted()` in a users hit (AUD-003), and so are an asset hit's name and serial, an
+  article hit's title, and an infrastructure hit's label and asset name — a hit does not say whether a
+  reporting agent wrote them. `session_context` wraps the name and serial of the caller's assigned assets
+  for the same reason (the lean `mine` rows carry no specs), and the caller's own first and last name too
+  (anyone may rename themselves), so every turn that calls it is untrusted and never auto-approved:
+  `session_context` no longer has an exception. The display name in the system prompt ("Acting as …") is
+  not wrapped; it is covered by its own hardening (§12, "Hardening of the dynamic values");
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
@@ -741,15 +764,19 @@ path unit (W2-0, #1315):
   `{ total, offset, items }` and a `truncated` marker with `nextOffset` when more rows exist.
 - `infra_node_get` — input `id`, `detail` (`concise` | `full`), `includeClosedEdges`. Concise: the node
   summary with owners, children, edges (direction + the peer resolved through `listNodePage?ids=`) and
-  the blast-radius size; full adds the affected nodes with hop depth, linked KB articles, IP-conflict
-  peers and a few reported host facts. Lists inside it are capped at 50 with their totals.
+  the blast-radius size — the route's traversal over active `RUNS_ON`, `DEPENDS_ON` and `MEMBER_OF`
+  edges (a group takes its members down), an estimate from the recorded edges; full adds the affected
+  nodes with hop depth, linked KB articles, IP-conflict peers and a few reported host facts. Lists inside
+  it are capped at 50 with their totals.
 - Never projected: `secretRefs` (Secret Manager adjacency, even handles), the raw `specs` blob
   (software list, identifiers, serial, NICs), `reportingSource` / `externalId`, and any agent credential
   data. The label and inventory name of an agent-reported node, the label of any lean row whose
-  provenance the route does not state, and the reported host facts are wrapped with `untrusted()`.
+  provenance the route does not state, the reported host facts and the owners' first and last names
+  (AUD-003) are wrapped with `untrusted()`.
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
-  `report`, the secret link and the agent binary distribution.
+  the CSV export ([[0103-data-export-streaming-path]]), `report`, the secret link and the agent binary
+  distribution.
 
 **KB tools as built (W2-8).** `kb.tools.ts` binds `ArticlesController` handlers and, for the folder
 shown on a card, `ArticleCategoriesController.findAll`. The folder ACL (ADR-0060, INV-9) and draft
@@ -819,15 +846,17 @@ leak through a tool would be a leak in the test.
   destination is more visible; any action on **another person's article** (the `article:manage` bypass,
   T3), which also names it in `untrustedSources`. Unpublishing your own article is a standard card with
   `VISIBILITY_CHANGE`. Every write on an existing article carries a precondition on its `updatedAt`.
-- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`.
+- Untrusted content: titles, excerpts, bodies, metadata and author names in results are wrapped with
+  `untrusted()` (a person renames themselves through `PATCH /users/me`; AUD-003).
 - Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused by
   the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
-  transfer (no file tools); folder delete (a cascading one included) and restore (v1.1, declared in
+  transfer (no file tools), the article-index CSV export (a bulk file,
+  [[0103-data-export-streaming-path]]); folder delete (a cascading one included) and restore (v1.1, declared in
   `reference.tools.ts`), a folder move, and folder access rules (`elevated`, after v1).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
-  - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
+  - entity-ref labels (article titles) are not wrapped as untrusted;
   - the folder is an entity of type `category`, which the web cannot tell apart from the other
     category kinds (no `articleFolder` entity type yet);
   - a member without `article:manage` gets the elevated card for someone else's published article, and
@@ -852,9 +881,14 @@ Accounts holding the route's permission.
   candidates. **A partial page never decides** (review fix F1, the rule the consumables tools apply):
   when the route's substring search matched more rows than the one page a lookup reads (200), the
   entity meant may sit past it, so the reference is refused as `AMBIGUOUS_REFERENCE` asking for the id —
-  unless two exact matches are already on the page, which are named as candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
-  grants still works); the preview always reads the target, to name it. An id is recognized by shape —
-  a cuid (`c` + 24 lowercase alphanumerics) or a uuid.
+  unless two exact matches are already on the page, which are named as candidates. An id is recognized
+  by shape — a cuid (`c` + 24 lowercase alphanumerics) or a uuid, in any case (a uuid is compared
+  lower-case, as the route returns it — AUD-076). A cuid-shaped asset reference is read as an id first
+  and, when no live asset has that id, searched as a tag or serial, on the card and in the run alike
+  (AUD-077: a serial can look like a cuid). In `run` a raw id the caller may not read still passes
+  straight to the write handler (a Service Account with write-only grants still works), and a raw user id
+  is never looked up; the preview always reads the target, to name it. A person's name is wrapped with
+  `untrusted()` in owners, labels and cards (AUD-003; the email stays plain).
 - **Ownership is the assignment** (asset-centric): `asset_check_out` opens an `AssetAssignment`
   (`POST /asset-assignments`), `asset_check_in` releases one (`PATCH /asset-assignments/:id/release`).
   Check-in finds the assignment among the asset's live owners (`GET /assets/:id/assignments`); with no
@@ -879,15 +913,19 @@ Accounts holding the route's permission.
   ADMIN-only by **role** (`assertCanListDeleted`), while the restore route needs only `asset:delete` —
   so a Service Account or a non-ADMIN role granted `asset:delete` cannot restore through the tool, though
   it could over HTTP by id (a parity gap, follow-up F5). The list has no id filter, so a raw id scans the
-  five newest-archived pages (1,000 assets) and, when more exist, is refused as `AMBIGUOUS_REFERENCE`
-  asking for the tag or serial; a tag or serial is a `q` search.
+  five newest-archived pages (1,000 assets), then is searched as a tag or serial (AUD-077); when more
+  archived assets exist than the scan reads and the id was not among them, it is refused as
+  `AMBIGUOUS_REFERENCE` asking for the tag or serial. A tag or serial is a `q` search. In `run`, a
+  cuid-shaped reference no archived asset matches, or one the caller may not list, goes straight to the
+  restore route.
 - **Results.** `asset_search` returns `{ total, offset, items }` (model, category, location, current
   owners; never notes or specs) with a `truncated` marker; `asset_get` concise adds notes, cost and
   book value; `full` adds specs, the ownership history (capped at 50), the last 20 history events and
   the linked KB articles — a facet the caller may not read (`article:read`) is reported
   `unavailable`, not failed. `reference_lookup` pages the unpaged taxonomies itself; KB folders never
   carry their access rules. Notes, descriptions, specs and history payloads are wrapped with
-  `untrusted()`, and so are an asset's **name and serial** when a reporting agent may have written them
+  `untrusted()`, and so are the linked articles' titles and an asset's **name and serial** when a
+  reporting agent may have written them
   (review fix F3, mirroring the infra tools): the asset carries `specs._infraAutoCreated` (the node
   created it from the reported hostname) or `specs.host` (agent-linked), or the row does not say — the
   lean `asset_search` rows carry no specs, so their names and serials are always wrapped. Such an asset's
@@ -1030,7 +1068,7 @@ Accounts holding the route's permission.
     ADMIN role for its lookup.
 - **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1; the batch create is
   `asset_create_batch` over the single create route, and the batch update — status included — is
-  `asset_update_batch` over the single update route), the CSV export, the
+  `asset_update_batch` over the single update route), the asset and location CSV exports, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
   folder delete and restore (v1.1; create and rename are `kb_folder_create` / `kb_folder_rename`, #1378),
@@ -1046,16 +1084,26 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   `consumableCategory`): the three controllers share `category:write` / `category:delete`, so one listing
   permission is exact. `category_create`, `category_update`·D (rename, description, `order` — application
   and consumable only — and `specsSchema`, asset only; a field of another kind is `INVALID_INPUT`) and
-  `category_archive`·D. KB folders are categories too but stay with the KB toolset (a folder carries an
+  `category_archive`·D — a category still in use (an asset category's live models, whose assets follow
+  them; an application or consumable category's live items) needs `strategy` (`detach`, or `move` with
+  `moveTo`, one choice for all of them); without one the preview is refused with the counts, as the route
+  would answer 409. The card counts each kind from the kind's `GET …/:id/delete-impact`. KB folders are categories too but stay with the KB toolset (a folder carries an
   audience; its delete cascades).
 - **Models and locations:** `asset_model_update`·D (name, manufacturer, SKU, description, category by id
   or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
   route replaces `specs` whole; `category: null` removes the model's category — the card shows the
   category before → "None (no category)", and clearing one the model does not have is no change; the
   route takes `categoryId: null` since #1315, CEO 2026-09-25; `sku: null` / `description: null` clear
-  those fields the same way — a before → none row, a no-op when already empty, #1441), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
+  those fields the same way — a before → none row, a no-op when already empty, #1441), `asset_model_archive`·D
+  (in use — live assets or open purchase lines — it needs `strategy` `detach`, or `move` with `moveTo`, another
+  model in any category; the card counts each kind from `GET /asset-models/:id/delete-impact`, shows the open
+  lines as the distinct purchases they belong to — counted only when every line is listed, otherwise reported
+  as unknown — and shows a `destination` row), `asset_model_restore` (a `409` while the model's category is
+  archived); `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
-  top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
+  top-level), `location_archive`·D (in use — live assets, child locations or open purchases — it needs
+  `strategy` `detach`, or `move` with `moveTo`, one choice for all of them; the card counts each kind from
+  `GET /locations/:id/delete-impact` and shows a `destination` row), `location_restore`. The manufacturer is a free-text column of
   `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to
   resolve or create; a missing category is created with `category_create` first (its description says so).
 - **References:** a category by id or exact name, read from its unpaged route list (no partial page); a
@@ -1094,17 +1142,21 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   scheme is instance configuration (its own tools, #1394 — see below; its backfill stays unexposed); KB folder
   access rules are authorization configuration (`elevated`, after v1).
 - **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
-  names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
-  recorded for the KB tools).
+  names in summaries, are wrapped with `untrusted()`; so is the stored name a category or custom-status
+  refusal quotes (a no-op update, a kind change or an archive blocked by its carriers). Matching still
+  compares the raw names. Entity-ref labels are not wrapped (the follow-up already recorded for the KB
+  tools).
 - **Custom asset statuses (#1524, [[0101-custom-asset-statuses]]).** Four more tools in the same file, under
   the category permissions: `asset_status_label_create`, `asset_status_label_update`·D,
   `asset_status_label_archive`·D and `asset_status_label_restore` (idempotent). Every description opens with
   the concept — a team-defined name mapped to exactly one built-in status (its *kind*); the built-in status
   drives every rule; setting a custom status sets it. A custom status is named by id or exact name from its
   unpaged route list (entity type `assetStatusLabel`). Refused before a card: a live duplicate name
-  (`CONFLICT`), a kind change while live assets carry it (`CONFLICT`; archived carriers are refused by the
-  route), an archive in use without a destination, a destination equal to the archived one, or both
-  `moveTo` and `moveToStatus` (`INVALID_INPUT`). The archive card shows the assets that move (count + up to
+  (`CONFLICT`), a kind change while any asset carries it (`CONFLICT`), an archive in use without a
+  destination, a destination equal to the archived one, or both `moveTo` and `moveToStatus`
+  (`INVALID_INPUT`). "Carries" counts archived assets too, as the route does (AUD-094): the live
+  `assetCount` plus the total of `GET /assets?statusLabelId=&deleted=only`, which only an ADMIN may list —
+  for anyone else the card counts live assets and the route still decides. The archive card shows the assets that move (count + up to
   five, through `GET /assets?statusLabelId=`) and a `moveAssetsTo` row (an entity for a custom status, the
   status code otherwise); the route moves them and archives in one transaction and returns
   `movedAssetCount`, which the summary names. Restore resolves through `deleted=only` (ADMIN by role — the
@@ -1192,16 +1244,22 @@ a separate remediation, not a supported path here.
   grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
   (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
   filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and
-  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes,
-  imported `directoryAttrs`, an activity row's `subjectName` (entity names, some agent-reported) and a
-  history `payload`. The feed's `summary` is a fixed server phrase and is not wrapped.
+  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes, a
+  grant's access level (an approval copies the requester's text onto it), imported `directoryAttrs`, an
+  activity row's `subjectName` (entity names, some agent-reported) and a history `payload`. So are the
+  identity strings a person or a directory sync wrote (AUD-003): first and last name, `username`,
+  `legajo` and the manager's name (a lazyit user's or the free-text one), in results and in the name part
+  of every user label — entity refs, summaries, reference candidates and card values (the email stays
+  plain). Anyone may rename themselves through `PATCH /users/me`, so a turn that read a user carries the
+  untrusted-source marker and nothing proposed after it is auto-approved. The feed's `summary` is a fixed
+  server phrase and is not wrapped.
 - **Writes and warnings.** Previews leave `stepUpRequired` to core (it derives it from the warnings).
   - `user_create` (`elevated`): always `IDENTITY_CHANGE`, plus `ROLE_CHANGE` for a role above VIEWER. No
     target (nothing exists yet). The input has no `password`: the route's optional temporary password is
     a credential (INV-AI-5).
   - `user_update` (`elevated`, destructive): `ROLE_CHANGE` for a role change; `IDENTITY_CHANGE` for email,
-    name, username, legajo or activation (`isActive`); `EXTERNAL_PROVISIONING` when a role, name or email
-    change is mirrored to the IdP (the account has an `externalId`). A **manager** change is not an
+    name, username, legajo or activation (`isActive`). Nothing is mirrored to an IdP
+    ([[0102-remove-bundled-zitadel]]), so no external warning applies. A **manager** change is not an
     identity change and needs no step-up (CEO decision 2026-09-24): it is local-only and the route records
     it as an append-only `MANAGER_CHANGED` history row, so it carries the non-step-up `LEDGER_APPEND` —
     the elevated preview still has a warning. Bundled with an identity field, `IDENTITY_CHANGE` (and so
@@ -1210,7 +1268,7 @@ a separate remediation, not a supported path here.
     can redirect a future external approval or notification. The card shows the change; no password.
   - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
     `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
-    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated; always
+    cannot count them); no IdP account is deactivated ([[0102-remove-bundled-zitadel]] §5); always
     `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
     Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
     the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
@@ -1231,8 +1289,8 @@ a separate remediation, not a supported path here.
     restored role is above VIEWER (its powers come back); grants, assets and vault memberships are not
     restored, and the description says so. A live user is refused before any card (400).
 - **Unexposed with reasons:** `roleCounts` and `activityFilters` (not in the v1 cut), `remove` (the
-  `DELETE` alias of offboard), `clone` (v1.1), `provisionAccount` and `passwordResetCapabilities` (v1.1,
-  `elevated`), `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
+  `DELETE` alias of offboard), `clone` (v1.1), `passwordResetCapabilities` (v1.1, `elevated`),
+  `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
   export, the security audit logs and notifications (v1.1).
 - **Known limits and follow-ups.**
   - A non-ADMIN human an operator gave `user:manage` can restore through the route but not through the
@@ -1240,8 +1298,11 @@ a separate remediation, not a supported path here.
   - The offboarding card's asset and grant counts are taken at preview time; a check-out or grant made
     between the preview and the approval is still reclaimed but was not on the card (the precondition
     pins the user row, not its holdings).
-  - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
-    wrapping directory names with `untrusted()` would be a cross-toolset decision.
+  - Every toolset wraps person names (AUD-003): the users, KB and access tools, and since the B20 batch
+    the assets (an owner, a card's person), infrastructure (a node's owners), context (a users search
+    hit) and workflow-authoring (the enable card's sample grantee) tools. `session_context` no longer has
+    an exception: the caller's own name is wrapped too, so a turn that calls it is never auto-approved.
+    The system-prompt display name is covered by its own hardening (§12).
 
 **Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
@@ -1273,7 +1334,10 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
   is revoked automatically shortly", "revoked on … by user …", "pending: waiting for someone who can
   grant access…", "approved by user … on …; access grant … was created", "denied by …"). Never
   projected: an application's free-form `metadata`, any workflow definition, connection, engine Service
-  Account or secret. Descriptions, notes, justifications and denial reasons are `untrusted()`.
+  Account or secret. Descriptions, notes, justifications, denial reasons and access levels are
+  `untrusted()` — a request's level is the requester's own text and an approval copies it onto the grant
+  (AUD-095), so it is wrapped in results, in summaries and on the cards. So is the person's name on a
+  card, in a summary or in a reference candidate (AUD-003; the email stays plain).
 - **Writes.** Every preview's first `changes` row is `action`: one sentence saying who gets or loses
   what access on which application, and what happens outside lazyit. That last part comes from the
   guarded `GET /workflows?applicationId=` (headers only, `workflow:read`; bound as a facet, removed from
@@ -1313,7 +1377,8 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
   - `access_request_create` — `write`, human-only (a Service Account is refused and never listed);
     `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
     target + precondition the application); neither accepts `metadata`.
-- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1).
+- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1); the grant,
+  access-request and application list CSV exports (bulk files, [[0103-data-export-streaming-path]]).
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
@@ -1338,7 +1403,11 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
   `currentStock: 0`. Ref: `consumable created`.
 - `consumable_update` (write·D) — `consumable` plus any of name, sku, categoryId, description, minStock,
   unit, notes (at least one; never the stock) — the fields are taken from the route's own
-  `UpdateConsumableSchema`, so they cannot drift. Preview: target + `before → after` per sent field,
+  `UpdateConsumableSchema`, so they cannot drift. `null` clears sku, categoryId, description, minStock
+  (the low-stock alert goes off) and notes (#1584), and each of those fields says so in its input
+  description. Adding that text changed the tool's input-schema hash; #1584's nullable fields already
+  changed it in the same release, so `consumable_update` approvals left pending on v2.1.0 do not survive
+  the upgrade either way. Preview: target + `before → after` per sent field,
   precondition `{ consumable, updatedAt }`. Ref: `consumable updated`.
 - `consumable_record_movement` (write, not idempotent) — `consumable`, `type` (`IN` | `OUT` |
   `ADJUSTMENT`), `quantity` (positive int4), `reason`, `notes`. The preview shows `currentStock`
@@ -1351,7 +1420,8 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
   stock change between the card and the approval is `STALE`. The result re-reads the consumable for the
   new stock (best effort: skipped when the caller lacks `consumable:read`). Refs: `consumable updated`
   and `consumableMovement created` with `parent: consumable` (§8.5).
-- Unexposed: `remove` / `restore` (archive and restore, v1.1).
+- Unexposed: `remove` / `restore` (archive and restore, v1.1); the consumables, movements and deliveries CSV
+  exports (bulk files, [[0103-data-export-streaming-path]]).
 - Follow-ups (G2 review of #1341):
   - the update preview's `before` values of `description` / `notes` are other-authored text and are not
     `untrusted()`-wrapped (the card renders them to the person). The runtime (W2-3) must wrap preview
@@ -1398,7 +1468,9 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   suppliers already carrying the name — a hint, never a refusal), `supplier_update`, `purchase_link_assets`
   (`apply` is required — `[]` links only; the card shows, per asset, the before → after of each applied field
   that fills or replaces, from `linkPreview`), `purchase_receive` (`quantity` required; the card shows the
-  route's prefill — model, status, location (none when the purchase's delivery location is archived, as the
+  route's prefill — model, status (`IN_STORAGE`, or with `statusLabelId` the custom status as an entity
+  value and the built-in status it sets — AUD-093; a `status` of another kind, or a custom status that is
+  not live, is refused before the card; without `category:read` the card names it by id), location (none when the purchase's delivery location is archived, as the
   route applies none), company, purchase date = the invoice date else today, warranty
   end, cost with its currency — and received before → after), `purchase_receive_stock` (`LEDGER_APPEND`),
   `purchase_cancel_remaining`, `purchase_apply_license` (the card reads `licenseProposal`: seats before →
@@ -1424,7 +1496,8 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   auto-approved" rule is the chat's; there is no chat card to skip elsewhere.
 - **Unexposed**: archive / restore of purchases and suppliers (ADMIN lifecycle actions, done from the pages),
   `unlinkAssets` (a correction, done from the pages), `extractionStatus` (the web's probe; the tool answers the
-  same refusals), document upload / download (no file tools) and label edit / delete (human-only routes).
+  same refusals), document upload / download (no file tools), label edit / delete (human-only routes) and the
+  CSV exports of purchases, suppliers and pending units (bulk files, [[0103-data-export-streaming-path]]).
 - **Labels**: the sentences are `purchase_*.action` / `.summary` and `supplier_*.action` / `.summary` in
   `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
   `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,

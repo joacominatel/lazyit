@@ -154,7 +154,8 @@ export function projectArticle(row: ArticleRow): SearchDocument {
     // Index the Markdown body so a full-text query over article content finds the runbook (ADR-0042).
     content: row.content,
     // Folder-access metadata (ADR-0060 §5): the home folder, a FILTERABLE attribute the post-filter
-    // uses to drop a restricted hit a non-matching caller may not see. Never returned in a hit.
+    // uses to drop a restricted hit a non-matching caller may not see. Returned only on a hit that
+    // survives that filter (#1539), i.e. a folder the caller can already read.
     categoryId: row.categoryId,
   };
 }

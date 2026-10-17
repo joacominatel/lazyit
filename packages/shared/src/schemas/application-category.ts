@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ApplicationCategory — user-managed grouping for Applications (SaaS, Internal, Service, …).
@@ -23,6 +23,10 @@ export const ApplicationCategorySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // How many live (non-deleted) applications filed under this category (#1540), so Settings → Taxonomies can show what is in use before an archive. A
+  // COMPUTED read aggregate, not a stored column: no migration. Only the list read populates it; it is
+  // absent from single reads, writes and an older API, so every consumer treats it as optional.
+  usageCount: z.number().int().min(0).nullish(),
 });
 
 /** Payload to create an ApplicationCategory. `name` is unique (enforced by the DB). */
@@ -45,6 +49,10 @@ export const UpdateApplicationCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+export const ApplicationCategoryDeleteImpactSchema = z.object({
+  applications: deleteImpactGroup(z.object({ id: z.cuid(), name: z.string() })),
+});
+
 export type ApplicationCategory = z.infer<typeof ApplicationCategorySchema>;
 export type CreateApplicationCategory = z.infer<
   typeof CreateApplicationCategorySchema
@@ -52,3 +60,4 @@ export type CreateApplicationCategory = z.infer<
 export type UpdateApplicationCategory = z.infer<
   typeof UpdateApplicationCategorySchema
 >;
+export type ApplicationCategoryDeleteImpact = z.infer<typeof ApplicationCategoryDeleteImpactSchema>;

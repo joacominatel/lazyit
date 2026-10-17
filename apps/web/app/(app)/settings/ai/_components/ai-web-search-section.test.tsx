@@ -5,12 +5,13 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderToStaticMarkup } from "react-dom/server";
 import common from "@/messages/en/common.json";
 import messages from "@/messages/en/aiSettings.json";
-import { AiWebSearchSection } from "./ai-web-search-section";
+import { AiWebSearchSection, WebSearchDisclosure } from "./ai-web-search-section";
 
 /**
  * The Settings → AI web search card (#1389), rendered to static markup (ADR-0012: no DOM runner): the
- * switch reflects the setting, says what leaves lazyit, and is disabled with the reason where the
- * configured provider or model has no native search — but stays usable while on, to turn it off.
+ * switch reflects the setting and is disabled with the reason where the configured provider or model has
+ * no native search — but stays usable while on, to turn it off. What leaves lazyit lives in the switch's
+ * "?" tip and in the consent dialog turning it on opens (#1540) — both render `WebSearchDisclosure`.
  */
 const BASE: AiSettings = {
   ...AI_SETTINGS_DEFAULTS,
@@ -31,14 +32,22 @@ const BASE: AiSettings = {
   updatedAt: null,
 };
 
-function render(settings: Partial<AiSettings>): string {
+function wrap(node: React.ReactNode): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ aiSettings: messages, common }}>
-        <AiWebSearchSection settings={{ ...BASE, ...settings }} />
+        {node}
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
+}
+
+function render(settings: Partial<AiSettings>): string {
+  return wrap(<AiWebSearchSection settings={{ ...BASE, ...settings }} />);
+}
+
+function disclosure(provider: AiSettings["provider"]): string {
+  return wrap(<WebSearchDisclosure provider={provider} />);
 }
 
 /** Text as React writes it into markup (apostrophes and quotes escaped). */
@@ -52,36 +61,35 @@ function switchOf(html: string): string {
 }
 
 describe("AiWebSearchSection", () => {
-  test("off by default, usable on a supported provider, with the egress disclosure", () => {
+  test("off by default, usable on a supported provider", () => {
     const html = render({});
     const toggle = switchOf(html);
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain(" disabled=\"\"");
-    expect(html).toContain(esc(messages.webSearch.disclosure.egress));
     expect(html).toContain(esc(messages.webSearch.off));
   });
 
-  test("says once searched, nothing in the conversation is auto-approved; OpenAI gets its own note", () => {
-    const html = render({});
+  test("the disclosure says what leaves, that results are untrusted; OpenAI gets its own note", () => {
+    const html = disclosure("anthropic");
+    expect(html).toContain(esc(messages.webSearch.disclosure.title));
+    expect(html).toContain(esc(messages.webSearch.disclosure.egress));
     expect(html).toContain(esc(messages.webSearch.disclosure.untrusted));
     expect(html).not.toContain(esc(messages.webSearch.disclosure.openai));
-    expect(render({ provider: "openai", model: "gpt-6-sol" })).toContain(
-      esc(messages.webSearch.disclosure.openai),
-    );
+    expect(disclosure("openai")).toContain(esc(messages.webSearch.disclosure.openai));
   });
 
-  test("a configuration card: the long explanations sit behind help tips, the egress stays shown", () => {
+  test("a configuration card: the explanations and the disclosure sit behind help tips", () => {
     const html = render({});
-    // #1407: the description, the switch detail and the per-step cap explanation are not on the card…
+    // #1407/#1540: the description, the switch detail, the disclosure and the cap explanation are not
+    // on the card…
     expect(html).not.toContain(esc(messages.webSearch.description));
     expect(html).not.toContain(esc(messages.webSearch.switch.description));
     expect(html).not.toContain(esc(messages.webSearch.maxUses.description));
-    // …they are one focusable "?" away, each named after what it explains…
+    expect(html).not.toContain(esc(messages.webSearch.disclosure.egress));
+    // …they are one focusable "?" away, each named after what it explains (the switch's tip holds the
+    // disclosure; turning the switch on shows it again in the consent dialog).
     expect(html).toContain(`aria-label="More about ${messages.webSearch.title}"`);
     expect(html).toContain(`aria-label="More about ${messages.webSearch.switch.label}"`);
-    // …and what leaves lazyit is still spelled out on the card itself.
-    expect(html).toContain(esc(messages.webSearch.disclosure.title));
-    expect(html).toContain(esc(messages.webSearch.disclosure.egress));
   });
 
   test("on reads as on", () => {

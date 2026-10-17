@@ -3,7 +3,7 @@ title: ArticleVersion
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-10-15
 ---
 
 # ArticleVersion
@@ -53,11 +53,17 @@ this runbook say last quarter?"). A bad edit no longer destroys the prior body.
     revision by design** — it dates the *move* and names its actor, it is not a content diff. It does
     **not** record the source/destination folder: there is no `categoryId` column here, and adding one
     is an open, undecided schema change (ADR-0060 §9).
+  - a **folder move** ([[0060-kb-folder-access-control]] §10) → one snapshot per live article in the
+    moved subtree, with no content change, attributed to the mover (`editedById`, or
+    `serviceAccountId` when a service account holding `settings:manage` moved it).
   - `publish` / `unpublish` → snapshot (they change `status`); an idempotent no-op does not.
-- **Visibility mirrors the article reads.** A DRAFT's history is visible only to its author (404 to
-  anyone else), so a private draft's snapshots never leak ([[0022-draft-visibility-auth-shim]]).
-- **No rollback** yet — this records history; replaying a past version onto the live article is
-  deferred ([[0042-article-versioning-and-linking]]).
+- **Visibility mirrors the article reads.** A DRAFT's history is visible only to its author, an ADMIN
+  or an `article:manage` holder (AUD-086; 404 to anyone else), so a private draft's snapshots never
+  leak ([[0022-draft-visibility-auth-shim]]).
+- **Restore to a version** (#848) — `POST /articles/:id/versions/:version/restore` replays that
+  version's title, content and excerpt through the normal edit path, so it appends a **new** version
+  and never rewrites history. Status is not restored; the article keeps its current published or
+  draft state.
 
 ## Conventions
 
@@ -81,7 +87,7 @@ Prisma model `ArticleVersion` → table `article_versions`. Validation schema
 | `excerpt` | `string?` | frozen copy. |
 | `status` | `ArticleStatus` | frozen copy (`DRAFT` \| `PUBLISHED`). |
 | `editedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. The **human** editor. |
-| `serviceAccountId` | `cuid?` | optional FK → [[service-account]], `onDelete: SetNull`; unified two-actor model + at-most-one-actor CHECK. **Unreachable in practice** — the article write path 403s an SA author. |
+| `serviceAccountId` | `cuid?` | optional FK → [[service-account]], `onDelete: SetNull`; unified two-actor model + at-most-one-actor CHECK. The article write path 403s an SA author, so the only writer is a **folder move** by a service account holding `settings:manage` (ADR-0060 §10). Exposed on the wire as an optional field. |
 | `createdAt` | `datetime` | `@default(now())`. |
 
 Indexes: `@@unique([articleId, version])` (natural key + per-article timeline).
@@ -92,7 +98,8 @@ Indexes: `@@unique([articleId, version])` (natural key + per-article timeline).
 service, never created/edited via the API.
 
 - `GET /articles/:id/versions` — paginated version history ([[0030-list-pagination-contract]]),
-  newest version first. Drafts visible only to their author (404 otherwise).
+  newest version first. A draft's history is visible only to its author, an ADMIN or an
+  `article:manage` holder (AUD-086; 404 otherwise).
 - `GET /articles/:id/versions/:version` — a single version by its per-article number (404 if absent
   or the article isn't readable by the caller).
 

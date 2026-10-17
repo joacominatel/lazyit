@@ -3,7 +3,7 @@ title: lazyit Documentation
 tags: [moc, root]
 status: draft
 created: 2026-05-25
-updated: 2026-10-01
+updated: 2026-10-09
 ---
 
 # lazyit — Documentation
@@ -137,8 +137,8 @@ All open questions from the initial briefing are now decided (2026-05-25):
   [[workflow-engine/_MOC|Applications Workflow Engine]] ([[0054-applications-workflow-engine]])
   — "BullMQ executes, PostgreSQL remembers". Remaining pending ADRs: **CD / image publishing** and
   **E2E tooling** (see [[03-decisions/_MOC|Decisions]]).
-  (The **auth IdP** is decided — Zitadel/BYOI, [[0037-idp-choice-zitadel-byoi]] /
-  [[0043-zitadel-source-of-truth]]; **authorization** is decided — [[0046-roles-permissions-v2]] +
+  (**Authentication** is decided — local accounts by default or your own OIDC IdP, no bundled IdP,
+  [[0086-local-authentication-mode]] / [[0102-remove-bundled-zitadel]]; **authorization** is decided — [[0046-roles-permissions-v2]] +
   [[0048-service-accounts]]; the **deployment model + topology** are built — [[0015-deployment-model]] /
   [[deployment]].)
 

@@ -25,6 +25,8 @@ export const ArticleVersionSchema = z.object({
   excerpt: z.string().nullable(),
   status: ArticleStatusSchema,
   editedById: z.uuid().nullable(),
+  // Set instead of editedById when a service account moved the article's folder (ADR-0060 §10).
+  serviceAccountId: z.cuid().nullable().optional(),
   createdAt: z.iso.datetime(),
 });
 

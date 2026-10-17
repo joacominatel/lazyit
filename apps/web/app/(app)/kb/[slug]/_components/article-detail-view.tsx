@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { DetailSkeleton } from "@/components/detail-panel";
 import { MarkdownView } from "@/components/markdown-view";
 import { ArticleAttachmentProvider } from "@/components/markdown-attachment-image-view";
@@ -15,6 +15,7 @@ import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { useRecentArticles } from "@/lib/hooks/use-recent-articles";
 import { cn } from "@/lib/utils";
 import {
   READING_CONTAINER,
@@ -49,14 +50,14 @@ import { ArticleWikiLinkPreviewProvider } from "./article-wiki-link-preview";
  *    the TOC collapses to a `<details>` above the prose and Connections stacks below it). Each rail
  *    section shows only when it has content.
  *
- * WIDTH BUDGET (#1292). Chrome outside this view costs a fixed 568px at `md`+ with the folder tree
- * showing: the app sidebar (`w-60`), the main padding (`md:p-6`, 48px) and the KB folder rail
- * (`lg:w-64` + `gap-6`, 280px). The three-column split costs another 328px (`gap-x-10` + `w-72`).
+ * WIDTH BUDGET (#1292). Chrome outside this view costs a fixed 600px at `md`+ with the folder tree
+ * showing: the app sidebar (`w-60`), the main padding (`md:p-6`, 48px) and the KB rail (`lg:w-72` +
+ * `gap-6`, 312px since #1539). The three-column split costs another 328px (`gap-x-10` + `w-72`).
  * Splitting at `xl` (1280px) therefore left ~544px of prose at 1440px — the `max-w-3xl` cap never
  * engaged — while `max-w-6xl` capped the block ~200px short of the space available at 1920px.
  *
  * So the split is gated on the width where it actually fits rather than on a stock breakpoint:
- * READING_MEASURE (872px) + 328px + 568px = 1768px, rounded to 1800px. Below it the rail stacks and
+ * READING_MEASURE (872px) + 328px + 600px = 1800px. Below it the rail stacks and
  * the prose takes the full column up to READING_MEASURE; above it the block caps at exactly
  * READING_MEASURE + 328px, so prose, gap and rail tile the container with nothing dead between them.
  * The measure is continuous across the breakpoint — 872px on either side of 1800px.
@@ -78,6 +79,17 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   const canDelete = useCan("article:delete");
   // Render-time `[[slug]]` resolver (ADR-0059 §3): resolved → KB link, unresolved → tooltip.
   const resolveWikiLink = useWikiLinkResolver();
+
+  // #1539: remember this open in the viewer's per-browser "Recent" list (localStorage, never sent
+  // anywhere). Re-recorded when the title or home folder changes so the entry stays current.
+  const { record: recordRecent } = useRecentArticles();
+  const openedSlug = article?.slug;
+  const openedTitle = article?.title;
+  const openedFolderId = article?.categoryId ?? null;
+  useEffect(() => {
+    if (!openedSlug || openedTitle === undefined) return;
+    recordRecent({ slug: openedSlug, title: openedTitle, categoryId: openedFolderId });
+  }, [openedSlug, openedTitle, openedFolderId, recordRecent]);
 
   // "On this page" TOC + scroll-spy, read from the rendered prose DOM (Phase-1 heading ids).
   const proseRef = useRef<HTMLDivElement>(null);

@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-10-16
 ---
 
 # AccessGrant
@@ -40,11 +40,19 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   verbatim and never interprets it; each [[application]] owns its vocabulary.
 - **`expiresAt` drives auto-revoke** — a periodic sweeper (`AccessGrantExpirySweeper`) revokes a grant
   once it passes `expiresAt`, through the normal `revoke()` path so the deprovision workflow + system
-  attribution fire ([[0023-access-management-design]] amended). A proactive **`access_grant_expiring`**
+  attribution fire ([[0023-access-management-design]] amended). It is not informative: a past expiry,
+  typed on create or set by an edit, is revoked on the next sweep. A proactive **`access_grant_expiring`**
   notification (bell + email, admin broadcast) warns ~14 days before, so the team can re-grant before a
-  contractor/temp silently loses access (#1070). On **create**, when both are supplied, `expiresAt` must
+  contractor/temp silently loses access (#1070). It is skipped when the grant's application or user is
+  soft-deleted. On **create**, when both are supplied, `expiresAt` must
   be **on or after** `grantedAt` (a grant can't expire before it starts) — a `@lazyit/shared` cross-field
-  refine returns `400` otherwise (round-2 correctness).
+  refine returns `400` otherwise (round-2 correctness). **Changing the expiry** enforces the same rule
+  against the stored `grantedAt` in the service → `400` (AUD-097). Write-only: an existing row whose
+  expiry already predates its `grantedAt` still reads normally.
+- **Revoke happens once:** the revoke write is conditional on `revokedAt = null`. When two revokes
+  race (an admin and the expiry sweeper, or two admins), the first one wins and keeps its
+  `revokedAt` / actor attribution; the other gets `409` (single) or `already_in_state` (batch) and
+  records no second deprovision run (AUD-043).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
@@ -52,13 +60,14 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 - **Referential integrity:** the required FKs are `onDelete: Restrict` — a [[user]] or
   [[application]] with grant rows **cannot be hard-deleted**.
 
-> [!note] Actor comes from the `X-User-Id` shim, not the body
-> `grantedById` (on create) and `revokedById` (on revoke) are taken from the optional `X-User-Id`
-> header (the caller → a JWT later), **never** the request body ([[0022-draft-visibility-auth-shim]],
-> [[0023-access-management-design]]). Absent header → `null` actor (system/unknown), allowed by the
-> `SetNull`/optional design. [[asset-assignment]] now follows the **same** pattern — it originally
-> read `assignedById`/`releasedById` from the body (predating the shim) and was converged onto the
-> shim by [[0024-asset-assignment-actor-shim]]. Both append-only joins now agree.
+> [!note] Actor comes from the authenticated principal, not the body
+> The create and revoke actor is the verified principal ([[0038-jit-user-provisioning]],
+> [[0048-service-accounts]]), **never** the request body ([[0023-access-management-design]]): a human
+> lands in `grantedById` / `revokedById`, a service account in `grantedBySaId` / `revokedBySaId`. No
+> principal → `null` actor (system/unknown), allowed by the `SetNull`/optional design. The `X-User-Id`
+> shim is only a dev-mode way to supply that principal ([[0022-draft-visibility-auth-shim]]).
+> [[asset-assignment]] follows the **same** pattern ([[0024-asset-assignment-actor-shim]]), so both
+> append-only joins agree.
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /applications/:id` and `DELETE /users/:id` are **soft** deletes
@@ -107,7 +116,7 @@ Prisma model `AccessGrant` → table `access_grants`. Validation schemas (`Acces
 | `accessLevel` | `string?` | free-form, app-defined (e.g. "admin"); lazyit never interprets it. |
 | `grantedAt` | `datetime` | `@default(now())`; part of identity. Optional on create (backdate imports). |
 | `revokedAt` | `datetime?` | `null` while active; set to end the grant. Not a soft delete. |
-| `expiresAt` | `datetime?` | informative; no auto-revoke. `null` = no expiry. |
+| `expiresAt` | `datetime?` | the expiry sweeper revokes the grant once it passes (see Business rules). `null` = no expiry. |
 | `grantedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** grantor; null = system. |
 | `revokedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** revoker; null = system. |
 | `grantedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** grantor. At-most-one-actor CHECK with `grantedById`. |
@@ -120,20 +129,30 @@ Indexes: `@@index([userId])`, `@@index([applicationId])`. **No uniqueness constr
 
 ## Endpoints
 
-`apps/api/src/access-grants/` (`AccessGrantsModule`). The `X-User-Id` header is **optional** on
-create/revoke and becomes the actor. Documented via Swagger ([[0018-api-documentation-swagger]]).
+`apps/api/src/access-grants/` (`AccessGrantsModule`). The authenticated principal is the actor on
+create/revoke (see the note above). Documented via Swagger ([[0018-api-documentation-swagger]]).
 
 - `POST /access-grants` — open a grant. `userId`/`applicationId` must be live → else `400` (FK
-  errors also map to `400`). `grantedById` = `X-User-Id` (null if absent).
-- `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=` — list, newest first.
-  `activeOnly` **defaults to true** (`revokedAt = null`); `includeExpired` **defaults to true**
-  (pass `false` to hide active grants already past `expiresAt`).
+  errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
+- `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=&limit=&offset=&page=` —
+  list, newest first, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to true**
+  (`revokedAt = null`); `includeExpired` **defaults to true** (pass `false` to hide active grants
+  already past `expiresAt` that the sweeper has not revoked yet).
+- `GET /access-grants/mine?activeOnly=&includeExpired=&limit=&offset=&page=` — the caller's **own**
+  grants, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to false** (revoked
+  history included). A self-read: any authenticated human, no `accessGrant:read` needed; the user id
+  comes only from the principal, never a parameter. Service accounts get `403`.
 - `GET /access-grants/:id` — one by id (`404` if missing).
-- `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()`,
-  `revokedById = X-User-Id`. Already revoked → `409`.
+- `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()` and the principal in
+  `revokedById` or `revokedBySaId`. Already revoked, or revoked concurrently first → `409`.
+- `POST /access-grants/batch/revoke` — body `{ ids, notes? }`; revokes each active grant in one
+  transaction and returns the per-id outcome. Missing ids are skipped as `not_found`; already (or
+  concurrently) revoked ones as `already_in_state` — never a rollback of the rest.
 - `PATCH /access-grants/:id/notes` — body `{ notes }` (`null` clears). Metadata edit, no actor.
 - `PATCH /access-grants/:id/expiry` — body `{ expiresAt }` (`null` = permanent). Metadata edit,
-  no actor; never revokes/reactivates.
+  no actor. The edit itself revokes nothing, but an `expiresAt` already in the past is revoked by the
+  next expiry sweep, with the deprovision workflow; a revoked grant is never reactivated. An
+  `expiresAt` earlier than the grant's `grantedAt` → `400`.
 - **No `DELETE`** — by design (append-only).
 
 Plus the natural sub-resource endpoints on the related entities:
@@ -142,10 +161,23 @@ Plus the natural sub-resource endpoints on the related entities:
   user is missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — grants on one [[application]].
 
+**Export** — the access-review artefact ([[0103-data-export-streaming-path]]).
+`GET /access-grants/export?userId=&applicationId=&activeOnly=&includeExpired=` and
+`GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` stream as CSV every grant the
+matching list returns: same `accessGrant:read` (a VIEWER gets 403 by default), same filters and
+defaults, and the per-application route `404`s on a missing or archived application like its list.
+Columns: application, user, user email, access level, status (`active`, `expired` = past `expiresAt`
+and not yet swept, `revoked`), granted at, granted by, expires at, revoked at, revoked by, notes,
+grant ID. A service-account actor reads `<name> (service account)`. The names are joined, so each one
+follows the read the screen would need to resolve it: user names and the email column need
+`user:read`, the application name `application:read`, a service-account name `settings:manage`.
+Without it the cell holds the id the list already returns, and the email column is left out. Every
+export writes a [[data-export-log]] row.
+
 ## Not yet implemented (deferred)
 
-- A soft-delete-time guard on apps/users with active grants; **retrofitting [[asset-assignment]]** to the
-  same `X-User-Id` actor pattern. (Auto-revoke on `expiresAt` is now implemented — see `expiresAt` above.)
+- A soft-delete-time guard on apps/users with active grants. (Auto-revoke on `expiresAt` is now
+  implemented — see `expiresAt` above.)
 
 Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
 [[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·

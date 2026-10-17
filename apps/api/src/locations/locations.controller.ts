@@ -8,17 +8,22 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateLocationSchema,
+  LocationDeleteImpactSchema,
   LocationDetailSchema,
   LocationListPageSchema,
   LocationSchema,
@@ -29,7 +34,12 @@ import {
 import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { parseDeleteResolution } from '../common/delete-resolution';
+import { ExportService } from '../common/export';
+import { LOCATION_EXPORT_COLUMNS } from './locations-export';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -39,11 +49,29 @@ class LocationDetailDto extends createZodDto(LocationDetailSchema) {}
 class LocationListPageDto extends createZodDto(LocationListPageSchema) {}
 class CreateLocationDto extends createZodDto(CreateLocationSchema) {}
 class UpdateLocationDto extends createZodDto(UpdateLocationSchema) {}
+class LocationDeleteImpactDto extends createZodDto(
+  LocationDeleteImpactSchema,
+) {}
+
+/** The list's `type` filter: absent, or one of the location types (400 otherwise). */
+function parseLocationType(type?: string): LocationType | undefined {
+  if (type === undefined) return undefined;
+  const result = LocationTypeSchema.safeParse(type);
+  if (!result.success) {
+    throw new BadRequestException(
+      `Invalid type. Expected one of: ${LocationTypeSchema.options.join(', ')}`,
+    );
+  }
+  return result.data;
+}
 
 @ApiTags('locations')
 @Controller('locations')
 export class LocationsController {
-  constructor(private readonly locations: LocationsService) {}
+  constructor(
+    private readonly locations: LocationsService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get()
   @RequirePermission('location:read')
@@ -114,16 +142,7 @@ export class LocationsController {
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ) {
-    let parsedType: LocationType | undefined;
-    if (type !== undefined) {
-      const result = LocationTypeSchema.safeParse(type);
-      if (!result.success) {
-        throw new BadRequestException(
-          `Invalid type. Expected one of: ${LocationTypeSchema.options.join(', ')}`,
-        );
-      }
-      parsedType = result.data;
-    }
+    const parsedType = parseLocationType(type);
     const pageQuery = parsePageQuery({
       limit,
       offset,
@@ -136,6 +155,44 @@ export class LocationsController {
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
     return this.locations.findPage({ q, type: parsedType }, pageQuery);
+  }
+
+  // STATIC route declared BEFORE `:id` so `/locations/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('location:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every location matching the list filters (ADR-0103): same permission, filters and rows as GET /locations, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: [...LocationTypeSchema.options],
+  })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered locations as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('q') q?: string,
+    @Query('type') type?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const filters = { q, type: parseLocationType(type) };
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    return this.exports.exportCsv({
+      resource: 'LOCATIONS',
+      principal,
+      response: res,
+      filters: { ...filters, deleted: slice },
+      columns: LOCATION_EXPORT_COLUMNS,
+      filename: 'locations',
+      ...this.locations.exportSource(filters, slice),
+    });
   }
 
   @Get(':id')
@@ -165,12 +222,51 @@ export class LocationsController {
     return this.locations.update(id, dto);
   }
 
+  @Get(':id/delete-impact')
+  @RequirePermission('location:delete')
+  @ApiOperation({
+    summary:
+      'What deleting this location would re-point or detach: live assets, live child locations and open purchases (counts, plus the first 50 of each kind the caller may read).',
+  })
+  @ApiOkResponse({ type: LocationDeleteImpactDto })
+  deleteImpact(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.locations.deleteImpact(id, principal);
+  }
+
   @Delete(':id')
   @RequirePermission('location:delete')
-  @ApiOperation({ summary: 'Soft-delete a location — ADMIN only' })
+  @ApiOperation({
+    summary:
+      'Soft-delete a location — ADMIN only. While live assets, child locations or open purchases still point at it, give ONE strategy for all of them (409 DELETE_RESOLUTION_REQUIRED otherwise).',
+  })
+  @ApiQuery({
+    name: 'strategy',
+    required: false,
+    enum: ['detach', 'move'],
+    description:
+      'detach: assets lose their location, child locations become top-level, open purchases lose their delivery location. move: all of them go to targetId.',
+  })
+  @ApiQuery({
+    name: 'targetId',
+    required: false,
+    description:
+      'With strategy=move: a live location that is neither this one nor inside it.',
+  })
   @ApiOkResponse({ type: LocationDto })
-  remove(@Param('id') id: string) {
-    return this.locations.remove(id);
+  remove(
+    @Param('id') id: string,
+    @Query('strategy') strategy?: string,
+    @Query('targetId') targetId?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.locations.remove(
+      id,
+      parseDeleteResolution(strategy, targetId),
+      principal,
+    );
   }
 
   @Post(':id/restore')

@@ -3,7 +3,7 @@ title: AiServiceAccountSettings
 tags: [domain, entity, ai-assistant, service-accounts]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-16
 ---
 
 # AiServiceAccountSettings
@@ -24,6 +24,9 @@ own grants already allow — it never widens them.
 - `read-only` limits the SA to `read`-class tools; `off` refuses every run.
 - The SA still needs `ai:use`; an SA holding `infra:report` cannot be given AI access (enforced by the
   API).
+- **Widening is capped at the caller (SEC-088, 2026-10-16).** A higher access level, or a higher or
+  cleared cap, is refused with **403** `PERMISSION_CEILING_EXCEEDED` when the SA's effective verbs exceed
+  the non-ADMIN caller's own. Narrowing is never refused ([[0048-service-accounts]]).
 - Its own table, so `service_accounts` gains no column. Mutable config, no `deletedAt`. Changes are
   audited in [[ai-config-audit-log]].
 

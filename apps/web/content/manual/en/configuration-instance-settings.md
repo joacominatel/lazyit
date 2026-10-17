@@ -32,8 +32,9 @@ same pages as cards, in the same groups.
 
 **Access**
 
-- **Roles & permissions** — see who holds which role across the team, and tune what each role may do
-  under [Permissions](/help/permissions). You change a person's role from the Users section.
+- **Roles & permissions** — one matrix of what each role may do, with how many people hold each role.
+  See [Permission configuration](/help/users-permissions-permission-configuration). You change a
+  person's role from the Users section.
 - **Service accounts** — create and manage non-human API credentials for CI, scripts and
   integrations, scoped by permission and revocable.
 
@@ -49,7 +50,7 @@ same pages as cards, in the same groups.
   switch that lets external AI agents such as Claude Code connect over MCP. Everything starts off. See
   [AI assistant — setup](/help/ai-assistant-setup).
 - **Tasks** — the cross-application manual-task inbox for provisioning workflows. Per-application
-  automation is configured on each application's own Workflows tab.
+  automation is configured on each application's own Automation tab.
 
 **System**
 
@@ -74,8 +75,7 @@ section is **read-only** — it reflects the current state; it does not change i
 
 - **Configured** — whether initial setup is complete (an administrator exists). A fresh install shows
   *Setup pending* until the first administrator is created.
-- **Identity provider** — the sign-in posture: *Zitadel (bundled)*, *Generic OIDC (bring your
-  own)* or *Local accounts*.
+- **Identity provider** — the sign-in posture: *Local accounts* or *Generic OIDC (bring your own)*.
 - **Administrators** — how many administrator accounts the instance has.
 - **Runtime posture** — *Development* or *Production*.
 - **Version** — the exact version this instance is running, baked in when its images were built. A
@@ -176,6 +176,11 @@ normal "check for updates" state and you can start a fresh update later. You can
 still just *requested* — once the host script has actually started (backing up and beyond), the button
 is gone and that update must finish or be reconciled, because interrupting it mid-run could leave the
 databases and backups out of step. The cancelled request is kept in the update history for the record.
+
+You don't have to cancel first to update to a different version. If you run `update.sh` on the host for
+another version while a request is still pending, the script supersedes that request: it is marked
+failed with a "Superseded by an operator-run update" note, kept in the history, and the section follows
+the update you actually ran.
 
 ### If an update fails — the restore point
 

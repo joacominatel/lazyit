@@ -28,6 +28,7 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import { AssetsService } from '../assets/assets.service';
 import { AssetModelsService } from '../asset-models/asset-models.service';
 import { AssetCategoriesService } from '../asset-categories/asset-categories.service';
@@ -102,8 +103,7 @@ interface ModelCreateConfig {
  * would be a wrong link; the caller imports the asset UNASSIGNED with an `ambiguous-identity` warning.
  */
 type DirectoryPersonResolution =
-  | { kind: 'resolved'; personId: string }
-  | { kind: 'ambiguous' };
+  { kind: 'resolved'; personId: string } | { kind: 'ambiguous' };
 
 /**
  * Resolve the brand/category/sku for a created model from the mapping's `modelConfig` + this row's cells
@@ -157,15 +157,9 @@ const SPECS_RESERVED_KEYS: ReadonlySet<string> = new Set([
 /**
  * The live partial-unique index on `Asset.serial` — the discriminator that tells a serial-collision `P2002`
  * (a re-import row racing another writer for the same serial → route to the UPDATE path, #1061) apart from
- * an `assetTag` collision (which must stay a FAILED row). Prisma's `meta.target` is a string on Postgres,
- * but a driver can surface an array, so accept both.
+ * an `assetTag` collision (which must stay a FAILED row).
  */
 const SERIAL_ACTIVE_KEY = 'assets_serial_active_key';
-function isSerialActiveKeyTarget(target: unknown): boolean {
-  return Array.isArray(target)
-    ? target.includes(SERIAL_ACTIVE_KEY)
-    : target === SERIAL_ACTIVE_KEY;
-}
 
 /**
  * Re-build a specs object with a NULL prototype and the reserved prototype-pollution keys skipped
@@ -267,11 +261,26 @@ export class ImportCommitService {
     // DIRECTORY PERSONS + assignments — that lives in the mapping (`person.fields`). Parse it (defensive,
     // validated at save time) so the AND-check can additionally require `user:manage` when persons are in
     // play. A null mapping (shouldn't reach here past the commit gate) → no person creation implied.
-    const impliesPersons =
-      session.mapping !== null &&
-      (ImportMappingSchema.parse(session.mapping).person?.fields.length ?? 0) >
-        0;
-    await this.assertActorCanCommit(actorUserId, plan, impliesPersons);
+    const mapping =
+      session.mapping === null
+        ? null
+        : ImportMappingSchema.parse(session.mapping);
+    const impliesPersons = (mapping?.person?.fields.length ?? 0) > 0;
+    // A created model find-or-creates its category from modelConfig, so that path writes AssetCategory too (AUD-087).
+    const impliesCategories =
+      Boolean(
+        mapping?.modelConfig?.categoryConst ||
+        mapping?.modelConfig?.categoryColumn,
+      ) &&
+      plan.conflicts.some(
+        (c) => c.entity === 'AssetModel' && c.outcome === 'create',
+      );
+    await this.assertActorCanCommit(
+      actorUserId,
+      plan,
+      impliesPersons,
+      impliesCategories,
+    );
 
     const data: CommitJobData = { sessionId, actorUserId };
     try {
@@ -279,6 +288,7 @@ export class ImportCommitService {
         // A commit is idempotent (resumable — a re-run skips COMMITTED rows), so a transient infra
         // failure CAN safely retry, unlike the permanent parse failure.
         attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
         // Deterministic jobId = the sessionId: BullMQ dedups by jobId, so two concurrent enqueues for
         // the same session collapse to ONE job (no double-commit / duplicate ImportRun from a fast
         // double-click or a controller retry).
@@ -310,8 +320,12 @@ export class ImportCommitService {
     actorUserId: string,
     plan: ImportResolutionPlan,
     impliesPersons = false,
+    impliesCategories = false,
   ): Promise<void> {
     const required = new Set<Permission>(['asset:write']);
+    if (impliesCategories) {
+      required.add('category:write');
+    }
     // ADR-0069 REDESIGN §7 (Etapa 2): a commit that creates DIRECTORY PERSONS + opens their assignments
     // additionally mutates Users — so require `user:manage` (the user-administration verb that the Users
     // controller's create gates on) explicitly, fail-closed. The assignment itself is `asset:write`
@@ -747,7 +761,7 @@ export class ImportCommitService {
           parsed.data.serial !== undefined &&
           err instanceof Prisma.PrismaClientKnownRequestError &&
           err.code === 'P2002' &&
-          isSerialActiveKeyTarget(err.meta?.target)
+          uniqueViolationTargets(err).includes(SERIAL_ACTIVE_KEY)
         ) {
           const existing = await this.prisma.asset.findFirst({
             where: { serial: parsed.data.serial },
@@ -875,7 +889,7 @@ export class ImportCommitService {
    * we `findMany` the matching live users and branch on the DISTINCT id count: >1 → ambiguous (don't link);
    * exactly 1 → link (precedence email > legajo > username for the multi-key single-user case); 0 → create.
    *
-   * On a miss we create via UsersService.create with `skipIdpWriteBack` (no Zitadel mirror) + the import
+   * On a miss we create via UsersService.create with `directoryOnly` (a directory person) + the import
    * provenance, role FORCED to VIEWER, `externalId` null. We re-validate against CreateDirectoryPersonSchema
    * first (defense-in-depth: the coerced bucket is re-checked strict at commit time). The single `name`
    * is split into the required firstName/lastName; jobTitle/department → directoryAttrs (jsonb); supervisor
@@ -1009,7 +1023,7 @@ export class ImportCommitService {
       },
       actorId,
       {
-        skipIdpWriteBack: true,
+        directoryOnly: true,
         createdPayload: { source: 'import', sessionId, rowIndex },
         ...(Object.keys(directoryAttrs).length > 0
           ? { directoryAttrs: directoryAttrs as Prisma.InputJsonValue }

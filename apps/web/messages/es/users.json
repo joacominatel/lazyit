@@ -99,13 +99,9 @@
   "directoryBadge": "Directorio",
   "directory": {
     "provision": {
-      "action": "Crear cuenta OIDC",
       "title": "Persona de directorio",
       "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Dale una cuenta para que pueda iniciar sesión.",
-      "needsEmail": "Esta persona necesita un correo real antes de poder tener una cuenta. Edita la persona y agrégalo primero.",
-      "unsupported": "Crear cuentas solo está disponible con el proveedor de identidad integrado. Cuando usas tu propio proveedor OIDC, las personas importadas inician sesión a través de tu proveedor de identidad.",
-      "success": "{name} ya tiene una cuenta OIDC.",
-      "error": "No se pudo crear la cuenta. Inténtalo de nuevo."
+      "unsupported": "Con el inicio de sesión OIDC, las cuentas viven en tu proveedor de identidad. Crea a esta persona allí con el mismo correo verificado, y su primer inicio de sesión vincula la cuenta a este registro."
     },
     "provisionLocal": {
       "action": "Dar de alta con una contraseña temporal",
@@ -135,7 +131,9 @@
       "username": "Nombre de usuario",
       "manager": "Responsable",
       "joined": "Ingreso",
-      "lastUpdated": "Última actualización"
+      "lastUpdated": "Última actualización",
+      "department": "Departamento",
+      "jobTitle": "Puesto"
     },
     "fieldEmpty": "—",
     "managerField": {
@@ -213,13 +211,18 @@
     "lastName": "Apellido",
     "lastNameRequired": "El apellido es obligatorio",
     "email": "Correo",
-    "emailHelp": "La clave de vinculación de la cuenta con el proveedor de identidad. Debe ser única; un cambio se refleja en el proveedor de identidad.",
+    "emailHelp": "Debe ser único. Con el inicio de sesión OIDC, un cambio aquí no se envía a tu proveedor de identidad.",
     "legajo": "Legajo",
     "legajoPlaceholder": "ej. 10293",
     "legajoHelp": "Opcional. El número de legajo/ficha de nómina o RR. HH. Debe ser único entre los usuarios activos.",
     "username": "Nombre de usuario",
     "usernamePlaceholder": "ej. ada.lovelace",
     "usernameHelp": "Identificador de directorio opcional, distinto del correo. No es una credencial de inicio de sesión. Debe ser único entre los usuarios activos.",
+    "department": "Departamento",
+    "departmentPlaceholder": "p. ej. Finanzas",
+    "jobTitle": "Puesto",
+    "jobTitlePlaceholder": "p. ej. Contador",
+    "directoryManagedHint": "Se sincroniza desde el directorio de la empresa. Cambialo ahí.",
     "manager": {
       "label": "Responsable",
       "help": "Opcional. Un usuario de lazyit o un nombre libre — no ambos.",
@@ -260,7 +263,7 @@
       "title": "Credencial de inicio de sesión",
       "description": "Define una contraseña temporal para que pueda iniciar sesión. Se le pedirá que elija la suya en el primer ingreso.",
       "passwordLabel": "Contraseña temporal",
-      "passwordHelp": "De un solo uso, solo para entregar. lazyit nunca la conserva de forma legible — solo guarda un hash, o la define en tu proveedor de identidad — y se reemplaza la primera vez que el usuario inicia sesión.",
+      "passwordHelp": "De un solo uso, solo para entregar. lazyit solo guarda un hash, nunca la contraseña legible, y se reemplaza la primera vez que el usuario inicia sesión.",
       "passwordRequired": "Define una contraseña temporal para que el usuario nuevo pueda iniciar sesión.",
       "generate": "Generar",
       "show": "Mostrar contraseña",
@@ -327,11 +330,13 @@
     "assets": {
       "empty": "Esta persona no tiene activos para trasladar.",
       "assetFallback": "Activo",
+      "noPermission": "Trasladar activos requiere el permiso Agregar y editar inventario, que tu rol no tiene.",
       "assignedOn": "Asignado {date}"
     },
     "access": {
       "empty": "Esta persona no tiene acceso activo a aplicaciones para trasladar.",
-      "applicationFallback": "Aplicación"
+      "applicationFallback": "Aplicación",
+      "noPermission": "Trasladar el acceso a aplicaciones requiere el permiso Otorgar y revocar acceso, que tu rol no tiene."
     },
     "fire": {
       "label": "Aprovisionar al usuario nuevo en estas aplicaciones",
@@ -352,7 +357,8 @@
       "reasons": {
         "not_found": "Ya no es una fila activa del origen",
         "asset_deleted": "El activo fue eliminado",
-        "already_in_state": "Ya se trasladó para este activo"
+        "already_in_state": "Ya se trasladó para este activo",
+        "permission_required": "Tu rol no puede trasladar esto (requiere el permiso correspondiente)"
       }
     }
   },
@@ -369,11 +375,14 @@
     },
     "selfSuffix": "(tú)",
     "ariaLabel": "Rol de {name}",
+    "directoryLocked": "Persona solo de directorio: dale de alta para cambiar su rol.",
     "confirmTitle": "¿Cambiar el rol?",
     "confirmBody": "<strong>{name}</strong> pasará a ser <strong>{role}</strong>.",
     "confirmAction": "Cambiar rol",
+    "promotionNote": "Cualquier contraseña temporal o enlace de restablecimiento que aún no hayan usado dejará de funcionar.",
     "toast": {
       "changed": "{name} ahora es {role}",
+      "credentialsCancelled": "Si tenía una contraseña temporal o un enlace de restablecimiento pendiente, se canceló. Emite uno nuevo si todavía lo necesita.",
       "error": "No se pudo cambiar el rol"
     }
   },
@@ -383,21 +392,8 @@
   },
   "passwordReset": {
     "button": "Restablecer contraseña",
-    "disabledNoIdp": "Esta cuenta no tiene vínculo con un proveedor de identidad, por lo que el restablecimiento de contraseña lo gestiona tu proveedor de identidad.",
     "disabledInactive": "Este usuario está inactivo — reactívalo antes de restablecer su contraseña.",
     "disabledDirectoryOnly": "Esta persona todavía no tiene cuenta de inicio de sesión. Primero dale de alta con una contraseña temporal.",
-    "confirmTitle": "¿Enviar un restablecimiento de contraseña?",
-    "confirmBody": "Tu proveedor de identidad enviará a <strong>{email}</strong> un enlace para restablecer su contraseña. lazyit nunca ve ni establece la contraseña; la entrega depende de que el SMTP del proveedor esté configurado.",
-    "send": "Enviar correo de restablecimiento",
-    "toast": {
-      "sentTitle": "Correo de restablecimiento de contraseña enviado a través del proveedor de identidad",
-      "sentDescription": "La entrega depende de que el SMTP de tu proveedor de identidad esté configurado.",
-      "managedTitle": "El restablecimiento de contraseña lo gestiona tu proveedor de identidad",
-      "managedDescription": "lazyit no puede ejecutar un restablecimiento para esta cuenta — gestiona la contraseña en tu proveedor de identidad.",
-      "inactiveTitle": "Este usuario está inactivo",
-      "inactiveDescription": "Reactívalo antes de restablecer su contraseña.",
-      "error": "No se pudo enviar el restablecimiento de contraseña"
-    },
     "local": {
       "title": "Restablecer la contraseña de {name}",
       "intro": "lazyit gestiona las contraseñas en esta instancia, así que elige cómo le llega el restablecimiento a esta persona.",
@@ -577,5 +573,11 @@
     "consumablesMore": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan en esta acta.",
     "consumablesMoreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan en esta acta.",
     "consumablesUnavailable": "Los consumibles no figuran en esta acta: no tienes permiso para verlos."
+  },
+  "errors": {
+    "roleCeiling": "Solo puedes gestionar usuarios con un rol igual o inferior al tuyo. Solo un administrador puede gestionar administradores.",
+    "directoryRoleLocked": "Es una persona solo de directorio, sin inicio de sesión, así que su rol no puede cambiar. Dale de alta primero.",
+    "lastAdmin": "No se puede quitar al último administrador que puede iniciar sesión. Otro administrador debe iniciar sesión, o ser promovido, primero.",
+    "profileManagedByDirectory": "El departamento y el puesto de esta persona vienen del directorio de la empresa, así que no se pueden cambiar acá. Cambialos en el directorio."
   }
 }

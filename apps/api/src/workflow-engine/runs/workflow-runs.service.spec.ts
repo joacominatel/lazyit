@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await, @typescript-eslint/unbound-method -- test-double harness leans on loosely-typed jest.fn() mocks and scripted async stubs; intentional for this spec file only. */
 jest.mock('../../../generated/prisma/client', () => ({
   PrismaClient: class {},
   // The service catches a P2002 unique-violation via `instanceof Prisma.PrismaClientKnownRequestError`
@@ -26,6 +27,7 @@ import {
   type WorkflowRunOrchestrator,
 } from '../run/workflow-run.orchestrator';
 import type { WorkflowTriggerService } from '../run/workflow-trigger.service';
+import { RunLineageBusyError } from '../run/run-lineage';
 import type { ActorService } from '../../common/actor.service';
 import { Prisma } from '../../../generated/prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -184,16 +186,21 @@ describe('WorkflowRunsService.findOne — CSEC-4 step projection', () => {
  * resume-from-failed-step walk are the orchestrator's (tested in its own spec).
  */
 function buildForRetry(
-  runRow: { id: string; status: string } | null,
+  runRow: Record<string, unknown> | null,
   retryResult?:
     | { retried: true; resumeStepKey: string; attempt: number }
     | { retried: false }
     | Error,
+  grant: { revokedAt: Date | null; user: { deletedAt: Date | null } } = {
+    revokedAt: null,
+    user: { deletedAt: null },
+  },
 ) {
   const findFirst = jest.fn().mockResolvedValue(runRow);
   const prisma = {
     workflowRun: { findFirst },
     workflowStepRun: { findMany: jest.fn() },
+    accessGrant: { findUnique: jest.fn().mockResolvedValue(grant) },
   } as unknown as PrismaService;
   const retryRun = jest.fn(() =>
     retryResult instanceof Error
@@ -281,6 +288,50 @@ describe('WorkflowRunsService.retry — manual FAILED-run retry (issue #308)', (
       UnprocessableEntityException,
     );
   });
+
+  it('AUD-007: 409s when another run of the same grant event is in flight or SUCCEEDED', async () => {
+    const { service } = buildForRetry(
+      { id: 'r1', status: 'FAILED' },
+      new RunLineageBusyError('replay1', 'SUCCEEDED'),
+    );
+    await expect(service.retry('r1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('AUD-069: 409s a provisioning run whose grant was revoked or whose grantee was offboarded (never re-driven)', async () => {
+    const revoked = { revokedAt: new Date(), user: { deletedAt: null } };
+    const offboarded = { revokedAt: null, user: { deletedAt: new Date() } };
+    for (const grant of [revoked, offboarded]) {
+      const { service, retryRun } = buildForRetry(
+        {
+          id: 'r1',
+          status: 'FAILED',
+          trigger: 'ACCESS_GRANTED',
+          accessGrantId: 'g1',
+        },
+        { retried: true, resumeStepKey: 'provision', attempt: 2 },
+        grant,
+      );
+      await expect(service.retry('r1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(retryRun).not.toHaveBeenCalled();
+    }
+  });
+
+  it('AUD-069: a deprovisioning run is still retried although its grant is revoked by definition', async () => {
+    const { service, retryRun } = buildForRetry(
+      {
+        id: 'r1',
+        status: 'FAILED',
+        trigger: 'ACCESS_REVOKED',
+        accessGrantId: 'g1',
+      },
+      { retried: true, resumeStepKey: 'deprovision', attempt: 2 },
+      { revokedAt: new Date(), user: { deletedAt: new Date() } },
+    );
+    await expect(service.retry('r1')).resolves.toMatchObject({ ok: true });
+    expect(retryRun).toHaveBeenCalledWith('r1', undefined);
+  });
 });
 
 /**
@@ -313,8 +364,12 @@ interface ReplayHarnessOpts {
   plan?: Record<string, unknown> | null;
   /** Simulate the LATEST version vanishing between planForTrigger and the steps read (→ 422). */
   latestVersionMissing?: boolean;
-  /** When set, `create` throws this many P2002 collisions before succeeding (the seq race). */
+  /** When set, `create` throws this many P2002 collisions before succeeding. */
   collisionsBeforeSuccess?: number;
+  /** What the AUD-007 lineage query finds: a live run of the same grant event, or none. */
+  liveRun?: { id: string; status: string } | null;
+  /** The grant behind the source run (AUD-069). Defaults to active. */
+  grant?: { revokedAt: Date | null; user: { deletedAt: Date | null } } | null;
 }
 
 function buildForReplay(opts: ReplayHarnessOpts = {}) {
@@ -337,8 +392,14 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
   ];
 
   const findFirst = jest.fn(
-    async (args: { orderBy?: { replaySeq?: string } }) => {
-      // The seq query (orderBy replaySeq desc) vs the initial source load.
+    async (args: {
+      where?: { status?: unknown };
+      orderBy?: { replaySeq?: string };
+    }) => {
+      // The lineage query (status filter), the seq query (orderBy replaySeq desc), or the source load.
+      if (typeof args.where?.status === 'object') {
+        return opts.liveRun ?? null;
+      }
       if (args.orderBy?.replaySeq === 'desc') {
         return opts.maxReplaySeq == null
           ? null
@@ -374,13 +435,30 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
   );
 
   const findManyStepRuns = jest.fn().mockResolvedValue(opts.succeeded ?? []);
-  const prisma = {
+  const executeRaw = jest.fn().mockResolvedValue(0);
+  const prisma: Record<string, unknown> = {
     workflowRun: { findFirst, create },
     workflowVersion: { findUnique: findUniqueVersion },
     workflowStepRun: { findMany: findManyStepRuns },
-  } as unknown as PrismaService;
+    accessGrant: {
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(
+          opts.grant === undefined
+            ? { revokedAt: null, user: { deletedAt: null } }
+            : opts.grant,
+        ),
+    },
+    $executeRaw: executeRaw,
+  };
+  // The interactive transaction runs its callback against the same mock client.
+  prisma.$transaction = jest.fn(
+    async (fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma),
+  );
 
-  const orchestrator = { retryRun: jest.fn() } as unknown as WorkflowRunOrchestrator;
+  const orchestrator = {
+    retryRun: jest.fn(),
+  } as unknown as WorkflowRunOrchestrator;
 
   const plan =
     opts.plan === undefined
@@ -397,7 +475,12 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
   const enqueue = jest.fn().mockResolvedValue(true);
   const buildReplayRunData = jest.fn(
     (
-      p: { workflowId: string; workflowVersionId: number; applicationId: string; trigger: string },
+      p: {
+        workflowId: string;
+        workflowVersionId: number;
+        applicationId: string;
+        trigger: string;
+      },
       accessGrantId: string,
       _actor: unknown,
       seq: number,
@@ -421,12 +504,21 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
   } as unknown as WorkflowTriggerService;
 
   const service = new WorkflowRunsService(
-    prisma,
+    prisma as unknown as PrismaService,
     orchestrator,
     trigger,
     actorStub,
   );
-  return { service, prisma, trigger, enqueue, create, buildReplayRunData };
+  return {
+    service,
+    prisma: prisma as unknown as PrismaService,
+    trigger,
+    enqueue,
+    create,
+    buildReplayRunData,
+    findFirst,
+    executeRaw,
+  };
 }
 
 describe('WorkflowRunsService.replayLatest — clone-to-new-run (ADR-0057 Option 3)', () => {
@@ -584,25 +676,76 @@ describe('WorkflowRunsService.replayLatest — clone-to-new-run (ADR-0057 Option
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('survives the seq-allocation RACE: a P2002 unique-violation recomputes the seq and retries (never a 500)', async () => {
+  it('maps a P2002 on the idempotency key to a clean 409 (never a 500), without retrying inside the aborted transaction', async () => {
     const { service, create } = buildForReplay({
       maxReplaySeq: 0,
-      collisionsBeforeSuccess: 2, // two concurrent replays grabbed the seq first
-    });
-    const res = await service.replayLatest('src');
-    expect(res).toMatchObject({ ok: true, runId: 'new-run' });
-    // It retried the create until it won (2 collisions + 1 success).
-    expect(create).toHaveBeenCalledTimes(3);
-  });
-
-  it('surfaces a clean ConflictException (409) — never a 500 — when the seq race never resolves', async () => {
-    const { service } = buildForReplay({
-      maxReplaySeq: 0,
-      collisionsBeforeSuccess: 99, // it can never win
+      collisionsBeforeSuccess: 1,
     });
     await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
       ConflictException,
     );
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('AUD-007: refuses (409) while a run of the same grant event is in flight or SUCCEEDED — no second clone', async () => {
+    for (const status of [
+      'PENDING',
+      'RUNNING',
+      'AWAITING_INPUT',
+      'SUCCEEDED',
+    ]) {
+      const { service, create, enqueue } = buildForReplay({
+        maxReplaySeq: 1,
+        liveRun: { id: 'replay1', status },
+      });
+      await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(create).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    }
+  });
+
+  it('AUD-007: the live-run check runs under the lineage lock and does not exclude the source (a concurrent retry counts)', async () => {
+    const { service, executeRaw, findFirst, create } = buildForReplay({
+      maxReplaySeq: 0,
+    });
+    await service.replayLatest('src');
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    const lineageCall = findFirst.mock.calls.findIndex(
+      ([args]) => typeof args.where?.status === 'object',
+    );
+    expect(lineageCall).toBeGreaterThanOrEqual(0);
+    const where = findFirst.mock.calls[lineageCall][0].where as Record<
+      string,
+      unknown
+    >;
+    expect(where).toMatchObject({
+      trigger: 'ACCESS_GRANTED',
+      accessGrantId: 'cjld2cjxh0001qzrmn831i7rn',
+    });
+    expect(where).not.toHaveProperty('id');
+    // The lock is taken before the check, and both before the create.
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      findFirst.mock.invocationCallOrder[lineageCall],
+    );
+    expect(findFirst.mock.invocationCallOrder[lineageCall]).toBeLessThan(
+      create.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('AUD-069: refuses (409) to replay a provisioning run whose grant was revoked or whose grantee was offboarded', async () => {
+    for (const grant of [
+      { revokedAt: new Date(), user: { deletedAt: null } },
+      { revokedAt: null, user: { deletedAt: new Date() } },
+    ]) {
+      const { service, create } = buildForReplay({ maxReplaySeq: 0, grant });
+      await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(create).not.toHaveBeenCalled();
+    }
   });
 
   it('422s when no enabled workflow version exists to replay against (planForTrigger returns null)', async () => {

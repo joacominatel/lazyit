@@ -25,11 +25,8 @@ import {
 import { useUpdateUserRole } from "@/lib/api/hooks/use-user-mutations";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { notifyError } from "@/lib/api/notify-error";
+import { assignableRoles, canManageUser, isPromotion, notifyUserError } from "./role-ceiling";
 import { UserRoleBadge } from "./user-role-badge";
-
-/** The role values shown in the Select, in display order. Labels/hints are resolved via i18n. */
-const ROLE_VALUES: Role[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 interface UserRoleSelectProps {
   /** The user whose role is being shown/edited. */
@@ -44,13 +41,15 @@ interface UserRoleSelectProps {
  * {@link useCan} (`user:manage`), then decides what to render:
  *   - caller LACKS `user:manage` → a read-only {@link UserRoleBadge} (role management is gated);
  *   - caller IS the target → a disabled badge (no self-escalation/demotion; the API 403s anyway);
- *   - caller HOLDS `user:manage` editing someone else → an editable Select with a confirmation step.
+ *   - target ranked above the caller (SEC-088) → a read-only badge; directory-only → a badge with why;
+ *   - caller HOLDS `user:manage` editing someone else → a Select of the roles at or below their own.
  *
- * The API is the real enforcement boundary: the last-admin (409) and self-role (403) guards are
- * surfaced verbatim via {@link notifyError} if the optimistic UI ever lets a blocked change through.
+ * The API is the real enforcement boundary: its guards (role ceiling, last admin, self-role) are
+ * surfaced via {@link notifyUserError} if the optimistic UI ever lets a blocked change through.
  */
 export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
   const t = useTranslations("users.role");
+  const tUsers = useTranslations("users");
   const tc = useTranslations("common");
   const { data: me } = useCurrentUser();
   const canManage = useCan("user:manage");
@@ -75,10 +74,26 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
       </span>
     );
   }
+  // SEC-088: a user ranked above the caller is read-only to them.
+  if (!canManageUser(me?.role, user)) {
+    return <UserRoleBadge role={user.role} />;
+  }
+  if (user.directoryOnly) {
+    return (
+      <span className="inline-flex items-center gap-2" title={t("directoryLocked")}>
+        <UserRoleBadge role={user.role} />
+        <span className={size === "sm" ? "sr-only" : "text-xs text-muted-foreground"}>
+          {t("directoryLocked")}
+        </span>
+      </span>
+    );
+  }
+  const roleOptions = assignableRoles(me?.role);
 
   function handleConfirm() {
     if (pendingRole == null) return;
     const role = pendingRole;
+    const promoted = isPromotion(user.role, role);
     updateRole.mutate(
       { id: user.id, role },
       {
@@ -88,13 +103,12 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
               name: `${user.firstName} ${user.lastName}`,
               role: roleLabel(role),
             }),
+            promoted ? { description: t("toast.credentialsCancelled") } : undefined,
           );
           setPendingRole(null);
         },
-        // Surfaces the API's friendly messages verbatim — the last-admin 409 ("Cannot remove the
-        // last administrator…") and the self-role 403 ("You cannot change your own role").
         onError: (error) => {
-          notifyError(error, t("toast.error"));
+          notifyUserError(error, t("toast.error"), tUsers);
           setPendingRole(null);
         },
       },
@@ -121,7 +135,7 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {ROLE_VALUES.map((value) => (
+          {roleOptions.map((value) => (
             <SelectItem key={value} value={value}>
               {roleLabel(value)}
             </SelectItem>
@@ -147,6 +161,9 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
                 ),
               })}{" "}
               {pendingRole ? t(`hints.${pendingRole}`) : ""}
+              {pendingRole && isPromotion(user.role, pendingRole) ? (
+                <> {t("promotionNote")}</>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -94,7 +94,31 @@ export const ArticleLinkedToFilterSchema = ArticleLinkedToSchema;
 export const ArticleAssetIdFilterSchema = z.cuid();
 export const ArticleApplicationIdFilterSchema = z.cuid();
 
+/**
+ * `?sort=` for `GET /articles` (#1539). A closed allowlist; an unknown value is a **400** (ADR-0030),
+ * and an omitted one keeps the historical order. Each key fixes its own direction, because each has one
+ * sensible reading in a browse list:
+ *
+ *  - `updated` (default): newest-updated first, the order the list always had.
+ *  - `title`: alphabetical, A to Z, in the database collation (on a byte-wise collation, capitals sort
+ *    before lowercase — the same rule every other name sort in lazyit follows).
+ *  - `created`: newest-created first.
+ *
+ * Every order ends with the unique `id`, so paging never repeats or skips a row between pages.
+ */
+export const ArticleListSortSchema = z.enum(["updated", "title", "created"]);
+
+/**
+ * `?includeSubfolders=` for `GET /articles` (#1539). Only `true` is defined: with a `categoryId`
+ * filter it widens each selected folder to the folder **and every live descendant**, so a folder view
+ * can show everything filed under it. Folder access (ADR-0060) still applies on top. A descendant the
+ * caller may not read stays out, exactly as it would on its own. Without `categoryId` it has no
+ * effect. Any other value is a **400**, the same allowlist contract as {@link ArticleLinkedFilterSchema}.
+ */
+export const ArticleIncludeSubfoldersSchema = z.enum(["true"]);
+
 export type ArticleListItem = z.infer<typeof ArticleListItemSchema>;
 export type ArticleListPage = z.infer<typeof ArticleListPageSchema>;
 export type ArticleLinkedFilter = z.infer<typeof ArticleLinkedFilterSchema>;
 export type ArticleLinkedTo = z.infer<typeof ArticleLinkedToSchema>;
+export type ArticleListSort = z.infer<typeof ArticleListSortSchema>;

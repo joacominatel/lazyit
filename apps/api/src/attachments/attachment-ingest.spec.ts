@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,9 +29,21 @@ interface StoredRow {
 /** A minimal in-memory stand-in for the child's raw PrismaClient (only `attachment` is used). */
 function makePrisma() {
   const rows: StoredRow[] = [];
+  const lockedShas: string[] = [];
   let seq = 0;
   return {
     rows,
+    lockedShas,
+    // The blob lock (AUD-021): the second hashed key is the sha256.
+    // eslint-disable-next-line @typescript-eslint/require-await
+    $executeRaw: async (
+      _sql: TemplateStringsArray,
+      _ns: unknown,
+      sha: unknown,
+    ) => {
+      lockedShas.push(String(sha));
+      return 1;
+    },
     attachment: {
       // Distinct-by-sha256 max byteSize — matches the real budget accounting.
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -94,10 +106,54 @@ describe('ingestArticleImage', () => {
     expect(result.ok).toBe(true);
     expect(prisma.rows).toHaveLength(1);
     const row = prisma.rows[0];
+    expect(prisma.lockedShas).toEqual([row.sha256]);
     expect(row.entityId).toBe(ARTICLE_ID);
     expect(row.mimeType).toBe('image/png');
     // The blob exists on disk, keyed by the sha256 of the RE-ENCODED bytes.
     expect(existsSync(blobPathFor(row.sha256))).toBe(true);
+  });
+
+  it('AUD-021: holds the blob lock on the import transaction, so a dedup hit keeps its blob until the row commits', async () => {
+    const png = await realImage('png');
+    const first = makePrisma();
+    await ingestArticleImage(first, ARTICLE_ID, AUTHOR, {
+      buffer: png,
+      originalname: 'a.png',
+    });
+    const sha = first.rows[0].sha256;
+
+    // Same image imported again; its earlier row is gone, so a reclaimer sees nothing referencing it.
+    const held = new Set<string>();
+    const tx = makePrisma();
+    const create = tx.attachment.create;
+    const importTx = {
+      ...tx,
+      attachment: {
+        ...tx.attachment,
+        create: async (args: Parameters<typeof create>[0]) => {
+          if (!held.has(args.data.sha256)) {
+            await rm(blobPathFor(args.data.sha256), { force: true });
+          }
+          return create(args);
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      $executeRaw: async (
+        _sql: TemplateStringsArray,
+        _ns: unknown,
+        s: unknown,
+      ) => {
+        held.add(String(s));
+        return 1;
+      },
+    };
+    const result = await ingestArticleImage(importTx, ARTICLE_ID, AUTHOR, {
+      buffer: png,
+      originalname: 'b.png',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(blobPathFor(sha))).toBe(true);
   });
 
   it('rejects an SVG data payload (stored-XSS red line) — no attachment, no blob', async () => {

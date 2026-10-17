@@ -34,8 +34,9 @@ grupos.
 
 **Acceso**
 
-- **Roles y permisos** — consulta quién tiene cada rol en el equipo y ajusta lo que cada rol puede
-  hacer en [Permisos](/help/permissions). El rol de una persona se cambia desde la sección Usuarios.
+- **Roles y permisos** — una sola matriz de lo que puede hacer cada rol, con cuántas personas tienen
+  cada uno. Consulta [Configuración de permisos](/help/users-permissions-permission-configuration). El
+  rol de una persona se cambia desde la sección Usuarios.
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
 
@@ -53,7 +54,7 @@ grupos.
   el interruptor que permite que agentes de IA externos como Claude Code se conecten por MCP. Todo
   empieza desactivado. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup).
 - **Tareas** — la bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento.
-  La automatización de cada aplicación se configura en su propia pestaña de Flujos.
+  La automatización de cada aplicación se configura en su propia pestaña de Automatización.
 
 **Sistema**
 
@@ -80,8 +81,8 @@ guarda en cuanto lo cambias.
 
 - **Configurada** — si la configuración inicial está completa (existe un administrador). Una
   instalación nueva muestra *Configuración pendiente* hasta que se crea el primer administrador.
-- **Proveedor de identidad** — la postura de inicio de sesión: *Zitadel (incluido)*, *OIDC genérico
-  (el tuyo propio)* o *Cuentas locales*.
+- **Proveedor de identidad** — la postura de inicio de sesión: *Cuentas locales* u *OIDC genérico (usa
+  el tuyo)*.
 - **Administradores** — cuántas cuentas de administrador tiene la instancia.
 - **Postura de ejecución** — *Desarrollo* o *Producción*.
 - **Versión** — la versión exacta que ejecuta esta instancia, fijada al construir sus imágenes. Un
@@ -191,6 +192,11 @@ Solo puedes cancelar mientras sigue *solicitada* — una vez que el script del h
 en adelante), el botón desaparece y esa actualización debe terminar o reconciliarse, porque
 interrumpirla a mitad podría dejar las bases de datos y los respaldos desincronizados. La solicitud
 cancelada se conserva en el historial de actualizaciones como registro.
+
+No hace falta cancelar primero para actualizar a otra versión. Si ejecutas `update.sh` en el host para
+otra versión mientras una solicitud sigue pendiente, el script reemplaza esa solicitud: queda marcada
+como fallida con la nota "Superseded by an operator-run update", se conserva en el historial, y la
+sección sigue la actualización que realmente ejecutaste.
 
 ### Si una actualización falla — el punto de restauración
 

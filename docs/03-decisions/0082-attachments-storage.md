@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-02
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -124,7 +124,9 @@ todo tirado"):
 ### 3. Upload path — stream, sniff, blob-first
 
 - **`multer` `diskStorage`** streaming to `attachments/tmp/` — **never** `memoryStorage` (the
-  OOM guarantee). Hash on the stream as bytes land.
+  OOM guarantee). Hash on the stream as bytes land. The client filename is decoded as **UTF-8**
+  (`defParamCharset: 'utf8'`; multer's latin1 default stored `garantía.pdf` as `garantÃ­a.pdf`).
+  Names stored before that fix keep their mojibake; nothing rewrites them.
 - **Magic-byte sniff** decides the type — never the client extension or `Content-Type`. The detected
   type must be on the allowlist (and agree with the extension); the **server-derived** MIME is what's
   stored and later served.
@@ -138,6 +140,11 @@ todo tirado"):
 - **Blob-first write ordering:** write+fsync the blob (tmp → atomic rename to its content path),
   *then* insert the `Attachment` row. A crash between the two leaves an unreferenced blob (the GC
   sweep reclaims it) — never a row pointing at a missing file.
+- **Per-blob lock.** Content addressing means a promote can dedup onto an existing blob that has no
+  committed row yet. Every writer (upload, KB-import ingest, re-encode) holds a transaction-scoped
+  PostgreSQL advisory lock on the blob's `sha256` from the promote until its row commits; every
+  reclaimer (GC passes 2 and 3, the re-encode's old-blob cleanup) re-checks "no row references this
+  sha" and unlinks under the same lock, and skips a blob whose lock is held rather than waiting.
 - The **browser POSTs to the API origin directly** (not through the web proxy).
 
 ### 4. Serving — API-only, per-parent authz, hardened headers
@@ -146,7 +153,9 @@ todo tirado"):
 equivalent), each guarded by the **parent's** permission:
 
 - Asset document → `asset:read`. KB image → the article's visibility check, **including the folder
-  ACL** ([[0060-kb-folder-access-control]]) and draft-privacy.
+  ACL** ([[0060-kb-folder-access-control]]) and draft-privacy — the by-id article read, which lets an
+  ADMIN / `article:manage` holder read a foreign draft, matching the attachment write gate
+  ([[0022-draft-visibility-auth-shim]] AUD-086 amendment).
 - **404, not 403,** on no-access — no existence leak (the Secret-Manager member-blind pattern).
 - Stream with **`StreamableFile` + `createReadStream`** (the existing pattern) — never buffer.
 - **Response headers (all mandatory):**
@@ -197,9 +206,12 @@ finite," and — critically — Marta's version-restore requirement:
    bodies + **ALL `ArticleVersion` snapshots**. Because versions are append-only, *any image ever
    saved in any version is pinned forever* — a version restore can never surface a broken image.
 3. **A blob is physically deleted only when NO live `Attachment` row references its `sha256`**
-   (dedup-safe: shared blobs survive until the last referrer is gone).
+   (dedup-safe: shared blobs survive until the last referrer is gone). That check and the unlink run
+   under the per-blob lock (§3), so an upload deduplicating onto the blob cannot lose it.
 4. **A daily BullMQ sweep** soft-deletes never-referenced orphans past a **24 h grace** (images
    pasted into a draft that was abandoned), then a second pass unlinks blobs no live row references.
+   The orphan pass walks **every** candidate in `(createdAt, id)` pages, so pinned images can never
+   crowd orphans out of the sweep.
    The audit trail (who/when) survives even after the bytes are unlinked.
 
 ### 7. Storage guards (single-host)

@@ -30,14 +30,15 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
   sensitive views (the user directory, the access-grant ledger, and purchases and suppliers) are also
   hidden from Viewer by default.
 
-## The Roles overview
+## The Roles & permissions page
 
-**Settings → Roles** shows one card per role with, for each: a **live holder count** (how many active
-users currently hold it), a short reminder of what the role can do, and a **View N members** link. That
-link opens the [Users list](/help/users-permissions-user-lifecycle) filtered to that role — the Users
-list is where you actually browse and manage who holds it, with search, sort and paging. The cards show
-counts only; they no longer list members inline. From the same cards you can open **Edit permissions**
-for Member and Viewer (Admin is full access and locked).
+**Settings → Roles & permissions** is one matrix: what each role can do, with Admin as a locked
+reference column beside the editable Member and Viewer columns. Each column header shows a **live
+holder count** (how many active users currently hold that role); click it to open the
+[Users list](/help/users-permissions-user-lifecycle) filtered to that role — the Users list is where you
+actually browse and manage who holds it, with search, sort and paging. Editing what Member and Viewer
+may do is described in [Permission configuration](/help/users-permissions-permission-configuration).
+(The old address of the per-role editor, `/settings/roles/permissions`, now opens this page.)
 
 ## How a role is assigned
 
@@ -52,20 +53,41 @@ for Member and Viewer (Admin is full access and locked).
 
 ## Built-in safety rules
 
-Two guardrails protect the instance from being locked out or quietly escalated:
+These guardrails protect the instance from being locked out or quietly escalated:
 
 - **The last admin cannot be removed.** lazyit refuses to demote, deactivate or offboard the final
   remaining admin — there must always be at least one. You will see a clear message instead of the
-  change going through.
+  change going through. Only admins who can actually sign in count: an admin who has never signed in
+  through your identity provider, an admin without a password on a local-accounts install, or a
+  directory person does not keep the instance administrable.
+- **Nobody manages users above their own role.** If you give Member or Viewer the **Manage users**
+  capability, those people can only hand out their own role or a lower one, and can only edit, reset,
+  offboard or restore users whose role is at or below theirs. Only an admin can create an admin,
+  promote someone to admin, or act on an existing admin. The role pickers only list the roles you can
+  hand out, and on a user above your role the role shows as a plain badge and **Edit**, the password
+  reset and **Offboard** are not offered (cloning them still is). Anything else is refused with a
+  clear message.
+- **Only an admin edits permissions, the directory connection and the email settings.** Giving Member
+  or Viewer **Change instance settings** lets them view the permission matrix, the directory connection
+  and the email (SMTP) settings, not change them or run a directory sync. The service accounts they
+  manage can hold only permissions their own role has.
+- **Promoting someone cancels their pending sign-in credentials.** When a person's role goes up, a
+  temporary password they have not replaced yet and any password-reset link still waiting are cancelled,
+  so one handed out at the lower role stops working. The role-change confirmation warns you first, and
+  the success message reminds you. If they need one, issue a new temporary password or reset link
+  after the promotion.
 - **You cannot change your own role.** An admin cannot promote or demote themselves; a role change
   must be made by one admin on another. This prevents a single person quietly elevating their own
   access. (You can still edit your own name, email and other details.)
+- **A directory person's role cannot change.** People added by an import or the directory sync have no
+  login and stay **Viewer** until they are onboarded. Their role shows as locked, with the reason;
+  onboard them first, then change the role.
 
 ## A note on your identity provider
 
-If you bring your own identity provider (BYOI), roles are managed **locally in lazyit** — they are not
-read from a token and are used only for authorization inside the app. lazyit keeps its own copy of the
-role; you assign and change it here, in the Users section.
+Roles are managed **locally in lazyit**, whichever way people sign in. With your own OIDC provider they
+are not read from a token and are never sent to the provider; they are used only for authorization
+inside the app. You assign and change them here, in the Users section.
 
 For the full breakdown of what each role can do — and how to tune Member and Viewer — see
 [Permissions](/help/permissions) and [Permission configuration](/help/users-permissions-permission-configuration).

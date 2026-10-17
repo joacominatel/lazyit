@@ -37,6 +37,15 @@ function prismaMock() {
   };
 }
 
+// What each rebuildIndex call loaded: the service hands it a loader, which the double runs.
+const loaded = new Map<string, unknown[]>();
+const rebuildIndexMock = (): jest.Mock =>
+  jest.fn(async (index: string, load: () => Promise<unknown[]>) => {
+    const docs = await load();
+    loaded.set(index, docs);
+    return docs.length;
+  });
+
 function build(
   search: SearchMock,
   prisma: ReturnType<typeof prismaMock>,
@@ -57,9 +66,10 @@ describe('SearchBootstrapService', () => {
       enabled: true,
       isHealthy: jest.fn().mockResolvedValue(true),
       emptyOrMissingIndexes: jest.fn(),
-      rebuildIndex: jest.fn().mockResolvedValue(undefined),
+      rebuildIndex: rebuildIndexMock(),
     };
     prisma = prismaMock();
+    loaded.clear();
   });
 
   afterEach(() => {
@@ -79,14 +89,25 @@ describe('SearchBootstrapService', () => {
       expect(healed).toEqual(['assets', 'articles']);
       // Only the stale indexes were rebuilt — users/locations/applications were skipped.
       expect(search.rebuildIndex).toHaveBeenCalledTimes(2);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
-        { id: 'a1' },
-      ]);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('articles', [
-        { id: 'ar1' },
-        { id: 'ar2' },
-      ]);
+      expect(loaded.get('assets')).toEqual([{ id: 'a1' }]);
+      expect(loaded.get('articles')).toEqual([{ id: 'ar1' }, { id: 'ar2' }]);
       expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('reads the live set inside rebuildIndex, after its write journal opens (AUD-050)', async () => {
+      search.emptyOrMissingIndexes.mockResolvedValue([
+        'assets',
+      ] satisfies SearchIndex[]);
+      search.rebuildIndex.mockResolvedValue(0);
+
+      await build(search, prisma).selfHeal();
+
+      // The service owns when the load runs: a double that never calls the loader means no DB read.
+      expect(search.rebuildIndex).toHaveBeenCalledWith(
+        'assets',
+        expect.any(Function),
+      );
+      expect(prisma.asset.findMany).not.toHaveBeenCalled();
     });
 
     it('only indexes PUBLISHED, non-deleted articles (draft privacy)', async () => {
@@ -135,9 +156,7 @@ describe('SearchBootstrapService', () => {
 
       expect(search.isHealthy).toHaveBeenCalledTimes(3);
       expect(healed).toEqual(['assets']);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
-        { id: 'a1' },
-      ]);
+      expect(loaded.get('assets')).toEqual([{ id: 'a1' }]);
     });
 
     it('gives up after the bounded wait without probing or rebuilding (the sweeper is the backstop)', async () => {
@@ -213,14 +232,14 @@ describe('SearchBootstrapService', () => {
       expect(prisma.supplier.findMany).toHaveBeenCalledWith({
         where: { deletedAt: null },
       });
-      expect(search.rebuildIndex).toHaveBeenCalledWith('purchases', [
+      expect(loaded.get('purchases')).toEqual([
         expect.objectContaining({
           id: 'po1',
           supplierName: 'Compumundo',
           lineDescriptions: ['ThinkPad T14'],
         }),
       ]);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('suppliers', [
+      expect(loaded.get('suppliers')).toEqual([
         expect.objectContaining({ id: 's1', name: 'Compumundo' }),
       ]);
     });
@@ -237,10 +256,7 @@ describe('SearchBootstrapService', () => {
       await build(search, prisma).selfHeal();
 
       // assets failed but articles was still attempted.
-      expect(search.rebuildIndex).toHaveBeenCalledWith('articles', [
-        { id: 'ar1' },
-        { id: 'ar2' },
-      ]);
+      expect(loaded.get('articles')).toEqual([{ id: 'ar1' }, { id: 'ar2' }]);
     });
   });
 
@@ -262,9 +278,7 @@ describe('SearchBootstrapService', () => {
       ]);
       expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
       expect(search.rebuildIndex).toHaveBeenCalledTimes(9);
-      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
-        { id: 'a1' },
-      ]);
+      expect(loaded.get('assets')).toEqual([{ id: 'a1' }]);
     });
 
     it('continues to the next index when one rebuild fails (per-index fail-soft)', async () => {

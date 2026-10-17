@@ -10,14 +10,18 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ApplyLicenseResultSchema,
@@ -64,6 +68,9 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { ExportService } from '../common/export';
+import { PURCHASE_ORDER_EXPORT_COLUMNS } from './purchase-orders-export';
+import { PENDING_LINE_EXPORT_COLUMNS } from './pending-lines-export';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -157,6 +164,7 @@ export class PurchaseOrdersController {
     private readonly licenses: PurchaseLicenseService,
     private readonly fromAssets: PurchaseFromAssetsService,
     private readonly extraction: PurchaseExtractionService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
@@ -240,6 +248,58 @@ export class PurchaseOrdersController {
     );
   }
 
+  // STATIC route declared BEFORE `:id` so `/purchase-orders/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('purchaseOrder:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every purchase matching the list filters, one row per purchase (ADR-0103): same permission, filters and rows as GET /purchase-orders, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...PurchaseOrderStatusSchema.options],
+    isArray: true,
+  })
+  @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery({
+    name: 'receipt',
+    required: false,
+    enum: [...PurchaseOrderReceiptFilterSchema.options],
+  })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered purchases as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('q') q?: string,
+    @Query('status') status?: string | string[],
+    @Query('supplierId') supplierId?: string,
+    @Query('receipt') receipt?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    const filters = {
+      q,
+      status: parseEnumArrayQuery(status, PurchaseOrderStatusSchema, 'status'),
+      supplierId: parseCuidQuery(supplierId, 'supplierId'),
+      receipt: parseReceiptQuery(receipt),
+    };
+    return this.exports.exportCsv({
+      resource: 'PURCHASE_ORDERS',
+      principal,
+      response: res,
+      filters: { ...filters, deleted: slice },
+      columns: PURCHASE_ORDER_EXPORT_COLUMNS,
+      filename: 'purchases',
+      ...this.purchases.exportSource(filters, slice),
+    });
+  }
+
   // STATIC route declared BEFORE `:id` so `/purchase-orders/pending-lines` never resolves as an id.
   @Get('pending-lines')
   @RequirePermission('purchaseOrder:read')
@@ -262,6 +322,33 @@ export class PurchaseOrdersController {
       { supplierId: parseCuidQuery(supplierId, 'supplierId') },
       parsePageQuery({ limit, offset, page }),
     );
+  }
+
+  // STATIC route declared BEFORE `:id` (see pending-lines).
+  @Get('pending-lines/export')
+  @RequirePermission('purchaseOrder:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every line on the Pending units tab, one row per line (ADR-0103): same permission, filter and rows as GET /purchase-orders/pending-lines, newest line first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited.',
+  })
+  @ApiQuery({ name: 'supplierId', required: false })
+  @ApiOkResponse({ description: 'The pending lines as CSV (text/csv).' })
+  exportPendingLines(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('supplierId') supplierId?: string,
+  ): Promise<StreamableFile> {
+    const filters = { supplierId: parseCuidQuery(supplierId, 'supplierId') };
+    return this.exports.exportCsv({
+      resource: 'PENDING_UNITS',
+      principal,
+      response: res,
+      filters,
+      columns: PENDING_LINE_EXPORT_COLUMNS,
+      filename: 'pending-units',
+      ...this.receiving.pendingLinesExportSource(filters),
+    });
   }
 
   // STATIC route declared BEFORE `:id` (see pending-lines).

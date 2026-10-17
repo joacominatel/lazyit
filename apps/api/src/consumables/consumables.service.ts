@@ -11,6 +11,7 @@ import type {
   ConsumableDeliveryTargetKey,
   CreateConsumable,
   CreateConsumableMovement,
+  DeletedFilter,
   PageQuery,
   Permission,
   UpdateConsumable,
@@ -25,6 +26,11 @@ import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SearchService } from '../search/search.service';
 import { projectConsumable } from '../search/search.documents';
@@ -45,6 +51,16 @@ export interface ConsumableFilters {
   /** Restrict to consumables in this category (ConsumableCategory id, a cuid). */
   categoryId?: string;
 }
+
+// A to-one include is not auto-scoped (#1067): the export blanks an archived category, as the list does.
+const CONSUMABLE_EXPORT_INCLUDE = {
+  category: { select: { name: true, deletedAt: true } },
+} as const satisfies Prisma.ConsumableInclude;
+
+/** One row of the consumables CSV export. */
+export type ConsumableExportRow = Prisma.ConsumableGetPayload<{
+  include: typeof CONSUMABLE_EXPORT_INCLUDE;
+}>;
 
 /**
  * Server-side sort allowlist for `GET /consumables` (ADR-0030 amendment). Maps each PUBLIC `?sort=`
@@ -125,6 +141,44 @@ export interface MovementOrigin {
   ) => Promise<void>;
 }
 
+/** A ledger row with its target resolved and redacted for the caller (ADR-0098). */
+export type MovementExportRow = ConsumableMovement & {
+  target: ConsumableDeliveryTarget | null;
+};
+
+// Not filtered (ADR-0032): an archived consumable's deliveries stay listed, flagged by its `deletedAt`.
+const DELIVERY_INCLUDE = {
+  consumable: {
+    select: { id: true, name: true, sku: true, unit: true, deletedAt: true },
+  },
+} as const satisfies Prisma.ConsumableMovementInclude;
+
+/** One `GET /consumables/deliveries` item: the delivery, its target, consumable and return state. */
+export type DeliveryExportRow = MovementExportRow &
+  Prisma.ConsumableMovementGetPayload<{ include: typeof DELIVERY_INCLUDE }> & {
+    returnedQuantity: number;
+    outstandingQuantity: number;
+  };
+
+/** A consumable's ledger `where`: its list and its export read it. */
+function movementWhere(
+  consumableId: string,
+  { type, from, to }: MovementFilters,
+): Prisma.ConsumableMovementWhereInput {
+  return {
+    consumableId,
+    ...(type ? { type } : {}),
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to) } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 /** The one target a create payload or a deliveries query names, or null (validated upstream). */
 function targetOf(data: TargetColumns): TargetRef | null {
   for (const key of Object.keys(TARGET_KIND) as ConsumableDeliveryTargetKey[]) {
@@ -165,10 +219,7 @@ export class ConsumablesService {
    * over the same `where` in one `$transaction`.
    */
   async findPage(filters: ConsumableFilters, page: PageQuery) {
-    const where = {
-      ...this.buildWhere(filters),
-      ...deletedWhere(page.deleted),
-    };
+    const where = this.listWhere(filters, page.deleted);
     const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
@@ -186,7 +237,7 @@ export class ConsumablesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.consumable.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,
@@ -194,6 +245,33 @@ export class ConsumablesService {
       this.prisma.consumable.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
+  }
+
+  /** The list's `where` for a filter set and soft-delete slice: the page, its count and the export read it. */
+  listWhere(
+    filters: ConsumableFilters,
+    deleted: DeletedFilter,
+  ): Prisma.ConsumableWhereInput {
+    return { ...this.buildWhere(filters), ...deletedWhere(deleted) };
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where`, walked newest first by keyset. */
+  exportSource(filters: ConsumableFilters, deleted: DeletedFilter) {
+    const where = this.listWhere(filters, deleted);
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.consumable.count({ where, ...escapeHatch }),
+      fetchBatch: (after: KeysetCursor<string> | null, take: number) =>
+        this.prisma.consumable.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          include: CONSUMABLE_EXPORT_INCLUDE,
+          ...escapeHatch,
+        }),
+    };
   }
 
   /** The shared `where` for the consumable list — used identically by findPage and its count. */
@@ -240,25 +318,59 @@ export class ConsumablesService {
 
   /**
    * Create. `currentStock` is never set here — it starts at the schema default (0) and only moves
-   * through movements (ADR-0034). Invalid categoryId hits the FK and is mapped to 400. Now `async` so
+   * through movements (ADR-0034). A missing or archived categoryId is a 400. Now `async` so
    * the fire-and-forget search sync can fire on the created row (#873).
    */
   async create(data: CreateConsumable) {
+    await this.assertCategoryLive(data.categoryId);
     const consumable = await this.prisma.consumable.create({ data });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search?.upsert('consumables', projectConsumable(consumable));
     return consumable;
   }
 
-  /** Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. */
+  /**
+   * Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. `null`
+   * clears an optional field (and detaches the category).
+   */
   async update(id: string, data: UpdateConsumable) {
-    await this.assertExists(id);
+    const existing = await this.prisma.consumable.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, categoryId: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Consumable ${id} not found`);
+    }
+    // Filing under an archived category is refused (400); keeping a legacy one is not.
+    if (data.categoryId !== existing.categoryId) {
+      await this.assertCategoryLive(data.categoryId);
+    }
     const consumable = await this.prisma.consumable.update({
       where: { id },
       data,
     });
     this.search?.upsert('consumables', projectConsumable(consumable));
     return consumable;
+  }
+
+  /**
+   * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
+   * without this a consumable could be filed under a category the taxonomy hides (SEC-052). Write-only:
+   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   */
+  private async assertCategoryLive(
+    categoryId: string | null | undefined,
+  ): Promise<void> {
+    if (!categoryId) return;
+    const category = await this.prisma.consumableCategory.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `ConsumableCategory ${categoryId} not found (missing or archived)`,
+      );
+    }
   }
 
   /** Soft delete: set deletedAt (never hard-delete; movements keep the FK alive). */
@@ -723,24 +835,38 @@ export class ConsumablesService {
     principal?: Principal,
   ) {
     await this.assertExists(consumableId);
-    const { type, from, to } = filters;
     const rows = await this.prisma.consumableMovement.findMany({
-      where: {
-        consumableId,
-        ...(type ? { type } : {}),
-        ...(from || to
-          ? {
-              createdAt: {
-                ...(from ? { gte: new Date(from) } : {}),
-                ...(to ? { lte: new Date(to) } : {}),
-              },
-            }
-          : {}),
-      },
+      where: movementWhere(consumableId, filters),
       orderBy: { id: 'desc' },
     });
     const targets = await this.resolveTargets(rows, principal);
     return rows.map((row, i) => ({ ...row, target: targets[i] }));
+  }
+
+  // The list orders by id; the export walks (createdAt, id) like every export (ADR-0103 §3).
+  async movementsExportSource(
+    consumableId: string,
+    filters: MovementFilters,
+    principal: Principal,
+  ) {
+    await this.assertExists(consumableId);
+    const where = movementWhere(consumableId, filters);
+    const readable = await this.readableKinds(principal);
+    return {
+      count: () => this.prisma.consumableMovement.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<number> | null,
+        take: number,
+      ): Promise<MovementExportRow[]> => {
+        const rows = await this.prisma.consumableMovement.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+        });
+        const targets = await this.resolveTargets(rows, principal, readable);
+        return rows.map((row, i) => ({ ...row, target: targets[i] }));
+      },
+    };
   }
 
   /**
@@ -763,6 +889,55 @@ export class ConsumablesService {
     page: PageQuery,
     principal?: Principal,
   ) {
+    const { where, readable } = await this.deliveriesScope(filters, principal);
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.consumableMovement.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        take,
+        skip,
+        include: DELIVERY_INCLUDE,
+      }),
+      this.prisma.consumableMovement.count({ where }),
+    ]);
+    return pageOf(
+      await this.withReturnState(rows, principal, readable),
+      total,
+      page,
+    );
+  }
+
+  /** The deliveries CSV export's reads (ADR-0103): the list's gate, `where` and redaction, by keyset. */
+  async deliveriesExportSource(filters: DeliveryFilters, principal: Principal) {
+    const { where, readable } = await this.deliveriesScope(filters, principal);
+    return {
+      count: () => this.prisma.consumableMovement.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<number> | null,
+        take: number,
+      ): Promise<DeliveryExportRow[]> =>
+        this.withReturnState(
+          await this.prisma.consumableMovement.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            include: DELIVERY_INCLUDE,
+          }),
+          principal,
+          readable,
+        ),
+    };
+  }
+
+  /** The deliveries list's per-kind gate (403) and its `where`, shared by the page and the export. */
+  private async deliveriesScope(
+    filters: DeliveryFilters,
+    principal?: Principal,
+  ): Promise<{
+    where: Prisma.ConsumableMovementWhereInput;
+    readable: ReadableKinds;
+  }> {
     const target = targetOf(filters);
     if (!target) {
       // Unreachable through the controller (the query schema requires exactly one target).
@@ -793,31 +968,17 @@ export class ConsumablesService {
           }
         : {}),
     };
-    const { take, skip } = offsetOf(page);
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.consumableMovement.findMany({
-        where,
-        orderBy: { id: 'desc' },
-        take,
-        skip,
-        // `Consumable` is not auto-filtered (ADR-0032) and a nested include is never filtered anyway: a
-        // soft-deleted consumable's deliveries stay listed, flagged by its `deletedAt`.
-        include: {
-          consumable: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              unit: true,
-              deletedAt: true,
-            },
-          },
-        },
-      }),
-      this.prisma.consumableMovement.count({ where }),
-    ]);
+    return { where, readable };
+  }
 
-    // Returned so far, per delivery on this page (one query).
+  /** Each delivery with its redacted target and return state; one returns query per batch. */
+  private async withReturnState(
+    rows: Prisma.ConsumableMovementGetPayload<{
+      include: typeof DELIVERY_INCLUDE;
+    }>[],
+    principal: Principal | undefined,
+    readable: ReadableKinds,
+  ): Promise<DeliveryExportRow[]> {
     const returnable = rows.filter((row) => row.returnable);
     const returned = new Map<number, number>();
     if (returnable.length > 0) {
@@ -834,7 +995,7 @@ export class ConsumablesService {
       }
     }
     const targets = await this.resolveTargets(rows, principal, readable);
-    const items = rows.map((row, i) => {
+    return rows.map((row, i) => {
       const returnedQuantity = row.returnable ? (returned.get(row.id) ?? 0) : 0;
       return {
         ...row,
@@ -845,7 +1006,6 @@ export class ConsumablesService {
           : 0,
       };
     });
-    return pageOf(items, total, page);
   }
 
   /**

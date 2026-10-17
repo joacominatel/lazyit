@@ -2,8 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   DismissAllNotificationsQuerySchema,
   DismissNotificationsResultSchema,
+  MarkNotificationGroupReadSchema,
   MarkReadResultSchema,
+  NOTIFICATION_GROUP_PREVIEW_SIZE,
   NOTIFICATION_TYPES,
+  NotificationGroupKeySchema,
+  NotificationGroupPageSchema,
+  NotificationGroupSchema,
+  NotificationGroupsQuerySchema,
   NotificationPageSchema,
   NotificationSchema,
   NotificationTypeSchema,
@@ -224,5 +230,75 @@ describe("DismissAllNotificationsQuerySchema (#1309)", () => {
         upTo: ["2026-09-23T10:00:00.000Z", "2026-09-23T11:00:00.000Z"],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("grouped bell contract (#1649)", () => {
+  const row = {
+    id: "ckx1",
+    type: "critical_app_access",
+    severity: "warning",
+    title: "Access to Okta granted",
+    summary: null,
+    entityType: "application",
+    entityId: "app-1",
+    targetUserId: null,
+    recipientUserId: null,
+    metadata: null,
+    read: false,
+    createdAt: "2026-10-17T12:00:00.000Z",
+  };
+
+  test("tz defaults to UTC and accepts IANA names", () => {
+    expect(NotificationGroupsQuerySchema.parse({})).toEqual({ tz: "UTC" });
+    for (const tz of ["America/Argentina/Buenos_Aires", "Europe/Madrid", "Etc/GMT+3"]) {
+      expect(NotificationGroupsQuerySchema.safeParse({ tz }).success).toBe(true);
+    }
+  });
+
+  test("tz rejects raw offsets, unknown zones and SQL-looking input", () => {
+    for (const tz of ["+03:00", "-0300", "Mars/Olympus", "", "UTC'; --", "a".repeat(65)]) {
+      expect(NotificationGroupsQuerySchema.safeParse({ tz }).success).toBe(false);
+    }
+  });
+
+  test("a group key needs a known type and a real calendar day", () => {
+    expect(
+      NotificationGroupKeySchema.parse({ type: "critical_app_access", day: "2026-10-17" }),
+    ).toEqual({ type: "critical_app_access", day: "2026-10-17", tz: "UTC" });
+    expect(
+      NotificationGroupKeySchema.safeParse({ type: "nope", day: "2026-10-17" }).success,
+    ).toBe(false);
+    for (const day of ["2026-13-01", "2026-02-30", "17/10/2026", "2026-10-17T00:00:00Z"]) {
+      expect(
+        NotificationGroupKeySchema.safeParse({ type: "low_stock", day }).success,
+      ).toBe(false);
+    }
+  });
+
+  test("the mark-group body is the group key", () => {
+    expect(MarkNotificationGroupReadSchema).toBe(NotificationGroupKeySchema);
+  });
+
+  test("a group page carries counts and a bounded preview", () => {
+    const group = {
+      type: "critical_app_access",
+      day: "2026-10-17",
+      count: 312,
+      unread: 300,
+      latestAt: row.createdAt,
+      latest: [row, row, row],
+    };
+    expect(
+      NotificationGroupPageSchema.safeParse({ items: [group], total: 1, limit: 20, offset: 0 })
+        .success,
+    ).toBe(true);
+    expect(
+      NotificationGroupSchema.safeParse({
+        ...group,
+        latest: Array(NOTIFICATION_GROUP_PREVIEW_SIZE + 1).fill(row),
+      }).success,
+    ).toBe(false);
+    expect(NotificationGroupSchema.safeParse({ ...group, count: 0 }).success).toBe(false);
   });
 });

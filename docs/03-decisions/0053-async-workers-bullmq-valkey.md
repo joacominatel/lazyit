@@ -3,7 +3,7 @@ title: "ADR-0053: Async workers — BullMQ on Valkey, with sandboxed processors"
 tags: [adr, infra, async, queue, worker, security]
 status: accepted
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -130,6 +130,17 @@ or the job fails. This closes the structural half of SEC-002 and exercises the w
 - **Follow-ups:** the **Applications workflow-engine** ADR (flows); the **backups-from-frontend** feature;
   the **grant auto-expiry** repeatable job; a **dedicated worker container** when load warrants; optional
   **bull-board** for queue observability. After the pilot lands, move SEC-002 to `06-security/closed/`.
+
+## Amendment (2026-10-14) — the Valkey connection never gives up (AUD-009)
+
+The ioredis `retryStrategy` shared by the BullMQ connection (and the Worker connections BullMQ
+duplicates from it) and by the `/health/ready` probe **backs off linearly to a 3 s cap and keeps
+retrying for as long as Valkey is down**. The earlier strategy gave up after 20 attempts (~40 s), and a
+given-up ioredis client never reconnects, so a routine Valkey restart left imports, workflow triggers
+and queued jobs down until the API was restarted. The #257 log flood stays fixed by throttling, not by
+giving up: the first error of an outage is logged in full, then at most one "still failing" line a minute
+(per client), and the throttle re-arms on reconnect. Readiness still gates on Postgres only; the probe's
+`valkey` check reports a fixed `unreachable` category, never the raw driver message (SEC-070, AUD-018).
 
 Related: [[0009-bun-first-vs-app-stack]] · [[0021-knowledge-base-design]] · [[0025-containerization-strategy]] ·
 [[0028-secrets-and-config]] · [[0035-search-architecture]] · [[0043-zitadel-source-of-truth]]

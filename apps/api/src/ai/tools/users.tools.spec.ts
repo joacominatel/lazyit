@@ -8,6 +8,7 @@ import { getLoggerToken } from 'nestjs-pino';
 import {
   AiActionPreviewSchema,
   AiToolResultSchema,
+  aiToolResultSourceRef,
   DEFAULT_ROLE_PERMISSIONS,
   type Permission,
   type Role,
@@ -40,7 +41,6 @@ import { ServiceAccountAuthenticator } from '../../auth/service-account-authenti
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
 import { LocalProvisioningService } from '../../auth/local/local-provisioning.service';
 import { PasswordLifecycleService } from '../../auth/local/password-lifecycle.service';
-import { IDENTITY_PROVIDER } from '../../auth/identity/identity-provider.interface';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
@@ -52,6 +52,8 @@ import { UsersService } from '../../users/users.service';
 import { SearchService } from '../../search/search.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
+import { ExportService } from '../../common/export';
 import { AssetHistoryService } from '../../asset-history/asset-history.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigger.service';
@@ -64,6 +66,7 @@ import { AiToolDispatcher } from '../core/tool-dispatcher';
 import { AiToolExecutor } from '../core/tool-executor';
 import { bind, type AiExecutionContext } from '../core/tool-descriptor';
 import { AI_TOOLSETS, AiToolRegistry } from '../core/tool-registry';
+import { untrustedRefsOf } from '../runtime/agent-loop';
 import { usersToolset } from './users.tools';
 
 /**
@@ -280,6 +283,10 @@ const prisma = {
     findFirst: jest.fn((args: FindArgs) =>
       Promise.resolve(liveRows(args)[0] ? { ...liveRows(args)[0] } : null),
     ),
+    findUnique: jest.fn(({ where }: { where: { id: string } }) => {
+      const row = users.get(where.id);
+      return Promise.resolve(row ? { ...row } : null);
+    }),
     findMany: jest.fn((args: FindArgs) => {
       const rows = sorted(liveRows(args), args.orderBy);
       const skip = args.skip ?? 0;
@@ -447,6 +454,13 @@ const prisma = {
       return Promise.resolve(data);
     }),
   },
+  // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
+  $executeRaw: jest.fn().mockResolvedValue(0),
+  // The SEC-088 row lock re-reads the target's role.
+  $queryRaw: jest.fn((_sql: TemplateStringsArray, id: string) => {
+    const row = users.get(id);
+    return Promise.resolve(row ? [{ role: row.role }] : []);
+  }),
   /** Array form (reads) or an interactive transaction: all or nothing over the in-memory tables. */
   $transaction: jest.fn(async (arg: unknown): Promise<unknown> => {
     if (Array.isArray(arg)) return Promise.all(arg);
@@ -496,14 +510,6 @@ const grants = {
   findAll: jest.fn(({ userId }: { userId: string }) =>
     Promise.resolve(GRANTS[userId] ?? []),
   ),
-};
-const idp = {
-  kind: 'local',
-  supportsManagement: false,
-  createUser: jest.fn(),
-  deactivateUser: jest.fn().mockResolvedValue(undefined),
-  grantRole: jest.fn().mockResolvedValue(undefined),
-  updateUser: jest.fn().mockResolvedValue(undefined),
 };
 
 // ─── Actors and contexts ───────────────────────────────────────────────────────────────────────────
@@ -728,11 +734,12 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: AccessGrantsService, useValue: grants },
+        { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ApplicationsService, useValue: applications },
         { provide: ArticlesService, useValue: {} },
         { provide: AssetHistoryService, useValue: { record: jest.fn() } },
         { provide: WorkflowTriggerService, useValue: {} },
-        { provide: IDENTITY_PROVIDER, useValue: idp },
         { provide: LocalProvisioningService, useValue: {} },
         { provide: PasswordLifecycleService, useValue: {} },
         {
@@ -920,8 +927,51 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
       expect(result).toMatchObject({
         ok: true,
-        data: { total: 1, items: [{ id: ID.member, username: 'aops' }] },
+        data: {
+          total: 1,
+          items: [
+            {
+              id: ID.member,
+              username: '<untrusted_content>aops</untrusted_content>',
+            },
+          ],
+        },
       });
+    });
+
+    it('AUD-003: self-editable identity strings are wrapped, so a turn that lists users is marked untrusted', async () => {
+      // The attack: anyone may rename themselves through PATCH /users/me.
+      users.set(ID.member, {
+        ...users.get(ID.member)!,
+        lastName: INJECTION,
+      });
+      const result = await tools.invoke(
+        'user_search',
+        { role: 'MEMBER' },
+        chat(ADMIN),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          items: [
+            {
+              id: ID.member,
+              email: 'ana@example.com',
+              firstName: '<untrusted_content>Ana</untrusted_content>',
+              lastName: `<untrusted_content>${INJECTION}</untrusted_content>`,
+              username: '<untrusted_content>aops</untrusted_content>',
+              legajo: '<untrusted_content>L-100</untrusted_content>',
+              manager: {
+                type: 'external',
+                name: '<untrusted_content>Head of IT</untrusted_content>',
+              },
+            },
+          ],
+        },
+      });
+      expect(untrustedRefsOf(result, 'user_search')).toEqual([
+        aiToolResultSourceRef('user_search'),
+      ]);
     });
 
     it('isActive filters activation in ONE call, with the same rows as GET /users?isActive= (#1375)', async () => {
@@ -1114,7 +1164,10 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       const data = (result as { data: Record<string, Record<string, unknown>> })
         .data;
       expect(data.user).toMatchObject({
-        manager: { type: 'external', name: 'Head of IT' },
+        manager: {
+          type: 'external',
+          name: '<untrusted_content>Head of IT</untrusted_content>',
+        },
         createdAt: T0.toISOString(),
       });
       expect(data.assignments.items).toEqual([
@@ -1129,7 +1182,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       expect(data.accessGrants.items).toEqual([
         expect.objectContaining({
           id: 'ckgrant00000000000000001',
-          accessLevel: 'admin',
+          accessLevel: '<untrusted_content>admin</untrusted_content>',
         }),
       ]);
       const dir = await tools.invoke(
@@ -1256,7 +1309,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           type: 'user',
           id: ID.member,
           op: 'updated',
-          label: 'Ana Ops <ana@example.com>',
+          label:
+            '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
         },
         changes: [{ field: 'role', before: 'MEMBER', after: 'VIEWER' }],
         precondition: {
@@ -1264,10 +1318,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           updatedAt: T0.toISOString(),
         },
       });
-      // IdP-linked account: the role is mirrored to the identity provider.
-      expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'ROLE_CHANGE'].sort(),
-      );
+      // Nothing is written to the identity provider (ADR-0102), even for an IdP-linked account.
+      expect(preview.warnings).toEqual(['ROLE_CHANGE']);
 
       // Without the password step-up the action stays pending.
       await expect(tools.approve(action.id, chat(ADMIN))).rejects.toMatchObject(
@@ -1291,7 +1343,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       });
       expect(users.get(ID.member)!.role).toBe('VIEWER');
-      expect(idp.grantRole).toHaveBeenCalledWith('zitadel-sub-ana', 'VIEWER');
       expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
       expect(ledger.find((e) => e.event === 'APPROVED')).toMatchObject({
         approverUserId: ID.admin,
@@ -1311,7 +1362,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         stepUpVerified: true,
       });
       expect(replay).toMatchObject({ status: 'SUCCEEDED', replayed: true });
-      expect(idp.grantRole).toHaveBeenCalledTimes(1);
       expect(history).toHaveLength(1);
     });
 
@@ -1338,12 +1388,13 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         { field: 'isActive', before: true, after: false, valueKind: 'boolean' },
         {
           field: 'manager',
-          before: 'Head of IT',
-          after: 'Admin User <admin@example.com>',
+          before: '<untrusted_content>Head of IT</untrusted_content>',
+          after:
+            '<untrusted_content>Admin User</untrusted_content> <admin@example.com>',
         },
       ]);
       expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
+        ['IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
       );
       // A manager bundled with an identity field still needs the password.
       expect(preview.stepUpRequired).toBe(true);
@@ -1506,8 +1557,9 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       expect(moved.action.preview!.changes).toEqual([
         {
           field: 'manager',
-          before: 'Admin User',
-          after: 'Viewer User <viewer@example.com>',
+          before: '<untrusted_content>Admin User</untrusted_content>',
+          after:
+            '<untrusted_content>Viewer User</untrusted_content> <viewer@example.com>',
         },
       ]);
     });
@@ -1595,6 +1647,36 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           verb: 'patch',
           url: `/users/${ID.admin}`,
           shape: { body: { role: 'MEMBER' } },
+        }),
+      ).toBe(403);
+    });
+
+    it('a MEMBER delegated user:manage cannot promote to ADMIN through the tool (403), exactly like HTTP (SEC-088)', async () => {
+      roleMatrix = {
+        ...DEFAULT_ROLE_PERMISSIONS,
+        MEMBER: [...DEFAULT_ROLE_PERMISSIONS.MEMBER, 'user:manage'],
+      };
+      resolver.invalidate();
+      const proposal = await tools.propose(
+        'user_update',
+        { user: ID.viewer, role: 'ADMIN' },
+        chat(MEMBER),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      const approved = await tools.approve(proposal.action.id, chat(MEMBER), {
+        stepUpVerified: true,
+      });
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { status: 403 } },
+      });
+      expect(users.get(ID.viewer)!.role).toBe('VIEWER');
+      expect(
+        await viaNetwork(MEMBER, {
+          method: 'update',
+          verb: 'patch',
+          url: `/users/${ID.viewer}`,
+          shape: { body: { role: 'ADMIN' } },
         }),
       ).toBe(403);
     });
@@ -1851,7 +1933,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         'SOFT_DELETE',
         'CASCADE_RELEASES_ASSIGNMENTS',
         'CASCADE_REVOKES_GRANTS',
-        'EXTERNAL_DEPROVISIONING',
         'IRREVERSIBLE',
       ]);
       expect(preview.changes).toContainEqual({
@@ -1887,7 +1968,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
       expect(JSON.stringify(approved.result)).not.toContain('Prod DB root');
       expect(users.get(ID.member)!.deletedAt).toBeInstanceOf(Date);
-      expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-sub-ana');
       expect(history).toEqual([
         expect.objectContaining({
           eventType: 'DELETED',

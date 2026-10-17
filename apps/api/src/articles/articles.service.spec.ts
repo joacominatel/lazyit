@@ -96,6 +96,7 @@ type ArticleLinkMock = {
 type ArticleWikiLinkMock = {
   deleteMany: jest.Mock;
   createMany: jest.Mock;
+  updateMany: jest.Mock;
   findMany: jest.Mock;
 };
 // ArticleAlias (ADR-0059 §2): current-state join — create / delete / findFirst / findMany.
@@ -113,10 +114,11 @@ describe('ArticlesService', () => {
   let articleLink: ArticleLinkMock;
   let articleWikiLink: ArticleWikiLinkMock;
   let articleAlias: ArticleAliasMock;
-  let articleCategory: { findFirst: jest.Mock };
+  let articleCategory: { findFirst: jest.Mock; findMany: jest.Mock };
   let asset: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
   let prisma: { $transaction: jest.Mock };
+  let queryRaw: jest.Mock;
   // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: ActorService;
@@ -169,6 +171,7 @@ describe('ArticlesService', () => {
     articleWikiLink = {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([]),
     };
     articleAlias = {
@@ -187,13 +190,23 @@ describe('ArticlesService', () => {
     //   - interactive callback form (create/update/publish/unpublish/import): invoke the callback
     //     with a `tx` exposing the same model mocks, so the snapshot write hits articleVersion and
     //     the wiki-link rebuild hits articleWikiLink (ADR-0059 §3).
-    const tx = { article, articleVersion, articleLink, articleWikiLink };
+    // `$queryRaw` is the folder row lock (AUD-023); `articleCategory` is the re-check under it.
+    queryRaw = jest.fn().mockResolvedValue([]);
+    const tx = {
+      article,
+      articleVersion,
+      articleLink,
+      articleWikiLink,
+      $queryRaw: queryRaw,
+      get articleCategory() {
+        return articleCategory;
+      },
+    };
     prisma = {
       $transaction: jest.fn(
         (
           arg:
-            | Array<Promise<unknown>>
-            | ((client: typeof tx) => Promise<unknown>),
+            Array<Promise<unknown>> | ((client: typeof tx) => Promise<unknown>),
         ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
       ),
     };
@@ -201,7 +214,11 @@ describe('ArticlesService', () => {
     // used. Reads delegate to resolve(user) for draft visibility; writes read principal.user.id directly.
     actor = new ActorService();
     // Category / asset / application exist by default; overridden per-test.
-    articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
+    // `findMany` backs the `includeSubfolders` live-tree load (#1539); empty unless a test wires a tree.
+    articleCategory = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'c1' }),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
     asset = { findFirst: jest.fn().mockResolvedValue({ id: 'as1' }) };
     application = { findFirst: jest.fn().mockResolvedValue({ id: 'app1' }) };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
@@ -693,7 +710,8 @@ describe('ArticlesService', () => {
       )[0][0].where;
       expect(fm.take).toBe(5);
       expect(fm.skip).toBe(10);
-      expect(fm.orderBy).toEqual({ updatedAt: 'desc' });
+      // The default order (no `sort`) is newest-updated first, with the unique `id` tiebreak (#1539).
+      expect(fm.orderBy).toEqual([{ updatedAt: 'desc' }, { id: 'asc' }]);
       // count's where is identical to the page's where (so total can't drift from the page).
       expect(countWhere).toEqual(fm.where);
       // The Page<T> envelope — `_count` flattened to `linkCount`.
@@ -703,6 +721,198 @@ describe('ArticlesService', () => {
         limit: 5,
         offset: 10,
       });
+    });
+  });
+
+  describe('findPage sort (#1539)', () => {
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+    const orderBy = (): unknown =>
+      (article.findMany.mock.calls as Array<[{ orderBy: unknown }]>)[0][0]
+        .orderBy;
+    const countArgs = (): Record<string, unknown> =>
+      (article.count.mock.calls as Array<[Record<string, unknown>]>)[0][0];
+
+    it.each([
+      [undefined, [{ updatedAt: 'desc' }, { id: 'asc' }]],
+      ['updated', [{ updatedAt: 'desc' }, { id: 'asc' }]],
+      ['title', [{ title: 'asc' }, { id: 'asc' }]],
+      ['created', [{ createdAt: 'desc' }, { id: 'asc' }]],
+    ] as const)(
+      'sort=%p orders by %j, always ending with the unique id tiebreak',
+      async (sort, expected) => {
+        await service.findPage({ sort }, PAGE, undefined);
+        expect(orderBy()).toEqual(expected);
+      },
+    );
+
+    it('leaves the count unordered and on the same where as the page', async () => {
+      await service.findPage({ sort: 'title' }, PAGE, undefined);
+      expect(countArgs()).not.toHaveProperty('orderBy');
+      expect(countArgs().where).toEqual(listWhere());
+    });
+  });
+
+  describe('findPage includeSubfolders (#1539)', () => {
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+    // The `categoryId IN` filter clauses in the list where (the folder-access pin is a separate clause).
+    const categoryClauses = (): unknown[] =>
+      listWhere().AND.filter((c) => 'categoryId' in c);
+    // root ─┬─ child ── grandchild
+    //       └─ sibling
+    // other (a separate root)
+    const TREE = [
+      { id: 'root', parentId: null },
+      { id: 'child', parentId: 'root' },
+      { id: 'grandchild', parentId: 'child' },
+      { id: 'sibling', parentId: 'root' },
+      { id: 'other', parentId: null },
+    ];
+
+    it('widens each selected folder to itself plus every nested live descendant', async () => {
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['root', 'child', 'sibling', 'grandchild'] } },
+      ]);
+    });
+
+    it('loads the live folder tree in ONE query (id + parentId, deletedAt null)', async () => {
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['child', 'other'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+      expect(articleCategory.findMany).toHaveBeenCalledWith({
+        where: { deletedAt: null },
+        select: { id: true, parentId: true },
+      });
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['child', 'other', 'grandchild'] } },
+      ]);
+    });
+
+    it('excludes a soft-deleted descendant (and what is filed under it)', async () => {
+      // `child` is soft-deleted, so the live-only query does not return it: neither it nor its
+      // `grandchild` is reached from `root`.
+      articleCategory.findMany.mockResolvedValueOnce(
+        TREE.filter((f) => f.id !== 'child'),
+      );
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['root', 'sibling'] } },
+      ]);
+    });
+
+    it('keeps the folder-access pin ANDed on top, so an unreadable descendant stays out', async () => {
+      // The caller may read `root` and `sibling`, not `child`/`grandchild`. The widened filter names
+      // them, but the separate `categoryId IN <visible>` clause still excludes them.
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(
+        new Set(['root', 'sibling', 'other']),
+      );
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      const clauses = categoryClauses();
+      expect(clauses).toContainEqual({
+        categoryId: { in: ['root', 'sibling', 'other'] },
+      });
+      expect(clauses).toContainEqual({
+        categoryId: { in: ['root', 'child', 'sibling', 'grandchild'] },
+      });
+      // Both apply (AND), and the count shares the very same where.
+      const countWhere = (
+        article.count.mock.calls as Array<[{ where: unknown }]>
+      )[0][0].where;
+      expect(countWhere).toEqual(listWhere());
+    });
+
+    it('is cycle-safe over a corrupt parentId loop', async () => {
+      articleCategory.findMany.mockResolvedValueOnce([
+        { id: 'x', parentId: 'z' },
+        { id: 'y', parentId: 'x' },
+        { id: 'z', parentId: 'y' },
+      ]);
+      await service.findPage(
+        { categoryId: ['x'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['x', 'y', 'z'] } },
+      ]);
+    });
+
+    it('is a no-op without a categoryId filter — no tree query, no categoryId clause', async () => {
+      await service.findPage({ includeSubfolders: true }, PAGE, undefined);
+      expect(articleCategory.findMany).not.toHaveBeenCalled();
+      expect(categoryClauses()).toEqual([]);
+    });
+
+    it('without includeSubfolders, categoryId matches only the selected folders (no tree query)', async () => {
+      await service.findPage({ categoryId: ['root'] }, PAGE, undefined);
+      expect(articleCategory.findMany).not.toHaveBeenCalled();
+      expect(categoryClauses()).toEqual([{ categoryId: { in: ['root'] } }]);
+    });
+  });
+
+  describe('findPage archived slice (#1647)', () => {
+    type ListCall = {
+      where: Record<string, unknown> & { AND: Array<Record<string, unknown>> };
+      includeSoftDeleted?: boolean;
+    };
+    const findManyArgs = (): ListCall =>
+      (article.findMany.mock.calls as Array<[ListCall]>)[0][0];
+    const countArgs = (): ListCall =>
+      (article.count.mock.calls as Array<[ListCall]>)[0][0];
+
+    it('lists live articles by default, without the soft-delete escape hatch', async () => {
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+        undefined,
+      );
+      expect(findManyArgs().where.deletedAt).toBeNull();
+      expect(findManyArgs()).not.toHaveProperty('includeSoftDeleted');
+      expect(countArgs()).not.toHaveProperty('includeSoftDeleted');
+    });
+
+    it('deleted=only lists archived rows on page and count alike, past the read filter', async () => {
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'only' },
+        undefined,
+      );
+      expect(findManyArgs().where.deletedAt).toEqual({ not: null });
+      expect(findManyArgs().includeSoftDeleted).toBe(true);
+      expect(countArgs().includeSoftDeleted).toBe(true);
+      expect(countArgs().where).toEqual(findManyArgs().where);
+    });
+
+    it("keeps the folder pin and the draft rule on the archived slice: another author's archived draft stays out", async () => {
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(new Set(['c1']));
+      await service.findPage(
+        { q: 'vpn' },
+        { limit: 50, offset: 0, deleted: 'only' },
+        AUTHOR_USER as never,
+      );
+      const and = findManyArgs().where.AND;
+      expect(and[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
+      });
+      expect(and).toContainEqual({ categoryId: { in: ['c1'] } });
     });
   });
 
@@ -796,6 +1006,102 @@ describe('ArticlesService', () => {
       await expect(
         service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
       ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    // --- AUD-086: the direct reads (id and slug) honour the #877 manager exemption ---
+
+    const FOREIGN_DRAFT = {
+      id: 'a',
+      status: 'DRAFT',
+      authorId: AUTHOR,
+      categoryId: 'shared-folder',
+    };
+    const MANAGER_USER = { id: MANAGER_ID } as never;
+
+    it("lets an article:manage holder read another author's DRAFT by id", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'article:manage',
+      ]);
+    });
+
+    it("lets an ADMIN read another author's DRAFT by id", async () => {
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', { id: ADMIN_ID } as never, ADMIN_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it("lets an article:manage holder read another author's DRAFT by slug", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it("still hides another author's DRAFT by slug from a non-manager (404)", async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("still hides a manager's foreign DRAFT by slug in a folder they cannot read (404)", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("still hides another author's DRAFT from a non-manager (404)", async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("still hides a manager's foreign DRAFT in a folder they cannot read (404)", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("keeps another author's DRAFT out of a manager's list", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' as const },
+        MANAGER_USER,
+        MANAGER_PRINCIPAL,
+      );
+      expect(listWhere().AND[0]).toEqual({
+        OR: [
+          { status: 'PUBLISHED' },
+          { status: 'DRAFT', authorId: MANAGER_ID },
+        ],
+      });
     });
   });
 
@@ -907,6 +1213,73 @@ describe('ArticlesService', () => {
   // (ADR-0060 §1), so `PATCH /articles/:id` with a `categoryId` is an AUTHORIZATION write. Moving
   // INTO a folder the actor cannot read is refused; moving OUT of a restricted folder into a more
   // permissive one stays allowed by decision (the widening is confirmed in the UI, not blocked).
+  describe('a folder deleted mid-write cannot take the article (AUD-023)', () => {
+    // The pre-transaction check passes; the folder is soft-deleted before the transaction locks it.
+    const deletedBeforeLock = () =>
+      articleCategory.findFirst
+        .mockResolvedValueOnce({ id: 'c1' })
+        .mockResolvedValueOnce(null);
+
+    it('create locks the folder FOR SHARE and re-checks it is live inside the transaction', async () => {
+      await service.create(
+        { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+        AUTHOR_PRINCIPAL,
+      );
+      const [sql, id] = queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        string,
+      ];
+      expect(sql.join('?')).toMatch(/FOR SHARE/);
+      expect(id).toBe('c1');
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        article.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create is refused with the usual 400 when the folder is gone under the lock', async () => {
+      deletedBeforeLock();
+      await expect(
+        service.create(
+          { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+          AUTHOR_PRINCIPAL,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.create).not.toHaveBeenCalled();
+    });
+
+    it('a move is refused with the usual 400 when the destination is gone under the lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      deletedBeforeLock();
+      await expect(
+        service.update('a', { categoryId: 'dest' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.update).not.toHaveBeenCalled();
+      expect(queryRaw.mock.calls[0]).toContain('dest');
+    });
+
+    it('an edit that does not move the article takes no folder lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      await service.update('a', { title: 'New' }, AUTHOR_PRINCIPAL);
+      expect(queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
   describe('article move — folder destination guard (ADR-0060 §9, #1296)', () => {
     const inFolder = (categoryId: string, authorId = AUTHOR) => ({
       id: 'a',
@@ -1506,6 +1879,31 @@ describe('ArticlesService', () => {
       });
     });
 
+    it('clears the live excerpt when the restored version had none (AUD-047)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        title: 'New title',
+        content: 'new body',
+        excerpt: 'internal note, see ticket 123',
+      });
+      articleVersion.findFirst.mockResolvedValueOnce({
+        id: 5,
+        articleId: 'a',
+        version: 1,
+        title: 'Old title',
+        content: 'old body',
+        excerpt: null,
+        status: 'PUBLISHED',
+      });
+
+      await service.restoreVersion('a', 1, AUTHOR_PRINCIPAL);
+
+      expect(lastUpdate()).toMatchObject({ excerpt: null });
+      expect(lastVersion()).toMatchObject({ excerpt: null });
+    });
+
     it('404s when the requested version does not exist (and writes nothing)', async () => {
       article.findFirst.mockResolvedValue({
         id: 'a',
@@ -1920,6 +2318,88 @@ describe('ArticlesService', () => {
   });
 
   // --- wiki-links: rebuild on save (ADR-0059 §3) ---------------------------
+
+  describe('forward [[slug]] references resolve when the slug appears (AUD-101)', () => {
+    // Links follow the slug: an edge still cached on a soft-deleted holder is taken over too.
+    const resolvesTo = (slug: string, id: string) =>
+      expect(articleWikiLink.updateMany).toHaveBeenCalledWith({
+        where: {
+          targetSlug: slug,
+          OR: [
+            { resolvedTargetId: null },
+            { resolvedTarget: { is: { deletedAt: { not: null } } } },
+          ],
+        },
+        data: { resolvedTargetId: id },
+      });
+
+    it('on create', async () => {
+      await service.create(
+        {
+          title: 'VPN setup',
+          content: 'body',
+          categoryId: 'c1',
+          status: 'PUBLISHED',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      resolvesTo('vpn-setup', 'art1');
+    });
+
+    it('on a soft-delete restore', async () => {
+      article.findFirst.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        deletedAt: new Date(),
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        status: 'PUBLISHED',
+        deletedAt: null,
+      });
+      await service.restore('a', AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+
+    it('on a slug change, and not on an edit that keeps the slug', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        slug: 'vpn',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        categoryId: 'c1',
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn',
+        title: 'VPN guide',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { title: 'VPN guide' }, AUTHOR_PRINCIPAL);
+      expect(articleWikiLink.updateMany).not.toHaveBeenCalled();
+
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { slug: 'vpn-setup' }, AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+  });
 
   describe('wiki-link rebuild on save', () => {
     // The data passed to the last articleWikiLink.createMany.

@@ -8,7 +8,7 @@ subcategory: troubleshooting
 # Troubleshooting Access Automation
 
 When automation does not do what you expect, the run timeline almost always tells you why. Start
-there: open the application's **Workflows** tab, find the run (or look at the grant's chip —
+there: open the application's **Automation** tab, find the run (or look at the grant's chip —
 **Needs attention** means a run failed), and read its [timeline](/help/access-automation-testing-observability).
 
 > Whatever goes wrong with a workflow, **the access grant is safe.** A failed run never rolls back or
@@ -49,6 +49,20 @@ failure** enabled, lazyit retries it automatically with backoff. If it exhausted
 wait for the external system, then **Retry** the failed run to resume the same run from the failed
 step.
 
+## A step failed because the credential is unavailable
+
+If the timeline says the connection's credential is **unavailable**, the credential attached to the
+connection was revoked or can no longer be decrypted (for example, after the instance's encryption key
+changed). The step fails without retrying, and **Test connection** reports a failed check instead of an
+error. **Replace** the credential on the connection, **Test connection**, then **Retry** the failed run.
+
+## A step failed with an invalid path
+
+A REST step whose **Path** renders a `.` or `..` segment fails before anything is sent, and is not
+retried: such a segment would leave the connection's base address. This usually means a mapped value
+(a username, say) was `.` or `..`. The dry-run shows the same problem as a warning. Fix the data or
+the step's **Path**, then **Replay with latest**.
+
 ## A run is stuck "Waiting (manual)"
 
 The run paused for a person — either a **Human task** step or an **Escalated failure**. It will stay
@@ -58,11 +72,19 @@ confirm you have **`workflow:task`** and are an allowed assignee — see
 [Manual tasks](/help/access-automation-manual-tasks) and
 [Permissions](/help/access-automation-permissions).
 
+If you choose **Fail run** on an escalated task, you can later **Retry** the run from the step that
+failed.
+
 ## "Replay with latest" was refused
 
 If replay is refused because the run already provisioned a non-reversible step, a fresh run would
 create that thing a second time. Don't force it — **re-grant the access** instead, which starts a
 clean new run from the beginning.
+
+**Retry** and **Replay with latest** are also refused when another run for the same access is already
+running, waiting, or has succeeded — open that run instead; running a second one would create the
+account twice. They are refused too when the access was revoked or the person offboarded — re-grant to
+provision again.
 
 ## A credential isn't working and you can't see its value
 

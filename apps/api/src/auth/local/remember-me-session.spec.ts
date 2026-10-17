@@ -22,6 +22,7 @@ import { LocalCredentialService } from './local-credential.service';
 import { LocalProvisioningService } from './local-provisioning.service';
 import { LoginService } from './login.service';
 import { PasswordLifecycleService } from './password-lifecycle.service';
+import { PermissionResolverService } from '../permission-resolver.service';
 import { UsersService } from '../../users/users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchService } from '../../search/search.service';
@@ -30,7 +31,6 @@ import { AssetHistoryService } from '../../asset-history/asset-history.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigger.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
-import { IDENTITY_PROVIDER } from '../identity/identity-provider.interface';
 import { DirectoryReconcileService } from '../../directory/directory-reconcile.service';
 import { inMemoryUserSessions } from './user-session-table.harness-spec';
 import type { DirectoryConnectionService } from '../../directory/directory-connection.service';
@@ -188,6 +188,8 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         },
       ),
       count: jest.fn().mockResolvedValue(1),
+      // The acting ADMIN_ID's role, read by the role ceiling (SEC-088).
+      findUnique: jest.fn().mockResolvedValue({ role: 'ADMIN' }),
       // Only the directory reconcile lists users here: it loads the live 'ad'-sourced cohort.
       findMany: jest.fn(({ where }: { where: Where }) =>
         Promise.resolve(
@@ -210,6 +212,10 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       secretAuditLog: { createMany: jest.fn() },
+      // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      // The SEC-088 row lock re-reads the subject's role.
+      $queryRaw: jest.fn(() => Promise.resolve([{ role: row.role }])),
     };
     prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) =>
       Promise.resolve(fn(prisma)),
@@ -242,14 +248,11 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         { provide: WorkflowTriggerService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
         {
-          provide: IDENTITY_PROVIDER,
-          useValue: { kind: 'local', supportsManagement: false },
-        },
-        {
           provide: LocalProvisioningService,
           useValue: new LocalProvisioningService(credentials),
         },
         { provide: PasswordLifecycleService, useValue: passwords },
+        { provide: PermissionResolverService, useValue: {} },
         {
           provide: getLoggerToken(UsersService.name),
           useValue: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },

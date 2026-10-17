@@ -13,6 +13,7 @@ import {
   type Role,
   RoleSchema,
   toManagerInput,
+  type User,
 } from "@lazyit/shared";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -52,25 +53,33 @@ import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useCloneUser } from "@/lib/api/hooks/use-user-mutations";
 import {
+  useCurrentUser,
   useUserAssignments,
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
-import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { ManagerField } from "./manager-field";
+import { assignableRoles, notifyUserError } from "./role-ceiling";
+import {
+  DIRECTORY_PROFILE_FIELDS,
+  type DirectoryProfileValues,
+  directoryProfileValues,
+  newDirectoryProfile,
+} from "./user-form-payload";
 
 const FORM_ID = "clone-user-form";
-const ROLE_VALUES: Role[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 /** The source user the clone is templated from (only the fields the wizard needs). */
 export interface CloneSource {
   id: string;
   firstName: string;
   lastName: string;
+  directoryAttrs?: User["directoryAttrs"];
 }
 
 /** The new hire's profile inputs (a CreateUser-shaped form, manager as the XOR form value). */
-interface ProfileValues {
+interface ProfileValues extends DirectoryProfileValues {
   email: string;
   firstName: string;
   lastName: string;
@@ -84,6 +93,7 @@ function blankProfile(source: CloneSource): ProfileValues {
   return {
     // The clone NEVER pre-fills the source email/legajo/username (those are unique) — only the names,
     // as a convenience starting point the operator overwrites. Role defaults to least-privilege VIEWER.
+    // A clone usually joins the same team, so department and job title carry over too (#1646).
     email: "",
     firstName: source.firstName,
     lastName: source.lastName,
@@ -91,6 +101,7 @@ function blankProfile(source: CloneSource): ProfileValues {
     legajo: "",
     username: "",
     manager: { kind: "none" },
+    ...directoryProfileValues(source.directoryAttrs),
   };
 }
 
@@ -152,6 +163,9 @@ export function CloneUserWizard({
   source,
 }: CloneUserWizardProps) {
   const t = useTranslations("users.clone");
+  const tUsers = useTranslations("users");
+  const { data: me } = useCurrentUser();
+  const roleOptions = assignableRoles(me?.role);
   const { date } = useFormatters();
   const tf = useTranslations("users.form");
   const tc = useTranslations("common");
@@ -176,6 +190,9 @@ export function CloneUserWizard({
   // Per-field validation errors keyed by the CloneUserSchema profile path (e.g. "email").
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // SEC-088: a clone copies only what the caller could open by hand; the API skips the rest as permission_required.
+  const canCarryAssets = useCan("asset:write");
+  const canCarryGrants = useCan("accessGrant:grant");
   // The source's ACTIVE footprint to offer as checklists.
   const { data: assignments, isLoading: assignmentsLoading } =
     useUserAssignments(open ? source.id : undefined, true);
@@ -223,6 +240,7 @@ export function CloneUserWizard({
         ...(legajo !== "" ? { legajo } : {}),
         ...(username !== "" ? { username } : {}),
         manager,
+        ...newDirectoryProfile(profile),
       },
       cloneAssetAssignments: [...options.selectedAssignments],
       cloneAccessGrants: [...options.selectedGrants],
@@ -267,7 +285,7 @@ export function CloneUserWizard({
             }),
           );
         },
-        onError: (error) => notifyError(error, t("toast.error")),
+        onError: (error) => notifyUserError(error, t("toast.error"), tUsers),
       },
     );
   }
@@ -362,7 +380,7 @@ export function CloneUserWizard({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLE_VALUES.map((value) => (
+                    {roleOptions.map((value) => (
                       <SelectItem key={value} value={value}>
                         {t(`roleLabels.${value}`)}
                       </SelectItem>
@@ -401,6 +419,22 @@ export function CloneUserWizard({
                 {errors.username && <FieldError errors={[{ message: errors.username }]} />}
               </Field>
 
+              {DIRECTORY_PROFILE_FIELDS.map((name) => (
+                <Field key={name} data-invalid={Boolean(errors[name]) || undefined}>
+                  <FieldLabel htmlFor={`clone-${name}`}>{tf(name)}</FieldLabel>
+                  <Input
+                    id={`clone-${name}`}
+                    value={profile[name]}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, [name]: e.target.value }))
+                    }
+                    placeholder={tf(`${name}Placeholder`)}
+                    aria-invalid={Boolean(errors[name]) || undefined}
+                  />
+                  {errors[name] && <FieldError errors={[{ message: errors[name] }]} />}
+                </Field>
+              ))}
+
               <Field>
                 <FieldLabel htmlFor="clone-manager">
                   {tf("manager.label")}
@@ -418,69 +452,81 @@ export function CloneUserWizard({
               <p className="pt-2 text-sm font-medium text-foreground">
                 {t("sections.assets")}
               </p>
-              <ChecklistSection
-                loading={assignmentsLoading}
-                emptyText={t("assets.empty")}
-                loadingText={t("loading")}
-                items={activeAssignments.map((a) => ({
-                  id: a.id,
-                  label:
-                    assetNameById.get(a.assetId) ?? t("assets.assetFallback"),
-                  meta: t("assets.assignedOn", {
-                    date: date(a.assignedAt),
-                  }),
-                }))}
-                selected={options.selectedAssignments}
-                onToggle={toggleAssignment}
-                idPrefix="clone-assignment"
-              />
+              {canCarryAssets ? (
+                <ChecklistSection
+                  loading={assignmentsLoading}
+                  emptyText={t("assets.empty")}
+                  loadingText={t("loading")}
+                  items={activeAssignments.map((a) => ({
+                    id: a.id,
+                    label:
+                      assetNameById.get(a.assetId) ?? t("assets.assetFallback"),
+                    meta: t("assets.assignedOn", {
+                      date: date(a.assignedAt),
+                    }),
+                  }))}
+                  selected={options.selectedAssignments}
+                  onToggle={toggleAssignment}
+                  idPrefix="clone-assignment"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("assets.noPermission")}</p>
+              )}
 
               {/* — Access to carry over — */}
               <p className="pt-2 text-sm font-medium text-foreground">
                 {t("sections.access")}
               </p>
-              <ChecklistSection
-                loading={grantsLoading}
-                emptyText={t("access.empty")}
-                loadingText={t("loading")}
-                items={activeGrants.map((g) => ({
-                  id: g.id,
-                  label:
-                    appNameById.get(g.applicationId) ??
-                    t("access.applicationFallback"),
-                  meta: g.accessLevel ?? undefined,
-                }))}
-                selected={options.selectedGrants}
-                onToggle={toggleGrant}
-                idPrefix="clone-grant"
-              />
-
-              {/* — Engine toggle — */}
-              <Field orientation="horizontal" className="pt-2">
-                <FieldContent>
-                  <FieldLabel htmlFor="clone-fire">
-                    {t("fire.label")}
-                  </FieldLabel>
-                  <FieldDescription>{t("fire.help")}</FieldDescription>
-                </FieldContent>
-                <Switch
-                  id="clone-fire"
-                  checked={options.fireWorkflows}
-                  onCheckedChange={(value) =>
-                    dispatchOptions({ type: "fireWorkflowsChanged", value })
-                  }
+              {canCarryGrants ? (
+                <ChecklistSection
+                  loading={grantsLoading}
+                  emptyText={t("access.empty")}
+                  loadingText={t("loading")}
+                  items={activeGrants.map((g) => ({
+                    id: g.id,
+                    label:
+                      appNameById.get(g.applicationId) ??
+                      t("access.applicationFallback"),
+                    meta: g.accessLevel ?? undefined,
+                  }))}
+                  selected={options.selectedGrants}
+                  onToggle={toggleGrant}
+                  idPrefix="clone-grant"
                 />
-              </Field>
-
-              {options.fireWorkflows && grantCount > 0 && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
-                >
-                  <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" />
-                  <span>{t("fire.warning", { count: grantCount })}</span>
-                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("access.noPermission")}</p>
               )}
+
+              {/* — Engine toggle, only meaningful when grants can be carried over — */}
+              {canCarryGrants ? (
+                <>
+                  <Field orientation="horizontal" className="pt-2">
+                    <FieldContent>
+                      <FieldLabel htmlFor="clone-fire">
+                        {t("fire.label")}
+                      </FieldLabel>
+                      <FieldDescription>{t("fire.help")}</FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      id="clone-fire"
+                      checked={options.fireWorkflows}
+                      onCheckedChange={(value) =>
+                        dispatchOptions({ type: "fireWorkflowsChanged", value })
+                      }
+                    />
+                  </Field>
+
+                  {options.fireWorkflows && grantCount > 0 && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
+                    >
+                      <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" />
+                      <span>{t("fire.warning", { count: grantCount })}</span>
+                    </div>
+                  )}
+                </>
+              ) : null}
             </FieldGroup>
           </form>
         )}

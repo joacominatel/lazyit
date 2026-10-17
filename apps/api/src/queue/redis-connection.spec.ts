@@ -9,22 +9,16 @@ import {
   DEFAULT_REDIS_URL,
   isQueueUnavailableError,
   REDIS_MAX_BACKOFF_MS,
-  REDIS_MAX_RECONNECT_ATTEMPTS,
   redactRedisUrl,
   redisConnectionOptions,
   resolveRedisUrl,
-  type ConnectionLogger,
 } from './redis-connection';
 
 /** A single-string logger spy (typed args so `.mock.calls[i][0]` stays `string`, not `any`). */
 type LogSpy = jest.Mock<void, [string]>;
 
-/** A logger spy capturing each level. */
-function makeLogger(): ConnectionLogger & {
-  log: LogSpy;
-  warn: LogSpy;
-  error: LogSpy;
-} {
+/** A logger spy capturing each level (spy properties, so `expect(logger.error)` is not an unbound method). */
+function makeLogger(): { log: LogSpy; warn: LogSpy; error: LogSpy } {
   return {
     log: jest.fn<void, [string]>(),
     warn: jest.fn<void, [string]>(),
@@ -87,12 +81,11 @@ describe('redactRedisUrl (never log a secret)', () => {
   });
 });
 
-describe('buildRetryStrategy (bounded — never retry forever)', () => {
+describe('buildRetryStrategy (capped backoff, never gives up)', () => {
   it('caps the backoff at REDIS_MAX_BACKOFF_MS', () => {
     const strat = buildRetryStrategy();
     expect(strat(1)).toBeLessThanOrEqual(REDIS_MAX_BACKOFF_MS);
-    // A high (but still within-attempts) value saturates the cap.
-    expect(strat(REDIS_MAX_RECONNECT_ATTEMPTS)).toBe(REDIS_MAX_BACKOFF_MS);
+    expect(strat(20)).toBe(REDIS_MAX_BACKOFF_MS);
   });
 
   it('grows the backoff with the attempt count (before the cap)', () => {
@@ -101,21 +94,12 @@ describe('buildRetryStrategy (bounded — never retry forever)', () => {
     expect(strat(2)).toBe(200);
   });
 
-  it('returns null (stop reconnecting) once max attempts is exceeded', () => {
-    const strat = buildRetryStrategy({ maxAttempts: 3 });
-    expect(strat(3)).not.toBeNull();
-    expect(strat(4)).toBeNull();
-    expect(strat(99)).toBeNull();
-  });
-
-  it('calls onGiveUp exactly once when it gives up', () => {
-    const onGiveUp = jest.fn();
-    const strat = buildRetryStrategy({ maxAttempts: 2, onGiveUp });
-    strat(3);
-    strat(4);
-    strat(5);
-    expect(onGiveUp).toHaveBeenCalledTimes(1);
-    expect(onGiveUp).toHaveBeenCalledWith(2);
+  it('keeps returning a delay after a long outage, so ioredis never stops reconnecting (AUD-009)', () => {
+    const strat = buildRetryStrategy();
+    // ~1 minute (a routine Valkey restart) and ~1 day of attempts at the capped backoff.
+    for (const times of [21, 100, 30_000]) {
+      expect(strat(times)).toBe(REDIS_MAX_BACKOFF_MS);
+    }
   });
 });
 
@@ -164,10 +148,10 @@ describe('redisConnectionOptions (BullMQ interplay + fail-fast)', () => {
     expect(opts.enableOfflineQueue).toBe(false);
   });
 
-  it('installs a bounded retryStrategy function', () => {
+  it('installs a retryStrategy that never gives up', () => {
     expect(typeof opts.retryStrategy).toBe('function');
     const strat = opts.retryStrategy as (t: number) => number | null;
-    expect(strat(REDIS_MAX_RECONNECT_ATTEMPTS + 1)).toBeNull();
+    expect(strat(1_000)).toBe(REDIS_MAX_BACKOFF_MS);
   });
 });
 
@@ -264,6 +248,22 @@ describe('buildRedisConnection (boot logging + wiring)', () => {
 
     client.emit('end');
     expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs the first error of a later outage loudly again after a reconnect', () => {
+    const logger = makeLogger();
+    const client = fakeClient();
+    buildRedisConnection(
+      { REDIS_URL: 'redis://valkey:6379' },
+      logger,
+      () => client as unknown as IORedis,
+    );
+    client.emit('error', new Error('connect ECONNREFUSED'));
+    client.emit('ready');
+    client.emit('error', new Error('connect ECONNREFUSED'));
+
+    expect(logger.error).toHaveBeenCalledTimes(2);
+    expect(logger.error.mock.calls[1][0]).toContain('connection error');
   });
 });
 

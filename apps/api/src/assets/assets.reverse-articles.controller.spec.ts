@@ -14,6 +14,7 @@ import type { AssetsService } from './assets.service';
 import type { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import type { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ArticlesService } from '../articles/articles.service';
+import type { ExportService } from '../common/export';
 
 /**
  * Reverse KB lookup on the asset detail surface (`GET /assets/:id/articles`, #220): the endpoint is
@@ -34,6 +35,7 @@ describe('AssetsController GET /assets/:id/articles (paginated + filtered, #220)
     {} as unknown as AssetAssignmentsService,
     {} as unknown as AssetHistoryService,
     { findArticlesForAsset } as unknown as ArticlesService,
+    {} as unknown as ExportService,
   );
 
   beforeEach(() => {

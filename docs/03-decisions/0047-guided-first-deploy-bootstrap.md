@@ -3,7 +3,7 @@ title: "ADR-0047: Guided first-deploy bootstrap script (infra/start.sh)"
 tags: [adr, infra, deployment, secrets, dx]
 status: accepted
 created: 2026-06-02
-updated: 2026-09-26
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -12,6 +12,11 @@ deciders: [Joaquín Minatel]
 ## Status
 
 accepted
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the authentication question is two-way
+(built-in accounts or your own OIDC IdP). `start.sh` no longer generates `ZITADEL_MASTERKEY` or any other
+`ZITADEL_*` key, and it refuses to start when it finds bundled-Zitadel leftovers. The rest of this record
+still binds.
 
 ## Context
 

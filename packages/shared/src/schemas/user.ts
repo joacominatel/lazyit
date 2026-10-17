@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireAtLeastOneKey, ZitadelPasswordSchema } from "./primitives";
+import { PasswordPolicySchema, requireAtLeastOneKey } from "./primitives";
 
 /**
  * User — a person in the organization.
@@ -17,6 +17,13 @@ import { requireAtLeastOneKey, ZitadelPasswordSchema } from "./primitives";
  */
 export const RoleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 export type Role = z.infer<typeof RoleSchema>;
+
+const ROLE_RANK: Record<Role, number> = { VIEWER: 0, MEMBER: 1, ADMIN: 2 };
+
+/** SEC-088 role ceiling: `user:manage` grants and acts only at or below the caller's role (ADR-0040). */
+export function canManageRole(callerRole: Role, targetRole: Role): boolean {
+  return ROLE_RANK[targetRole] <= ROLE_RANK[callerRole];
+}
 
 /**
  * Where a user's role currently lives, for the auth epic (ADR-0043). Informational only — the API's
@@ -52,23 +59,25 @@ export const LegajoSchema = z.string().trim().min(1).max(100);
  */
 export const UsernameSchema = z.string().trim().toLowerCase().min(1).max(100);
 
+/** A free-text directory attribute such as a job title or department (ADR-0069 REDESIGN §3). */
+export const DirectoryAttributeSchema = z.string().trim().min(1).max(200);
+
 /**
  * The TEMPORARY-password policy for admin user-provisioning (ADR-0064, issue #411). It is the SHARED
- * {@link ZitadelPasswordSchema} (`schemas/primitives.ts`) — Zitadel's DEFAULT complexity policy (min 8,
- * max 70, upper + lower + digit + symbol) — the SAME single definition the first-run bootstrap wizard's
- * `SetupPasswordSchema` (`schemas/config.ts`) uses, so an admin-provisioned temp password is validated
- * identically to the bootstrap one and Zitadel never rejects it mid-mirror (which would leave a
- * half-provisioned, un-loggable user).
+ * {@link PasswordPolicySchema} (`schemas/primitives.ts`) — min 8, max 70, upper + lower + digit + symbol
+ * — the SAME single definition the first-run bootstrap wizard's `SetupPasswordSchema`
+ * (`schemas/config.ts`) uses, so an admin-provisioned temp password is validated identically to the
+ * bootstrap one.
  *
  * It is re-exported under this name (not imported from `config.ts`) ON PURPOSE: `config.ts` already
  * imports `EmailSchema` from THIS module (`config → user`), so importing back (`user → config`) would
  * close a module-import cycle. Both schemas instead share the leaf-module `primitives.ts` (it imports
  * only `zod`), so the rules can no longer DRIFT apart (issue #474) and the dependency graph stays acyclic.
  *
- * Like the bootstrap password, this is NEVER persisted to lazyit's DB, NEVER logged (ADR-0031/0064) and
- * NEVER echoed back in a response — it is set on the bundled Zitadel and handed off to the admin once.
+ * Like the bootstrap password, this is NEVER stored in plaintext, NEVER logged (ADR-0031/0064) and NEVER
+ * echoed back in a response — it is handed off to the admin once.
  */
-export const TempPasswordSchema = ZitadelPasswordSchema;
+export const TempPasswordSchema = PasswordPolicySchema;
 export type TempPassword = z.infer<typeof TempPasswordSchema>;
 
 /**
@@ -141,14 +150,14 @@ export const UserSchema = z.object({
   // present (null = no manager recorded); a soft-deleted linked manager surfaces isOffboarded=true.
   manager: ManagerDescriptorSchema.nullable(),
   // Directory-only person flag (ADR-0069 REDESIGN §3). TRUE = a User created by the bulk import for an
-  // asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role stays
+  // asset's "assigned to" that has NO login and NO IdP identity (externalId stays null, role stays
   // VIEWER). Flips to false when the person first signs in via OIDC and the verified-email claim links
   // this row (ADR-0038). Always present on the wire (server default false); a directory person shows a
   // "Directory" badge and can be filtered via `?directoryOnly` (CEO §0 #2).
   directoryOnly: z.boolean(),
-  // Free-form directory attributes for a directory-only person (jobTitle, department, phone, and any
-  // person sub-field with no native home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb,
-  // unvalidated per-field in this MVP); null/absent for normal accounts.
+  // Free-form directory attributes (jobTitle, department, phone, and any person sub-field with no native
+  // home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb, unvalidated per-field in this MVP).
+  // A manual create or edit writes `jobTitle` / `department` here too (#1646).
   directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional(),
   // AD/LDAP directory-source discriminator (ADR-0091): "ad" for a person the directory sync owns, null
   // otherwise. OPTIONAL on the wire (additive). Non-null means the directory owns the name, so
@@ -199,9 +208,8 @@ export const CreateUserSchema = z.strictObject({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   // RBAC role (ADR-0040; default flipped to VIEWER by ADR-0043). Optional; omitted → server default
-  // VIEWER (least-privilege read-only). Accepting it here is SAFE only because the Users controller is
-  // ADMIN-gated by the RolesGuard: a non-admin never reaches this endpoint, so they cannot set or
-  // escalate a role. Privilege management is an ADMIN-only operation.
+  // VIEWER (least-privilege read-only). `user:manage` can be delegated to MEMBER or VIEWER (ADR-0046),
+  // so the API refuses a role above the caller's own (403 ROLE_CEILING_EXCEEDED, see canManageRole).
   role: RoleSchema.optional(),
   // Employee/file number (ADR-0058). Optional + normalized (trim). Unique among LIVE rows (the partial
   // unique index); a duplicate among live users surfaces as a 409 via the PrismaExceptionFilter.
@@ -210,16 +218,16 @@ export const CreateUserSchema = z.strictObject({
   username: UsernameSchema.optional(),
   // The manager input union (or null). Omit for "no manager". Cross-field refined above.
   manager: ManagerInputSchema.nullable().optional(),
+  // Stored in `directoryAttrs` under the keys the importer uses (#1646).
+  jobTitle: DirectoryAttributeSchema.optional(),
+  department: DirectoryAttributeSchema.optional(),
   // The TEMPORARY password an admin may set when provisioning a user (ADR-0064, issue #411). OPTIONAL on
-  // the wire — omit it for the unchanged no-credential create. It is HONORED ONLY on the bundled-Zitadel
-  // MANAGEMENT path (`idp.supportsManagement`): the API sets it on the freshly-created Zitadel user with
-  // `changeRequired:true`, so Zitadel forces a password change at first login — it is a one-time hand-off
-  // secret, never a standing admin-known credential. Under BYOI / generic-OIDC the API REJECTS it with a
-  // 400 (the operator's own IdP owns the credential). It is NEVER persisted to lazyit's DB, NEVER logged
-  // (ADR-0031/0064) and NEVER echoed back in a response. Uses {@link TempPasswordSchema}, which mirrors
-  // the bootstrap wizard's `SetupPasswordSchema` discipline rule-for-rule (the same complexity Zitadel
-  // enforces) — distinct from the bootstrap carve-out, which sets `changeRequired:false` for the very
-  // first admin (this path is always `changeRequired:true`).
+  // the wire — omit it for the unchanged no-credential create. It is HONORED ONLY in local mode
+  // (ADR-0086): the API stores its hash with `mustChangePassword`, so the user must change it at first
+  // login — a one-time hand-off secret, never a standing admin-known credential. Under generic OIDC the
+  // API REJECTS it with a 400 (the operator's own IdP owns the credential). It is NEVER stored in
+  // plaintext, NEVER logged (ADR-0031/0064) and NEVER echoed back in a response. Uses
+  // {@link TempPasswordSchema}, the same policy as the bootstrap wizard's `SetupPasswordSchema`.
   password: TempPasswordSchema.optional(),
 });
 
@@ -253,8 +261,8 @@ export const CreateDirectoryPersonSchema = z
     // Directory/display handle (ADR-0058). Optional + normalized; live-unique. An identity key (CEO Q5).
     username: UsernameSchema.optional(),
     // Free-form directory attributes routed into `directoryAttrs` (jsonb) by the backend.
-    jobTitle: z.string().trim().min(1).max(200).optional(),
-    department: z.string().trim().min(1).max(200).optional(),
+    jobTitle: DirectoryAttributeSchema.optional(),
+    department: DirectoryAttributeSchema.optional(),
     // The supervisor's name, routed into `managerName` (free-text) by the backend — `managerId` only when
     // it matches a live non-directory User (REDESIGN §3.6 / §10 #9).
     supervisor: z.string().trim().min(1).max(200).optional(),
@@ -279,13 +287,9 @@ export const CreateDirectoryPersonSchema = z
  * changes a user's RBAC role.
  *
  * Admin user-control (issue #149): `firstName` / `lastName` / `email` are an ADMIN edit of the user's
- * profile, and they are NOT local-only — the API mirrors a name/email change back to the IdP (Zitadel
- * Management API) inside the same no-split-brain transactional + 503-compensation pattern as a role
- * change (ADR-0043 §3, INVARIANTS INV-5): if the Zitadel write fails the local row is reverted and the
- * request is 503. `email` is the account-linking key (citext, INV-2): the write-back updates the
- * EXISTING Zitadel user (same `sub`/`externalId`) and sets the new address pre-verified, so the change
- * never forces re-verification or breaks the account link. `externalId` is intentionally absent here —
- * the strictObject rejects it (SEC-006), so an admin can never re-point a row at a different identity.
+ * lazyit profile; nothing is written back to an IdP (ADR-0102). `email` is the account-linking key
+ * (citext, INV-2). `externalId` is intentionally absent here — the strictObject rejects it (SEC-006),
+ * so an admin can never re-point a row at a different identity.
  *
  * `legajo` / `username` / `manager` are the ADR-0058 additions: each optional, each cleared by sending
  * `null` (legajo/username) or `manager: null`; `manager` carries the same input union as create.
@@ -294,21 +298,21 @@ export const UpdateUserSchema = requireAtLeastOneKey(
   z
     .strictObject({
       // Normalized (trim + lowercase) so the stored value matches the citext column (ADR-0041).
-      // Mirrored back to the IdP on change (issue #149): the account-linking key, so the write-back
-      // updates the existing Zitadel user (same sub) pre-verified — never a re-link.
       email: EmailSchema,
-      // Mirrored back to the IdP profile (givenName / familyName) on change (issue #149).
       firstName: z.string().trim().min(1).max(100),
       lastName: z.string().trim().min(1).max(100),
       isActive: z.boolean(),
-      // RBAC role (ADR-0040). Same ADMIN-gated safety as CreateUserSchema: only an ADMIN can reach
-      // the Users controller, so a non-admin can never escalate their own (or anyone's) role.
+      // RBAC role (ADR-0040). Same ceiling as CreateUserSchema; nobody changes their own role, and a
+      // directory-only person's role never changes (INV-DIR-1).
       role: RoleSchema,
       // ADR-0058. `null` clears the value; a string is normalized + checked unique-among-live.
       legajo: LegajoSchema.nullable(),
       username: UsernameSchema.nullable(),
       // The manager input union, or `null` to clear. Cross-field refined (never both id + name).
       manager: ManagerInputSchema.nullable(),
+      // `null` clears. A change on a person the AD/LDAP sync owns is a 409 PROFILE_MANAGED_BY_DIRECTORY.
+      jobTitle: DirectoryAttributeSchema.nullable(),
+      department: DirectoryAttributeSchema.nullable(),
     })
     .partial(),
 );

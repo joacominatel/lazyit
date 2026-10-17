@@ -3,7 +3,7 @@ title: "ADR-0039: Auth.js v5 for frontend OIDC login"
 tags: [adr, auth, frontend, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-09-24
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -23,6 +23,9 @@ cannot be renewed (no refresh token, or the refresh failed) now **ends the sessi
 callback returns `null` — instead of riding to a client-side 401 (§10). In local mode the session cookie
 lives 400 days (the browser cap) so a "keep me signed in" session outlives it; OIDC keeps Auth.js's 30-day
 default.
+**Amended by [[0102-remove-bundled-zitadel]] (#1543, 2026-10-09):** there is no bundled Zitadel app any
+more, so §10's `offline_access` precondition applies to the operator's own IdP client. The flow is
+unchanged.
 
 ## Context
 

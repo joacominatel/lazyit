@@ -43,7 +43,7 @@ texto plano en *cursiva*.
 ### "Basado en contenido escrito por otras personas"
 
 Si el asistente leyó contenido de otras personas antes de proponer el cambio — un artículo, una nota,
-un fragmento de búsqueda, una página web — la tarjeta muestra un aviso amarillo **Basado en contenido
+el nombre de una persona, un fragmento de búsqueda, una página web — la tarjeta muestra un aviso amarillo **Basado en contenido
 escrito por otras personas**, con enlaces a lo que leyó cuando hay una sola página que enlazar. Ese
 contenido puede esconder instrucciones pensadas para engañar a una IA. **Verificá que el cambio sea
 realmente lo que pediste.**
@@ -177,8 +177,8 @@ Mientras está activa:
   - todo lo crítico — roles, identidad e inicio de sesión, accesos, credenciales, aplicaciones marcadas
     como críticas, cualquier *Cambio sensible*, todo lo que pide tu contraseña;
   - cualquier cambio propuesto **después de que el asistente leyó texto libre** — de otra persona o tuyo
-    — en el mismo turno: un artículo, una nota, una descripción, un fragmento de búsqueda, las opciones
-    que elegiste en uno de sus formularios;
+    — en el mismo turno: un artículo, una nota, una descripción, el nombre de una persona, un fragmento
+    de búsqueda, las opciones que elegiste en uno de sus formularios;
   - **todos los cambios de un chat en el que el asistente buscó en la web**, por el resto de ese chat;
   - **todos los cambios de compras** — una compra, sus líneas, un proveedor, recibir unidades, vincular
     activos, aplicar una licencia;
@@ -207,7 +207,8 @@ elemento — *"También afecta a 12 activos"*, con algunos nombrados. Si no pod�
 registros, **Usado por** dice *"No lo podés ver: …"* en vez de cero: el elemento puede seguir en
 uso. Si el número cambia antes de que apruebes, la tarjeta se actualiza como se explica en
 [Cuando la tarjeta cambia mientras decidís](#cuando-la-tarjeta-cambia-mientras-decidís). Las categorías
-archivadas se restauran desde **Configuración → Taxonomías**, no desde el chat.
+archivadas no se restauran desde el chat — mirá
+[Qué puedes gestionar](/help/configuration-taxonomies#qué-puedes-gestionar).
 
 ## Etiquetas de activos
 

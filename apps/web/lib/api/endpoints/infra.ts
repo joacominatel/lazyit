@@ -102,6 +102,23 @@ export interface InfraNodeListParams extends InfraNodeFilters {
   dir?: "asc" | "desc";
 }
 
+export const INFRA_NODE_EXPORT_PATH = `${BASE}/nodes/export`;
+
+/** The Servers page filters, never paging or sort; the CSV export sends exactly these. */
+export function infraNodeFilterParams(params: InfraNodeFilters = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.kind) qs.set("kind", params.kind);
+  if (params.status) qs.set("status", params.status);
+  if (params.state) qs.set("state", params.state);
+  if (params.source) qs.set("source", params.source);
+  if (params.role) qs.set("role", params.role);
+  if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
+  if (params.assetIds && params.assetIds.length > 0)
+    qs.set("assetIds", params.assetIds.join(","));
+  if (params.q) qs.set("q", params.q);
+  return qs;
+}
+
 /**
  * A page of topology nodes (`GET /infra/nodes/page`) — the house `{ items, total, limit, offset }`
  * envelope over the enriched `InfraNodeListItem` (the lean node PLUS the linked Asset's inventory
@@ -114,16 +131,7 @@ export async function getInfraNodes(
   params: InfraNodeListParams = {},
   signal?: AbortSignal,
 ): Promise<InfraNodeListPage> {
-  const qs = new URLSearchParams();
-  if (params.kind) qs.set("kind", params.kind);
-  if (params.status) qs.set("status", params.status);
-  if (params.state) qs.set("state", params.state);
-  if (params.source) qs.set("source", params.source);
-  if (params.role) qs.set("role", params.role);
-  if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
-  if (params.assetIds && params.assetIds.length > 0)
-    qs.set("assetIds", params.assetIds.join(","));
-  if (params.q) qs.set("q", params.q);
+  const qs = infraNodeFilterParams(params);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.sort) {

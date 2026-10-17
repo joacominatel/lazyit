@@ -1,12 +1,21 @@
 ---
 title: "Auth — Zitadel as source of truth (Option B): design dossier"
 tags: [architecture, auth, authz, oidc, rbac, idp, zitadel, security, devops, frontend]
-status: accepted
+status: superseded
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-10-09
 ---
 
 # Auth — Zitadel as the identity & authorization source of truth (design dossier)
+
+> [!warning] Superseded — historical design record
+> The bundled Zitadel was removed by [[0102-remove-bundled-zitadel]] (epic #1543). The Zitadel services,
+> the bootstrap sidecar, the Caddy `auth.` site, the Management-API write-back, `provision-account` and the
+> `IdentityProvider` seam described below no longer exist. lazyit runs local accounts by default or your
+> own OIDC IdP (BYOI), configured by environment variables, and never writes to the IdP. DB-first roles,
+> JIT provisioning and the `/setup` guards still hold. Current state: [[deployment]] (identity section),
+> [[authorization]], [[0086-local-authentication-mode]]. This note keeps its filename because it is widely
+> linked; read it as history.
 
 > **Decision of record:** [[0043-zitadel-source-of-truth]] (status: accepted — CEO approved all 7
 > forks 2026-06-01). This dossier is the

@@ -3,7 +3,7 @@ title: PurchaseOrderEvent
 tags: [domain, entity, purchases, audit]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-16
 ---
 
 # PurchaseOrderEvent
@@ -57,9 +57,9 @@ default ([[0006-soft-delete-and-auditing]]).
 | --- | --- | --- |
 | `CREATED` | create | `{ lineCount }` |
 | `STATUS_CHANGED` | header update that changes `status` | `{ from, to }` |
-| `UPDATED` | header update of any other field | `{ fields, changes: { field: { from, to } } }` — `notes` is recorded as `{ changed: true }` only |
+| `UPDATED` | header update of any other field; also a [[location]] delete with a resolution, on each open purchase delivering there (`deliveryLocationId`, AUD-024) | `{ fields, changes: { field: { from, to } } }` — `notes` is recorded as `{ changed: true }` only |
 | `LINE_ADDED` | add a line | `{ lineId, description, quantity, unitPrice }` |
-| `LINE_UPDATED` | update a line | `{ lineId, changes: { field: { from, to } } }` — prices and quantities before and after |
+| `LINE_UPDATED` | update a line; also an [[asset-model]] delete with a resolution, on each open line mapped to it (`assetModelId`, SEC-041) | `{ lineId, changes: { field: { from, to } } }` — prices and quantities before and after |
 | `LINE_REMOVED` | remove a line | `{ lineId, description }` |
 | `DELETED` / `RESTORED` | soft delete / restore (restore of a live purchase writes nothing) | — |
 | `UNITS_RECEIVED` | a receive against a line (#1473) — ONE row per receive, after the per-unit loop | `{ lineId, quantity, assetIds, failed, overReceived }` |

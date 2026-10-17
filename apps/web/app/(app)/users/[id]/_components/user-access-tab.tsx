@@ -4,6 +4,7 @@ import { Squares2X2Icon } from "@heroicons/react/24/outline";
 import type { AccessGrant } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { DetailPanel } from "@/components/detail-panel";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -24,17 +25,19 @@ export function UserAccessTab({
   active,
   appNameById,
   now,
+  actions,
 }: {
   active: AccessGrant[];
   appNameById: Map<string, string>;
   now: number;
+  actions?: ReactNode;
 }) {
   const t = useTranslations("users.detail.access");
   const { date } = useFormatters();
   const sorted = sortGrantsByUrgency(active, now);
 
   return (
-    <DetailPanel title={t("title")}>
+    <DetailPanel title={t("title")} actions={actions}>
       {sorted.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : (

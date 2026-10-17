@@ -3,7 +3,7 @@ title: ServiceAccount
 tags: [domain, entity, auth, authn, authz, service-accounts]
 status: accepted
 created: 2026-06-03
-updated: 2026-06-03
+updated: 2026-10-16
 ---
 
 # ServiceAccount
@@ -51,6 +51,16 @@ SAME frozen catalog humans use ([[service-account-permission]]) — never a `Rol
   a human ([[INVARIANTS]] INV-SA-2).
 - **Never a Role; never ADMIN-equivalent.** No `role` column, no role resolution, no wildcard — the
   permission set is exactly its grants ([[INVARIANTS]] INV-SA-3).
+- **Never more than its manager holds** (SEC-088, 2026-10-16). A write that issues or re-arms a token
+  must stay within the caller's own verbs, resolved DB-first from the caller's role: create (the set),
+  update (the verbs it adds; the whole set when it re-enables the account or extends its expiry), rotate,
+  restore and widening its AI access ([[ai-service-account-settings]]) (the current set). Update, rotate
+  and restore judge the grants read under a row lock (`FOR UPDATE`). Past it: **403** `PERMISSION_CEILING_EXCEEDED`, with the offending verbs
+  in `permissions`, and nothing is written. Narrowing writes (rename, removing verbs, disabling,
+  shortening the expiry, revoke) are never refused by it. ADMIN holds the full catalog, so only a
+  delegated `settings:manage` is affected ([[0048-service-accounts]]). `infra:report` is exempt: it only
+  reports inventory and no human role holds it, so a delegate still installs agents. `secret:fetch` stays
+  capped.
 - **Optional expiry + one-click rotate.** `expiresAt` is optional (no forced expiry in v1); `isActive`
   toggles it off without deleting; `POST /:id/rotate` mints a new secret (shown once) and invalidates
   the old.
@@ -93,7 +103,7 @@ except the once-only reveal ([[shared-package]]).
 ## Endpoints
 
 `apps/api/src/service-accounts/` (`ServiceAccountsModule`), all `@RequirePermission('settings:manage')`
-(ADMIN-only in the seed):
+(ADMIN-only in the seed; a delegated holder is capped at its own verbs, see *Business rules*):
 
 - `POST /service-accounts` — create → returns the token **once** (`ServiceAccountWithSecretSchema`).
 - `GET /service-accounts` — list (`?includeRevoked`).
@@ -122,7 +132,8 @@ unified principal to the right audit actor column.
 >   write a null-attributed row ([[INVARIANTS]] INV-SA-4).
 > - **[[service-account-audit-log]] has no SA actor column** — an SA that self-manages SAs records
 >   `actorId = null` (honest); adding an SA actor column there is a future ADR/migration.
-> - **Zitadel machine-user mirror deferred** — the IdP seam stays open; BYOI no-ops (a future ADR).
+> - **No IdP machine-user mirror** — the deferred Zitadel mirror will not be built and the IdP seam is
+>   retired ([[0102-remove-bundled-zitadel]] §6).
 
 Related: [[service-account-permission]] · [[service-account-audit-log]] · [[user]] · [[role-permission]] ·
 [[shared-package]] · [[0048-service-accounts]] · [[0046-roles-permissions-v2]] ·

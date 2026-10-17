@@ -15,8 +15,7 @@ import { UsersListView } from "./_components/users-list-view";
  * (filtered/paged/searched) user page so the client `UsersListView` hydrates with data already in
  * cache. The key is derived through the SAME pure code the client uses — `deriveListState` +
  * `deriveUserParams` (`./_components/users-list-query`) — so it's byte-identical to `useUserList(...)`'s
- * key and can't drift into a cache-miss double-fetch (#733). `status` is a client-side post-filter, so
- * it doesn't affect the key. The #600 401 handler stays on the client provider.
+ * key and can't drift into a cache-miss double-fetch (#733). The #600 401 handler stays on the client provider.
  */
 export default async function UsersPage({
   searchParams,

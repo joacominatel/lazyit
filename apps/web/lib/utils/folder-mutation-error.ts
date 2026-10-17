@@ -2,7 +2,7 @@ import { ApiError } from "@/lib/api/client";
 
 /**
  * The folder write endpoints (`POST /article-categories`, `PATCH /article-categories/:id`) reject
- * three specific situations, and each one deserves its own sentence in the UI rather than the
+ * a few specific situations, and each one deserves its own sentence in the UI rather than the
  * server's raw English message or a generic "couldn't save" toast (#1291):
  *
  *   - `cycle`         — 400, the move would make the folder its own ancestor (the DFS guard,
@@ -20,7 +20,12 @@ import { ApiError } from "@/lib/api/client";
  * 409 is the `PrismaExceptionFilter` mapping P2002 — the `(parentId, name) WHERE "deletedAt" IS
  * NULL` index. Status matching also survives the filter's message wording changing.
  */
-export type FolderMutationErrorKind = "cycle" | "deadParent" | "duplicateName";
+export type FolderMutationErrorKind =
+  | "cycle"
+  | "deadParent"
+  | "duplicateName"
+  // 403: moving a folder needs settings:manage (AUD-001), e.g. after the permission was revoked mid-session.
+  | "moveForbidden";
 
 /** Matches both 400 cycle messages: the self-parent short-circuit and the DFS walk's rejection. */
 const CYCLE_PATTERN = /cycle|its own parent/i;
@@ -37,6 +42,7 @@ export function folderMutationErrorKind(
 ): FolderMutationErrorKind | null {
   if (!(error instanceof ApiError)) return null;
   if (error.status === 409) return "duplicateName";
+  if (error.status === 403) return "moveForbidden";
   if (error.status !== 400) return null;
   if (CYCLE_PATTERN.test(error.message)) return "cycle";
   if (DEAD_PARENT_PATTERN.test(error.message)) return "deadParent";

@@ -40,6 +40,7 @@ import {
   readFileHead,
   sha256OfFile,
 } from './attachment-storage';
+import { lockBlob } from './blob-lock';
 import { sniffAttachment } from './magic-bytes';
 import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
 
@@ -155,8 +156,10 @@ export class AttachmentsService {
       }
 
       const sha256 = await sha256OfFile(file.path);
-      await promoteBlob(file.path, sha256);
       const row = await this.prisma.$transaction(async (tx) => {
+        // Held until the row commits, so a reclaimer cannot unlink a blob this upload just deduped onto.
+        await lockBlob(tx, sha256);
+        await promoteBlob(file.path, sha256);
         const created = await tx.attachment.create({
           data: {
             entityType,

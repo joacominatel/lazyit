@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type {
   CreateSupplier,
+  DeletedFilter,
   PageQuery,
   SupplierMergeField,
   UpdateSupplier,
@@ -19,6 +20,11 @@ import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { recordPurchaseOrderEvents } from './purchase-order-events';
 
 /** Optional filters for listing suppliers. */
@@ -103,7 +109,7 @@ export class SuppliersService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.supplier.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,
@@ -111,6 +117,27 @@ export class SuppliersService {
       this.prisma.supplier.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where`, walked newest first by keyset. */
+  exportSource(filters: SupplierFilters, deleted: DeletedFilter) {
+    const where: Prisma.SupplierWhereInput = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.supplier.count({ where, ...escapeHatch }),
+      fetchBatch: (after: KeysetCursor<string> | null, take: number) =>
+        this.prisma.supplier.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          ...escapeHatch,
+        }),
+    };
   }
 
   private buildWhere({ q }: SupplierFilters): Prisma.SupplierWhereInput {

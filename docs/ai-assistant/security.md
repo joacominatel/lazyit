@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-15
 ---
 
 # AI Assistant — Security & Threat Model
@@ -362,7 +362,8 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 
 | Source | Who can write it | Evidence |
 | --- | --- | --- |
-| Access-request `justification` | **any user, VIEWER included** | [R] `access-request.ts:44,70`; `permission.ts:277` |
+| Access-request `justification` and `accessLevel` (copied onto the grant on approval) | **any user, VIEWER included** | [R] `access-request.ts:44,70`; `permission.ts:277` |
+| A person's first and last name; `username`, `legajo`, the manager's name | **any signed-in user** (own name, `PATCH /users/me`); admins; directory sync | [R] `user.ts` `UpdateOwnProfileSchema`; AUD-003 |
 | KB articles, links, imported `.docx` | MEMBER+ (`article:write`); import | [R] [[0021-knowledge-base-design]], [[0059-kb-folders-links-and-import]] |
 | Asset `notes`, `specs` jsonb, names, `Application.url` | MEMBER+ | [R] `asset.ts:88`; DEF-004 |
 | Agent-reported hostnames and package lists | **any host holding the fleet-wide token** | [R] [[0074-server-reporting-agent]] |
@@ -549,9 +550,10 @@ the **exfiltration leg** and the **consequential-action leg**.
   - Refuse consent while `mustChangePassword` is set.
 - **Scopes** (least agency) [E: scope minimization]. `lazyit.read` covers T0. `lazyit.write` adds
   T1/T2. `lazyit.admin` adds T3/T4 (the `elevated` class), is **never preselected**, and requires
-  step-up at consent (R7) — through the same `PasswordStepUpVerifier` as the chat approvals, so one
-  per-account backoff covers both, and each refused attempt is audited `CONSENT_STEP_UP_FAILED`
-  (SEC-082). At
+  step-up at consent (R7) — through the same `PasswordStepUpVerifier` as the chat approvals and
+  `POST /auth/change-password` (AUD-013, PR #1577), so one per-account backoff covers all three, and
+  each refused consent attempt is audited `CONSENT_STEP_UP_FAILED` (SEC-082). A locked change-password
+  answers `429` with `code: STEP_UP_RATE_LIMITED`. At
   runtime, **effective authority = the user's live DB permissions ∩ the granted scopes.** Tools the
   user or scope cannot use are not listed.
 - **Tokens** [C, modelled on INV-SA-1]:

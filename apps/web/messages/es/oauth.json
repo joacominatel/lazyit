@@ -24,16 +24,16 @@
   "account": {
     "title": "IA y apps conectadas",
     "subtitle": "Conecta Claude Code y otras apps de IA a lazyit, y revisa o revoca las apps que pueden actuar en tu nombre.",
-    "forbidden": {
-      "title": "Tu rol no puede conectar apps de IA",
-      "body": "Conectar apps de IA requiere el permiso «Conectar agentes de IA externos (MCP)» (ai:connect). Pídeselo a un administrador si lo necesitas."
-    },
     "statusError": "No se pudo comprobar cómo se conectan las apps de IA a esta instancia. Tus apps conectadas aparecen abajo."
   },
   "mode": {
     "unavailable": {
       "title": "Las conexiones de apps de IA están desactivadas",
-      "body": "Un administrador no activó el servidor MCP (Ajustes → IA), o tu rol no permite conectar apps de IA. Las conexiones que ya tienes aparecen abajo: mientras el servidor MCP esté apagado quedan en pausa, no revocadas; revoca las que ya no quieras."
+      "body": "Un administrador no activó el servidor MCP (Ajustes → IA). Las conexiones que ya tienes aparecen abajo: mientras el servidor MCP esté apagado quedan en pausa, no revocadas; revoca las que ya no quieras."
+    },
+    "unavailableRole": {
+      "title": "Tu rol no puede conectar apps de IA",
+      "body": "Conectar apps de IA requiere el permiso «Conectar agentes de IA externos (MCP)». Las apps y los tokens que conectaste antes dejaron de funcionar, pero siguen listados abajo para que puedas revocarlos. Pide el permiso a un administrador si lo necesitas."
     },
     "oauth": {
       "title": "Esta instancia usa inicio de sesión OAuth",
@@ -74,6 +74,7 @@
         "tryOnce": "Para probarlo en una sola sesión sin instalarlo, ejecuta <code>{command}</code> en su lugar.",
         "stepSignInOauth": "Inicia Claude Code y ejecuta <code>/mcp</code> para iniciar sesión.",
         "stepToken": "Crea un token personal abajo. Claude Code te lo pide al activar el plugin y lo guarda en el llavero de tu sistema; nunca se guarda en los archivos del plugin.",
+        "stepTokenProfile": "Crea un token personal en <link>tu perfil → IA y apps conectadas</link>. Claude Code te lo pide al activar el plugin y lo guarda en el llavero de tu sistema; nunca se guarda en los archivos del plugin.",
         "errors": {
           "originUnknown": "La instancia no conoce su propia dirección, así que no se puede generar el plugin. Un administrador debe definir la dirección pública de la instancia (WEB_ORIGIN).",
           "unavailable": "El plugin no está disponible: se desactivaron las conexiones de apps de IA.",
@@ -85,6 +86,7 @@
       "title": "Otros clientes MCP",
       "descriptionOauth": "Conecta cualquier cliente MCP que admita servidores remotos por HTTP. La primera vez inicia sesión desde tu navegador.",
       "descriptionToken": "Conecta cualquier cliente MCP que admita servidores remotos por HTTP. Reemplaza <code>{placeholder}</code> por un token personal que crees abajo.",
+      "descriptionTokenProfile": "Conecta cualquier cliente MCP que admita servidores remotos por HTTP. Reemplaza <code>{placeholder}</code> por un token personal que crees en <link>tu perfil → IA y apps conectadas</link>.",
       "endpoint": "Dirección del servidor MCP",
       "copyEndpoint": "Copiar la dirección del servidor MCP",
       "tabs": {

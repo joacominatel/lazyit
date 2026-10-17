@@ -3,7 +3,7 @@ title: AssetModel
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-16
 ---
 
 # AssetModel
@@ -29,9 +29,32 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 - On [[asset]] creation, a live model's `specs` are materialized into `Asset.specs` as an editable
   snapshot. Explicit asset specs win over model defaults, and later model edits do not sync into
   existing assets.
-- **Soft delete only** — we never hard-delete, so existing [[asset]]s keep referencing a
-  soft-deleted model. The FK's `onDelete: SetNull` is only a safety net for a (non-occurring)
-  hard delete: it would detach assets rather than delete them (audit > strict integrity).
+- **Delete with one resolution (SEC-041).** A delete affects the model's **live assets** and the
+  **open purchase lines** mapped to it — live lines of a live `DRAFT` or `ORDERED` purchase (a status a
+  newer build adds counts as closed) that still expect units. While any of them exists, the delete
+  needs **one** resolution for all of them, never one per row:
+  - `detach` — the assets keep no model, the lines lose their model mapping;
+  - `move` — all of them go to one target model: live and not the model itself (`400` otherwise), in
+    **any** category. An asset's category follows its model, so a move into another category moves the
+    assets there too.
+
+  Without a resolution the delete is a `409` `DELETE_RESOLUTION_REQUIRED` with
+  `{ assets, purchaseOrderLines }`. The resolution and the soft delete run in **one transaction**
+  (30 s timeout). Locks, in order: both models and the assets `FOR UPDATE`, the purchases of the mapped
+  lines `FOR SHARE` (purchase before line, like every purchase write, and settled against a status change
+  or archive in flight), then the open lines `FOR UPDATE`. Each moved asset gets a
+  `MODEL_CHANGED` [[asset-history]] row (`{ from, to }`, `to: null` on detach), all written in one
+  insert, and each line a `LINE_UPDATED` [[purchase-order-event]] for `assetModelId`. History keeps its
+  reference: archived assets, received lines and the lines of cancelled purchases still point at the
+  archived model. Restoring the model re-links nothing. The FK's `onDelete: SetNull` only matters for a
+  hard delete, which the API never issues.
+- **Restore needs a live category.** Restoring a model whose category is still archived is a `409`:
+  restore the category first. Restores do not cascade, as for a [[location]] under an archived parent.
+- **Models archived before the delete resolution** still have their assets and lines pointing at them.
+  Restoring one brings those links back; deleting it again goes through the resolution.
+- **A live category on write (SEC-041).** A create with a `categoryId`, or an update that changes it, is
+  a `400` when the category is missing or archived. An update that leaves a legacy archived category in
+  place is accepted, so such a model stays editable.
 - `sku` is unique among **live** rows when present (a live duplicate returns `409`); a soft-deleted
   sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 
@@ -58,6 +81,7 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
+| `usageCount` | `int?` | **read-only, computed — not a column** (#1540). Only on the `GET /asset-models` page items: the number of **live** assets of this model; `0` when unused. Computed on both slices — an archived model (`?deleted=only`) still shows the live assets that point at it. Absent from `GET /:id` and the write responses. |
 
 ## UI behavior
 
@@ -70,13 +94,16 @@ the values before saving the concrete unit.
 `apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` — **paginated** `Page<AssetModel>`
 envelope with a server-side case-insensitive **`q`** over name/manufacturer/sku, an optional
 `?categoryId=` filter, an allowlisted `sort` (`name`/`manufacturer`/`sku`/`createdAt`/`updatedAt`,
-default `createdAt desc`) and the `deleted` slice — migrated off the raw array so the searchable model
+default `createdAt desc`) and the `deleted` slice, each item carrying the computed `usageCount` — migrated off the raw array so the searchable model
 picker can search/page authoritatively (issue #199, [[0030-list-pagination-contract]] §8). Then
-`GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete), `POST /:id/restore`
-(ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on
-write returns `400` (FK → [[0018-api-documentation-swagger]]). `PATCH /:id` with `categoryId: null`
+`GET /asset-models/:id`, `POST`, `PATCH /:id`, `GET /:id/delete-impact` (`assetModel:delete` — the
+counts plus the first 50 live assets and open lines, each list only when the caller may read that kind,
+`AssetModelDeleteImpactSchema`; a line carries its `purchaseOrderId`, the purchase `reference` and its
+`description`), `DELETE /:id` (soft delete; `?strategy=detach` or `?strategy=move&targetId=`, see
+above), `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
+A missing or archived `categoryId` on write returns `400`. `PATCH /:id` with `categoryId: null`
 **clears** the category (the model becomes uncategorized; its assets keep pointing at it) — the same
-state `onDelete: SetNull` produces when a category is deleted (CEO 2026-09-25, #1315).
+state a category delete with `detach` produces (CEO 2026-09-25, #1315).
 `sku: null` and `description: null` on `PATCH /:id` **clear** those fields (both columns are
 nullable; a cleared SKU is simply absent, and the partial unique index treats NULLs as distinct, so any
 number of models can have none). An empty string is still refused — `null` is the one way to clear

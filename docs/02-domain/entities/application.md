@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-16
 ---
 
 # Application
@@ -19,8 +19,8 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 ## Relationships
 
 - **grouped by** an optional [[application-category]] (`categoryId`, optional FK,
-  `onDelete: SetNull` — deleting a category detaches its applications, like
-  [[asset-model]] → [[asset-category]]).
+  `onDelete: SetNull`; deleting a category with live applications needs one resolution for all of
+  them — detach or move to another category, AUD-085).
 - **granted via** N [[access-grant]]s (to [[user]]s).
 - **licensed by** N `LICENSE` [[purchase-order-line]]s (`PurchaseOrderLine.applicationId`, `SetNull` on that
   side, #1477).
@@ -43,6 +43,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   grant on seat count.
 - **Category is optional and `SetNull`** — an application with no category is valid, and deleting a
   category never deletes its applications.
+- **A write never files under an archived category** — create, or an update that changes `categoryId`, is a
+  `400` when the category is missing or soft-deleted. An update that leaves a legacy archived category
+  unchanged is accepted, and reads stay tolerant of it.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
@@ -114,12 +117,24 @@ Indexes: `@@index([categoryId])`.
 `apps/api/src/applications/` (`ApplicationsModule`). Documented via Swagger
 ([[0018-api-documentation-swagger]]).
 
-- `GET /applications` — list (excludes soft-deleted, ordered by name).
+- `GET /applications?q=&categoryId=&isCritical=&deleted=` — list (excludes soft-deleted, ordered by name).
+  `categoryId` (a cuid, else `400`) keeps the applications filed under that category — an archived
+  category still matches, since filing is not undone by archiving it; `isCritical` is exactly `true` or
+  `false` (else `400`), absent = both. Both narrow the query, so `total` and every page honour them (#1631).
+- `GET /applications/export?q=&categoryId=&isCritical=&deleted=` — a CSV of every application the list
+  would return for the same filters, under the same `application:read` and the same ADMIN-only `deleted=only` (#1597,
+  [[0103-data-export-streaming-path]]). Columns: `id, name, vendor, url, description, isCritical,
+  seatsPurchased, seatsUsed, costPerSeat, renewalDate, notes, createdAt, updatedAt, deletedAt`;
+  `costPerSeat` in major units with a dot decimal, `seatsUsed` derived as on the list. The category (the
+  list carries only its id) and `metadata` are not exported. Every export is audited ([[data-export-log]]).
 - `GET /applications/:id` — one by id (`404` if missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
+- `GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` — the same grants as CSV
+  (see [[access-grant]] § Export).
 - `POST /applications` — create.
-- `PATCH /applications/:id` — partial update.
+- `PATCH /applications/:id` — partial update. `null` clears an optional field (`description`, `url`,
+  `vendor`, `notes`, `metadata`, the seat fields); `categoryId: null` detaches the category.
 - `DELETE /applications/:id` — soft delete.
 - `POST /applications/:id/restore` — ADMIN-only restore (clears `deletedAt`; re-indexes for search).
   See [[0041-soft-delete-reuse-and-restore]].

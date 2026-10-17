@@ -31,6 +31,7 @@ import {
   type AiEntityRef,
 } from '@lazyit/shared';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
+import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ApplicationsController } from '../../applications/applications.controller';
 import { ConsumablesController } from '../../consumables/consumables.controller';
@@ -1764,13 +1765,40 @@ const purchaseLinkAssets = defineTool({
 
 const RECEIVE_FIELDS = ReceiveFromLineSchema.shape;
 
+/**
+ * The custom status a receive names (ADR-0101): the card value and the built-in status it sets on each
+ * unit, as the route writes it (AUD-093). `kind` is null when the caller may not read custom statuses; a
+ * missing or archived one fails here, as the route would.
+ */
+async function receiveStatusLabel(
+  rt: AiToolRuntime,
+  id: string,
+): Promise<{ value: Row; kind: string | null; name: string | null }> {
+  let row: Row;
+  try {
+    row = asRow(
+      await rt.call(AssetStatusLabelsController, 'findOne', { params: { id } }),
+    );
+  } catch (err) {
+    if (mapToolError(err).status !== 403) throw err;
+    return { value: { type: 'assetStatusLabel', id }, kind: null, name: null };
+  }
+  const name = str(row.name);
+  return {
+    value: { type: 'assetStatusLabel', id, ...(name ? { label: name } : {}) },
+    kind: str(row.kind),
+    name,
+  };
+}
+
 const purchaseReceive = defineTool({
   name: 'purchase_receive',
   title: 'Receive units as new assets',
   description:
     'Receive units of an ASSET line as new assets (one per unit), born linked to the line. Everything is ' +
     "prefilled from the purchase: the model (the line's; pass modelId when the line has none), status " +
-    'IN_STORAGE, the delivery location, company, purchase date (the invoice date, else today), warranty end ' +
+    'IN_STORAGE (with statusLabelId, that custom status and the built-in status it maps to), the delivery ' +
+    'location, company, purchase date (the invoice date, else today), warranty end ' +
     "(+ the line's warranty months) and cost (the unit price with the currency label). Every other field " +
     'here only overrides (null leaves it empty). `quantity` is required; `serials`, when given, must be ' +
     'exactly `quantity` entries. Receiving more than pending is allowed and flagged. Asset tags come from ' +
@@ -1804,6 +1832,7 @@ const purchaseReceive = defineTool({
     bind(PurchaseOrdersController, 'findOne'),
     bind(AssetModelsController, 'findOne'),
     bind(LocationsController, 'findOne'),
+    bind(AssetStatusLabelsController, 'findOne'),
   ],
   async run(input, rt) {
     const { purchaseId: id, lineId: lid, ...body } = input;
@@ -1890,6 +1919,22 @@ const purchaseReceive = defineTool({
           })
         : null;
     }
+    const customStatus = input.statusLabelId
+      ? await receiveStatusLabel(rt, input.statusLabelId)
+      : null;
+    if (
+      customStatus?.kind &&
+      input.status !== undefined &&
+      input.status !== customStatus.kind
+    ) {
+      throw new BadRequestException(
+        `status ${input.status} does not match the custom status "${customStatus.name ?? input.statusLabelId}", ` +
+          `which maps to ${customStatus.kind}: give the custom status alone, or with its own status.`,
+      );
+    }
+    const status = customStatus
+      ? (customStatus.kind ?? input.status ?? null)
+      : (input.status ?? 'IN_STORAGE');
     const label = purchaseLabel(purchase);
     const pending = num(line.pendingQuantity) ?? 0;
     const received = num(line.receivedQuantity) ?? 0;
@@ -1919,7 +1964,16 @@ const purchaseReceive = defineTool({
         ),
         valueKind: 'entity',
       },
-      { field: 'status', after: input.status ?? 'IN_STORAGE' },
+      { field: 'status', after: status },
+      ...(customStatus
+        ? [
+            {
+              field: 'customStatus',
+              after: customStatus.value,
+              valueKind: 'entity' as const,
+            },
+          ]
+        : []),
       { field: 'location', after: location, valueKind: 'entity' },
       { field: 'company', after: company },
       { field: 'purchaseDate', after: purchaseDate, valueKind: 'date' },
@@ -2579,6 +2633,11 @@ export const purchasesToolset: AiToolset = {
     ),
     unexposed(
       PurchaseOrdersController,
+      ['export', 'exportPendingLines'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      PurchaseOrdersController,
       ['unlinkAssets'],
       'Unlinking is the correction of a link, done from the asset or the purchase page; not part of the Phase 3 ' +
         'chat flow (#1478). A later unit may expose it.',
@@ -2594,6 +2653,11 @@ export const purchasesToolset: AiToolset = {
       ['remove', 'restore'],
       'Archive and restore of a supplier are ADMIN-only lifecycle actions (ADR-0099 §9), done from the ' +
         'Suppliers page; not part of the chat purchase flow (#1478).',
+    ),
+    unexposed(
+      SuppliersController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
     unexposed(
       SuppliersController,

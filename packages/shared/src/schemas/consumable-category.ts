@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ConsumableCategory — user-managed grouping for Consumables (Cables, Adapters, Peripherals, …).
@@ -22,6 +22,10 @@ export const ConsumableCategorySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // How many live (non-deleted) consumables filed under this category (#1540), so Settings → Taxonomies can show what is in use before an archive. A
+  // COMPUTED read aggregate, not a stored column: no migration. Only the list read populates it; it is
+  // absent from single reads, writes and an older API, so every consumer treats it as optional.
+  usageCount: z.number().int().min(0).nullish(),
 });
 
 /** Payload to create a ConsumableCategory. `name` is unique (enforced by the DB). */
@@ -44,6 +48,10 @@ export const UpdateConsumableCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+export const ConsumableCategoryDeleteImpactSchema = z.object({
+  consumables: deleteImpactGroup(z.object({ id: z.cuid(), name: z.string(), sku: z.string().nullable() })),
+});
+
 export type ConsumableCategory = z.infer<typeof ConsumableCategorySchema>;
 export type CreateConsumableCategory = z.infer<
   typeof CreateConsumableCategorySchema
@@ -51,3 +59,4 @@ export type CreateConsumableCategory = z.infer<
 export type UpdateConsumableCategory = z.infer<
   typeof UpdateConsumableCategorySchema
 >;
+export type ConsumableCategoryDeleteImpact = z.infer<typeof ConsumableCategoryDeleteImpactSchema>;

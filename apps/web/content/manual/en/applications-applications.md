@@ -31,14 +31,44 @@ required — everything else is optional and there to help your team recognize a
 ## Adding and editing applications
 
 From the **Access** list, choose **New application**, fill in at least a name, and create it.
-Open any application to see its **Details** and edit it. Two shortcuts speed up repetitive setup:
+Open any application to see its page (below) and choose **Edit** at the top. Two shortcuts speed up
+repetitive setup:
 
 - **Clone** creates a new application pre-filled from an existing one — handy for similar systems.
   The clone is a *separate* application; you grant access to it independently.
-- **Edit** updates any field at any time.
+- **Edit** updates any field at any time. To remove a value, empty the field (or set the category to
+  none) and save.
 
 Creating and editing applications is everyday catalog work, available to administrators and
 members. **Deleting** an application is an administrator-only action.
+
+## The application page
+
+Opening an application shows everything about it on one page, laid out like an asset or a person:
+
+- **The header** — the name, a **Critical** badge when the application is marked critical, and the
+  publisher, category and URL. The main action sits on the right: **Grant access** for
+  administrators, or **Request access** for everyone else (it turns into *Access requested* or
+  *You have access* when that already applies). **Edit** is next to it; **Clone** and **Delete
+  application** are in the **⋯** menu.
+- **Needs attention** — a short row of what needs follow-up, most urgent first: grants that have
+  expired and wait to be revoked, more people than purchased seats, a license renewal within 30 days
+  or already past, grants expiring within 30 days, deactivated people who still hold access, and
+  requests waiting for a decision. When nothing needs attention, the row is not shown.
+- **Key facts** — **People with access** (distinct people, with the number of active grants),
+  **Seats** (used / purchased, with a bar), **Renewal**, and **Pending requests**. People with
+  access and Pending requests open their tab when you click them.
+- **Tabs** — **Access** (who holds access, see [Access grants](/help/applications-access-grants)),
+  **Requests** (this application's access requests, see
+  [Access requests](/help/applications-access-requests)), **Automation** (its workflows, recent runs
+  and connection, see [Access automation](/help/access-automation-concepts)), **Activity** (every
+  grant and revocation, newest first) and **About** (description, notes and license details). A tab
+  appears only if you can see what it lists: by default members see Access and Requests, and only
+  administrators see Automation and Activity. The open tab is kept in the address, so a shared link
+  opens on the same tab.
+- **The side column** — the details (publisher, category, URL, criticality, when it was added and
+  last updated) and the knowledge-base articles linked to the application. On a phone the side
+  column moves below the tabs.
 
 ## Categories
 
@@ -47,8 +77,10 @@ set — **SaaS, Internal, Service, Third Party, Infrastructure, Other** — but 
 yours to manage: rename them, add your own, or remove ones you don't use. A category is optional;
 an application with no category is perfectly valid.
 
-Deleting a category never deletes the applications in it — it simply **detaches** them, leaving
-them uncategorized. Nothing is lost.
+Deleting a category never deletes the applications in it. When it still has applications, lazyit
+shows you which ones and asks for **one decision for all of them**: leave them uncategorized, move
+them to another category, or, if you can create categories, type a name to create one right there
+and move them into it. Nothing is lost, and restoring the category later does not bring them back.
 
 ## Finding applications
 
@@ -57,6 +89,9 @@ The Access list supports searching by **name or publisher**, and filtering by **
 access** — how many people currently hold a live grant on that application — and, when you track
 licensing, a **License** cell (used / purchased, with an over-allocation warning and the next
 renewal date), so you can see at a glance which systems are in active use.
+
+**Export CSV** downloads every application matching the current search and the category and
+criticality filters — see [Exporting data](/help/notifications-activity-data-export).
 
 ## License & seats
 
@@ -73,8 +108,9 @@ you pay for is actually in use. On the application form, fill in any of:
 active access to the application. Because one person can hold more than one grant on the same app,
 lazyit counts *people*, not grants — so the number reflects real license consumption.
 
-The Access list and each application's **Details** show **used / purchased**. When more people hold
-access than there are purchased seats, lazyit flags the application as **over-allocated** — a nudge
+The Access list and each application's **Seats** key fact show **used / purchased**; the **About** tab
+lists all three license fields. When more people hold access than there are purchased seats, lazyit
+flags the application as **over-allocated**, in the list and in the page's *Needs attention* row — a nudge
 to buy more seats or revoke access no longer needed. The warning is advisory: lazyit never blocks a
 grant on seat count.
 

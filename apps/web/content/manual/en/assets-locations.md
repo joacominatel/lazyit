@@ -22,6 +22,9 @@ Open **Locations** and create a new one. A location has:
 
 Floor is a **label, not a number** — values like "Ground", "Basement 1" or "Mezzanine" are fine.
 
+**Export CSV** on the Locations list downloads every location matching the current search and type
+filter — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Location types
 
 Each location is classified by a type, chosen from a fixed set:
@@ -73,9 +76,32 @@ See [Stock movements](/help/consumables-stock-movements).
 
 ## Removing a location
 
-Locations are **soft-deleted**, never destroyed. Removing a location does **not** delete the assets
-that point to it — those assets simply become location-less for that link, and the record is kept for
-history. lazyit favors auditability over strict tidiness.
+Locations are **soft-deleted**, never destroyed, and removing one never deletes anything that points
+to it. When the location still has **assets**, **child locations** or **open purchases** delivering
+there, lazyit first shows you what will be affected and asks for **one decision for all of them** —
+you cannot choose item by item:
+
+- **Leave them without a location** — the assets lose their location, the child locations become
+  top-level and the open purchases lose their delivery location.
+- **Move them to another location** — everything goes to the location you pick. It must be a live
+  location that is not inside the one you are removing.
+- **Create a new location** — type a name: lazyit creates it with the same type and parent as the
+  one you are removing (at the top level when that one has no parent or its parent was removed), then
+  moves everything there. If the new location is created but the removal fails, the dialog says so
+  and offers to move everything to it on the next try, so you never end up with two. This choice
+  appears only if you can also create locations.
+
+The dialog names up to 50 of each kind and counts all of them. If you are not allowed to view a kind
+(purchases, say), you see only how many there are — the decision still applies to them.
+
+The move and the removal happen together, and every moved asset gets a location change in its
+history. Records that are already history keep pointing at the removed location: consumables
+delivered there, purchases that are cancelled or fully received, and archived assets. A location
+nothing points to is removed straight away.
+
+An admin can bring a removed location back from the archived view. Restoring it does not bring back
+what was moved off it. Restoring a location whose parent is still removed is refused — restore the
+parent first.
 
 ## What's next
 

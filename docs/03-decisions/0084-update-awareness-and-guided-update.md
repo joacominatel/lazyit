@@ -3,7 +3,7 @@ title: "ADR-0084: Update awareness & guided update — check, weekly email, upda
 tags: [adr, updates, versioning, deployment, infra, notifications, settings]
 status: accepted
 created: 2026-07-01
-updated: 2026-09-28
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -18,6 +18,26 @@ is *designed* here (§6) as a deferred, slot-in-compatible phase. Depends on
 are signed — see its *Tag trust*), MAJOR means "not one-click-safe", and the running version is baked
 in via `git describe` → build-arg → `GET /instance/version`. Sibling of [[0047-guided-first-deploy-bootstrap]] (the `start.sh` pattern
 this extends) and [[backups]] (the DR story this must never weaken).
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: with the bundled Zitadel gone there is
+one database. The mandatory verified pre-update backup (§3) is a single dump of the app database, and "both
+databases" elsewhere in this record now reads as that one. The no-quick-rollback flag for releases that bump
+the pinned Zitadel image is dropped.
+
+**Amended** — 2026-10-14 (backend audit 2026-10-10, AUD-061/AUD-062): the §4 single-flight guard is now
+also a database constraint. The partial unique index `update_runs_single_active_key` allows at most one
+`update_runs` row whose status is not `done`, `failed` or `rolled_back`; a concurrent enqueue that loses the
+race gets a 409. The migration that adds it first moves any extra active rows an instance already holds to
+`failed` with a "Superseded" reason (never deleted), keeping the run most likely executing. Adding a new
+*terminal* status to the shared catalog now means re-creating that index. One host-side effect: `update.sh`
+run for a target other than a still-`requested` run can no longer insert its own row; it warns and the update
+proceeds without live status, so cancel the pending request first. Separately, `update-status` serves
+`behindBy` and `securityRelevant` as 0/false whenever the cached latest release is not newer than the running
+version, so an upgrade clears the "behind" badge without waiting for the next check.
+*Corrected 2026-10-15 (PR #1589):* `update.sh` no longer needs the pending request cancelled first. When it
+records its run for a target other than a still-`requested` run, it marks that request `failed` with a
+"Superseded by an operator-run update to <tag>" reason (never deleted) and inserts its own row, both in one
+transaction; a request for the same target is still claimed as before.
 
 ## Context
 

@@ -11,7 +11,10 @@ lazyit puede **importar personas desde tu Active Directory local (o cualquier di
 tengas que cargar tu equipo en lazyit a mano. Apuntas lazyit a tu directorio en **Configuración →
 Directorio AD/LDAP** (solo administradores; en el menú lateral de Configuración está bajo
 **Integraciones**). Está **desactivada hasta que la actives**, y el encabezado de la página muestra
-**Activado** o **Desactivado** para la sincronización programada.
+**Activado** o **Desactivado** para la sincronización programada. Un Miembro o Lector al que le diste
+**Cambiar la configuración de la instancia** puede ver la conexión, pero solo un administrador puede
+guardarla o ejecutar **Sincronizar ahora**: para cualquier otra persona el formulario y **Sincronizar
+ahora** quedan bloqueados, con una nota que explica por qué.
 
 ## Qué hace — y qué deliberadamente no hace
 
@@ -20,10 +23,12 @@ directorio con una cuenta de servicio de solo lectura, busca en un subárbol que
 "persona de directorio" sin acceso** en lazyit por cada entrada coincidente. Eso es toda la función.
 
 - **Nunca escribe nada de vuelta** en tu directorio. lazyit solo lee.
-- **No es una forma de iniciar sesión.** Una persona de directorio **no tiene contraseña ni inicio de sesión
-  único** — importar a alguien no le permite entrar. Es un registro de una persona (un nombre y correo a los
-  que puedes asignar activos, conceder acceso y hacer seguimiento), no una cuenta. Para dar un inicio de
-  sesión real a una persona importada, usa **Aprovisionar cuenta** en su perfil, en la sección **Usuarios**.
+- **No es una forma de iniciar sesión.** Una persona de directorio **no tiene contraseña ni inicio de
+  sesión único** — importar a alguien no le permite entrar. Es un registro de una persona (un nombre y
+  correo a los que puedes asignar activos, conceder acceso y hacer seguimiento), no una cuenta. Para dar
+  un inicio de sesión real a una persona importada, abre su perfil en **Usuarios**: con cuentas locales,
+  dala de alta con una contraseña temporal; con tu propio proveedor OIDC, créala en el proveedor con el
+  mismo correo verificado y su primer inicio de sesión vincula ambas.
 - **No cambia cómo funcionan los permisos.** Todas las personas importadas son de nivel visor. Los grupos
   del directorio (`memberOf`) se registran solo como referencia y no otorgan nada.
 
@@ -107,10 +112,10 @@ ejecución** y un recuento de lo ocurrido:
 
 ## Revisar las personas importadas
 
-Al final de la página, **Personas del directorio para revisar** muestra una vista previa de las importadas más
-recientemente. Cada una enlaza a su perfil, donde puedes editarla, **aprovisionar un inicio de sesión** o
-darla de baja. Usa **Ver todas en Usuarios** para abrir la lista completa y con búsqueda filtrada a las
-personas de directorio.
+Al final de la página, **Personas del directorio para revisar** muestra una vista previa de las
+importadas más recientemente. Cada una enlaza a su perfil, donde puedes editarla, darle un inicio de
+sesión o darla de baja. Usa **Ver todas en Usuarios** para abrir la lista completa y con búsqueda
+filtrada a las personas de directorio.
 
 ## Actualizar una instancia existente
 

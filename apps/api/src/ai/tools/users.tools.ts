@@ -102,57 +102,74 @@ const userRef = z
     'The user: id, email, username, legajo (employee number) or "me" (always the person you act for).',
   );
 
-/** "Ana Ops <ana@example.com>" — what a person recognizes on a card or a chip. */
+/** "Ana Ops <ana@example.com>" — what a person recognizes on a card or a chip. The name is self-editable: wrapped. */
 function userLabel(row: Row): string {
-  const name = [str(row.firstName), str(row.lastName)]
-    .filter((part): part is string => !!part)
-    .join(' ');
+  const name = untrusted(
+    [str(row.firstName), str(row.lastName)]
+      .filter((part): part is string => !!part)
+      .join(' '),
+  );
   const email = str(row.email);
-  return email ? `${name} <${email}>`.trim() : name || String(row.id);
+  return email ? `${name ?? ''} <${email}>`.trim() : (name ?? String(row.id));
 }
 
 function userRefOf(row: Row, op: AiEntityRef['op']): AiEntityRef {
   return { type: 'user', id: String(row.id), op, label: userLabel(row) };
 }
 
-/** The manager descriptor the route resolves (display fields only, ADR-0058). */
+/** The identity strings a person or a directory sync wrote (a user renames themselves): untrusted (INV-AI-4). */
+const USER_AUTHORED = ['firstName', 'lastName', 'legajo', 'username'] as const;
+
+/** `row` with each of `fields` that it carries wrapped with `untrusted()`. */
+function wrapFields(row: Row, fields: readonly string[]): Row {
+  for (const field of fields) {
+    if (field in row) row[field] = untrusted(str(row[field]));
+  }
+  return row;
+}
+
+/** The manager descriptor the route resolves (display fields only, ADR-0058); names wrapped as untrusted. */
 function managerOf(value: unknown): Row | null {
   const manager = asRow(value);
   if (manager.type === 'user') {
-    return pick(manager, [
-      'type',
-      'id',
-      'firstName',
-      'lastName',
-      'isOffboarded',
-    ]);
+    return wrapFields(
+      pick(manager, ['type', 'id', 'firstName', 'lastName', 'isOffboarded']),
+      ['firstName', 'lastName'],
+    );
   }
-  if (manager.type === 'external') return pick(manager, ['type', 'name']);
+  if (manager.type === 'external') {
+    return wrapFields(pick(manager, ['type', 'name']), ['name']);
+  }
   return null;
 }
 
 function managerText(value: unknown): string | null {
   const manager = asRow(value);
   if (manager.type === 'user') {
-    return `${str(manager.firstName) ?? ''} ${str(manager.lastName) ?? ''}`.trim();
+    return untrusted(
+      `${str(manager.firstName) ?? ''} ${str(manager.lastName) ?? ''}`.trim(),
+    );
   }
-  return manager.type === 'external' ? str(manager.name) : null;
+  return manager.type === 'external' ? untrusted(str(manager.name)) : null;
 }
 
 /** The concise user shape every tool shares. Never `externalId`, a hash, an epoch or a credential flag. */
 function userSummary(row: Row): Row {
   return {
-    ...pick(row, [
-      'id',
-      'email',
-      'firstName',
-      'lastName',
-      'role',
-      'isActive',
-      'directoryOnly',
-      'legajo',
-      'username',
-    ]),
+    ...wrapFields(
+      pick(row, [
+        'id',
+        'email',
+        'firstName',
+        'lastName',
+        'role',
+        'isActive',
+        'directoryOnly',
+        'legajo',
+        'username',
+      ]),
+      USER_AUTHORED,
+    ),
     manager: managerOf(row.manager),
     ...(row.deletedAt ? { archivedAt: iso(row.deletedAt) } : {}),
   };
@@ -536,7 +553,9 @@ const userGet = defineTool({
               ...(full
                 ? {
                     items: grants.slice(0, AI_TOOL_LIST_MAX_LIMIT).map((g) => ({
-                      ...pick(g, ['id', 'applicationId', 'accessLevel']),
+                      ...pick(g, ['id', 'applicationId']),
+                      // Copied from the request when one was approved: requester-authored.
+                      accessLevel: untrusted(str(g.accessLevel)),
                       grantedAt: iso(g.grantedAt),
                       expiresAt: iso(g.expiresAt),
                       notes: untrusted(str(g.notes)),
@@ -745,10 +764,9 @@ const userUpdate = defineTool({
       const before = managerText(current.manager);
       if (!sameManager(current.manager, manager.body)) {
         changes.push({ field: 'manager', before, after: manager.label });
-        // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. It
-        // is local-only (never mirrored to the IdP) and the route records it as an append-only
-        // MANAGER_CHANGED history row — LEDGER_APPEND, a non-step-up code, so the elevated preview still
-        // carries a warning. Combined with another identity field, IDENTITY_CHANGE still applies.
+        // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. The
+        // route records it as an append-only MANAGER_CHANGED history row — LEDGER_APPEND, a non-step-up
+        // code, so the elevated preview still carries a warning. Combined with another identity field, IDENTITY_CHANGE still applies.
         warnings.add('LEDGER_APPEND');
       }
     }
@@ -757,11 +775,6 @@ const userUpdate = defineTool({
         'Nothing to change: every value given already matches the user.',
       );
     }
-    // A role, name or email change on an IdP-linked account is mirrored to the identity provider.
-    const mirrored = changes.some((c) =>
-      ['role', 'email', 'firstName', 'lastName'].includes(c.field),
-    );
-    if (mirrored && current.externalId) warnings.add('EXTERNAL_PROVISIONING');
 
     const target = userRefOf(current, 'updated');
     return previewOf(
@@ -880,8 +893,9 @@ const userOffboard = defineTool({
   description:
     'Offboard (archive) a user who left (administrators), in one step: their active application ' +
     'access grants are revoked, their assigned assets are released back to inventory, their Secret ' +
-    'Manager vault memberships are dropped, their sessions end and, when linked, their identity-provider ' +
-    'account is deactivated. It can be undone only partly: user_restore brings the account back but ' +
+    'Manager vault memberships are dropped and their sessions end. An account in an external identity ' +
+    'provider is not disabled there; that stays with the operator. It can be undone only partly: ' +
+    'user_restore brings the account back but ' +
     'not the grants, the assets or the vault memberships. lazyit refuses to offboard the last active administrator.',
   domain: 'users',
   class: 'write',
@@ -943,7 +957,6 @@ const userOffboard = defineTool({
         })),
       });
     }
-    if (current.externalId) warnings.push('EXTERNAL_DEPROVISIONING');
     const exposure = await criticalExposure(rt, String(current.id), grants);
     const criticalChanges: AiToolPreview['changes'] = [];
     if (touchesCritical(exposure)) {
@@ -1141,6 +1154,11 @@ export const usersToolset: AiToolset = {
   unexposed: [
     unexposed(
       UsersController,
+      ['export'],
+      'A bulk CSV file export (@Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      UsersController,
       ['roleCounts'],
       'Not in the v1 cut (tools-and-execution.md §7): user_search with a role filter returns the same count as its total.',
     ),
@@ -1156,7 +1174,7 @@ export const usersToolset: AiToolset = {
     ),
     unexposed(
       UsersController,
-      ['provisionAccount', 'passwordResetCapabilities'],
+      ['passwordResetCapabilities'],
       'Deferred to v1.1 as elevated with step-up, only where no credential is returned (tools-and-execution.md §3, §7 "elevated, after v1").',
     ),
     unexposed(

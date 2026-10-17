@@ -89,8 +89,10 @@ describe('ConsumablesService', () => {
   let consumable: ConsumableModelMock;
   let consumableMovement: MovementModelMock;
   let tx: TxMock;
+  let consumableCategory: { findFirst: jest.Mock };
   let prisma: {
     consumable: ConsumableModelMock;
+    consumableCategory: { findFirst: jest.Mock };
     consumableMovement: MovementModelMock;
     user: { findMany: jest.Mock };
     asset: { findMany: jest.Mock };
@@ -135,8 +137,10 @@ describe('ConsumablesService', () => {
       assetHistory: { create: jest.fn().mockResolvedValue({}) },
       $queryRaw: jest.fn().mockResolvedValue([]),
     };
+    consumableCategory = { findFirst: jest.fn() };
     prisma = {
       consumable,
+      consumableCategory,
       consumableMovement,
       user: { findMany: jest.fn().mockResolvedValue([]) },
       asset: { findMany: jest.fn().mockResolvedValue([]) },
@@ -193,7 +197,7 @@ describe('ConsumablesService', () => {
       // Consumable is NOT in the ADR-0032 SOFT_DELETABLE_MODELS set, so the `active` slice scopes to
       // live rows EXPLICITLY here (the read filter does not auto-scope it) — ADR-0041 addendum.
       where: { deletedAt: null },
-      orderBy: { name: 'asc' },
+      orderBy: [{ name: 'asc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
     });
@@ -287,11 +291,9 @@ describe('ConsumablesService', () => {
       },
     );
     const call = (
-      consumable.findMany.mock.calls as Array<
-        [{ orderBy: Record<string, unknown> }]
-      >
+      consumable.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(call.orderBy).toEqual({ currentStock: 'desc' });
+    expect(call.orderBy).toEqual([{ currentStock: 'desc' }, { id: 'desc' }]);
 
     await expect(
       service.findPage(
@@ -312,7 +314,7 @@ describe('ConsumablesService', () => {
 
     expect(consumable.findMany).toHaveBeenCalledWith({
       where: { deletedAt: { not: null } },
-      orderBy: { name: 'asc' },
+      orderBy: [{ name: 'asc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       includeSoftDeleted: true,
@@ -363,11 +365,84 @@ describe('ConsumablesService', () => {
     // The write gate (assertExists) is live-scoped (SEC-050): editing a soft-deleted consumable 404s.
     expect(consumable.findFirst).toHaveBeenCalledWith({
       where: { id: 'k1', deletedAt: null },
-      select: { id: true },
+      select: { id: true, categoryId: true },
     });
     expect(consumable.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
       data: { minStock: 3 },
+    });
+  });
+
+  describe('archived category on write (AUD-025, SEC-052)', () => {
+    it('create refuses an archived or missing category with 400 and writes nothing', async () => {
+      consumableCategory.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create({ name: 'Toner', unit: 'units', categoryId: 'cat1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consumableCategory.findFirst).toHaveBeenCalledWith({
+        where: { id: 'cat1', deletedAt: null },
+        select: { id: true },
+      });
+      expect(consumable.create).not.toHaveBeenCalled();
+    });
+
+    it('create files under a live category', async () => {
+      consumableCategory.findFirst.mockResolvedValue({ id: 'cat1' });
+      consumable.create.mockResolvedValue({ id: 'k1' });
+
+      await service.create({
+        name: 'Toner',
+        unit: 'units',
+        categoryId: 'cat1',
+      });
+
+      expect(consumable.create).toHaveBeenCalledWith({
+        data: { name: 'Toner', unit: 'units', categoryId: 'cat1' },
+      });
+    });
+
+    it('update refuses moving to an archived category with 400 and writes nothing', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: null });
+      consumableCategory.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.update('k1', { categoryId: 'archived' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consumable.update).not.toHaveBeenCalled();
+    });
+
+    it('update keeps a legacy archived category without re-checking it', async () => {
+      consumable.findFirst.mockResolvedValue({
+        id: 'k1',
+        categoryId: 'legacy',
+      });
+      consumable.update.mockResolvedValue({ id: 'k1' });
+
+      await service.update('k1', { categoryId: 'legacy', notes: 'x' });
+
+      expect(consumableCategory.findFirst).not.toHaveBeenCalled();
+      expect(consumable.update).toHaveBeenCalled();
+    });
+  });
+
+  it('null clears the optional fields, detaches the category and turns off the low-stock threshold (AUD-084)', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: 'c1' });
+    consumable.update.mockResolvedValue({ id: 'k1' });
+    const cleared = {
+      sku: null,
+      categoryId: null,
+      description: null,
+      minStock: null,
+      notes: null,
+    };
+
+    await service.update('k1', cleared);
+
+    expect(consumableCategory.findFirst).not.toHaveBeenCalled();
+    expect(consumable.update).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      data: cleared,
     });
   });
 

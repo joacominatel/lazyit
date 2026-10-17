@@ -28,6 +28,10 @@ import {
 } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { notifyError } from "@/lib/api/notify-error";
+import {
+  grantExpiryMinDate,
+  isExpiryBeforeGrantedError,
+} from "@/lib/utils/grant-expiry";
 
 /** "YYYY-MM-DD" from a date input → ISO datetime (null when empty — clears the expiry). */
 function dateInputToIso(value: string): string | null {
@@ -112,6 +116,10 @@ export function EditGrantDialog({
       toast.success(t("access.updatedToast"));
       onOpenChange(false);
     } catch (error) {
+      if (isExpiryBeforeGrantedError(error)) {
+        toast.error(t("access.expiryBeforeGranted"));
+        return;
+      }
       notifyError(error, t("access.updateError"));
     }
   }
@@ -144,6 +152,7 @@ export function EditGrantDialog({
             <Input
               id="edit-grant-expires"
               type="date"
+              min={grant ? grantExpiryMinDate(grant.grantedAt) : undefined}
               value={expiresAt}
               onChange={(event) => setExpiresAt(event.target.value)}
             />

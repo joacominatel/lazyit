@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream';
 import {
   BadRequestException,
   Body,
@@ -9,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   StreamableFile,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -20,6 +20,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ArticleListPageSchema,
@@ -42,11 +43,16 @@ import {
   type AssetStatus,
   type AssetWarrantyFilter,
 } from '@lazyit/shared';
-import { ASSET_SORT_ALLOWLIST, type AssetFilters } from './assets.service';
+import {
+  ASSET_SORT_ALLOWLIST,
+  type AssetFilters,
+  type PurchaseFilters,
+} from './assets.service';
 import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { ExportService } from '../common/export';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
@@ -91,6 +97,7 @@ export class AssetsController {
     private readonly assignments: AssetAssignmentsService,
     private readonly history: AssetHistoryService,
     private readonly articles: ArticlesService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
@@ -274,26 +281,40 @@ export class AssetsController {
         serials,
       }),
     };
-    // Purchase filters (#1476), list read only like assetTags/serials: the CSV export does not take them.
-    // Authorized here (403 without purchaseOrder:read); the list query applies no unauthorized ones.
+    filters.purchase = await this.parsePurchaseFilters(
+      { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
+      principal,
+    );
+    return this.assets.findPage(filters, pageQuery);
+  }
+
+  /**
+   * The purchase filters (#1476), shared by the list and the export: 403 without purchaseOrder:read, and
+   * only the authorized object reaches the query. None given → undefined, with no permission check.
+   */
+  private async parsePurchaseFilters(
+    raw: {
+      purchaseOrderLineId?: string;
+      purchaseOrderId?: string;
+      purchaseLinked?: string;
+    },
+    principal?: Principal,
+  ): Promise<PurchaseFilters | undefined> {
     const purchase = {
       purchaseOrderLineId: parseCuidQuery(
-        purchaseOrderLineId,
+        raw.purchaseOrderLineId,
         'purchaseOrderLineId',
       ),
-      purchaseOrderId: parseCuidQuery(purchaseOrderId, 'purchaseOrderId'),
+      purchaseOrderId: parseCuidQuery(raw.purchaseOrderId, 'purchaseOrderId'),
       purchaseLinked:
-        purchaseLinked === undefined
+        raw.purchaseLinked === undefined
           ? undefined
-          : parseBooleanQuery(purchaseLinked),
+          : parseBooleanQuery(raw.purchaseLinked),
     };
-    if (Object.values(purchase).some((value) => value !== undefined)) {
-      filters.purchase = await this.assets.authorizePurchaseFilters(
-        purchase,
-        principal,
-      );
+    if (Object.values(purchase).every((value) => value === undefined)) {
+      return undefined;
     }
-    return this.assets.findPage(filters, pageQuery);
+    return this.assets.authorizePurchaseFilters(purchase, principal);
   }
 
   /**
@@ -314,7 +335,7 @@ export class AssetsController {
     assignedToUserId?: string;
     ownership?: string;
     warranty?: string;
-    /** List read only (#1387): exact values, comma-separated. The CSV export does not take them. */
+    /** Exact values, comma-separated (#1387). */
     assetTags?: string;
     serials?: string;
   }) {
@@ -384,7 +405,7 @@ export class AssetsController {
   @ApiProduces('text/csv')
   @ApiOperation({
     summary:
-      'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1). Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only when the caller holds purchaseOrder:read (ADR-0099 §8).',
+      'CSV export of the WHOLE filtered asset inventory (issue #872, ADR-0103), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort, purchase filters included with their purchaseOrder:read check) and streams every matching asset newest-first: UTF-8 BOM, the `# lazyit` provenance line the importer reads, CRLF rows, formula-guarded text cells. `deleted=only` (archived) is ADMIN-only (403). Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`). `specs` is not included. Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only for a caller holding purchaseOrder:read (ADR-0099 §8).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'modelId', required: false })
@@ -404,6 +425,24 @@ export class AssetsController {
     required: false,
     enum: [...AssetWarrantyFilterSchema.options],
   })
+  @ApiQuery({ name: 'assetTags', required: false })
+  @ApiQuery({ name: 'serials', required: false })
+  @ApiQuery({
+    name: 'purchaseOrderLineId',
+    required: false,
+    description: 'Needs purchaseOrder:read (403 otherwise).',
+  })
+  @ApiQuery({
+    name: 'purchaseOrderId',
+    required: false,
+    description: 'Needs purchaseOrder:read (403 otherwise).',
+  })
+  @ApiQuery({
+    name: 'purchaseLinked',
+    required: false,
+    type: Boolean,
+    description: 'Needs purchaseOrder:read (403 otherwise).',
+  })
   @ApiQuery({
     name: 'deleted',
     required: false,
@@ -414,7 +453,9 @@ export class AssetsController {
   @ApiOkResponse({
     description: 'The filtered asset inventory as CSV (text/csv).',
   })
-  export(
+  async export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
     @Query('categoryId') categoryId?: string,
     @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
@@ -426,10 +467,14 @@ export class AssetsController {
     @Query('warranty') warranty?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
-    @CurrentPrincipal() principal?: Principal,
     @Query('statusLabelId') statusLabelId?: string,
-  ): StreamableFile {
-    const filters = this.parseAssetFilters({
+    @Query('assetTags') assetTags?: string,
+    @Query('serials') serials?: string,
+    @Query('purchaseOrderLineId') purchaseOrderLineId?: string,
+    @Query('purchaseOrderId') purchaseOrderId?: string,
+    @Query('purchaseLinked') purchaseLinked?: string,
+  ): Promise<StreamableFile> {
+    const filters: AssetFilters = this.parseAssetFilters({
       categoryId,
       modelId,
       locationId,
@@ -440,26 +485,28 @@ export class AssetsController {
       assignedToUserId,
       ownership,
       warranty,
+      assetTags,
+      serials,
     });
     // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
-
-    const filename = `lazyit-assets-${new Date().toISOString().slice(0, 10)}.csv`;
-    // Readable.from drains the async generator one chunk at a time → never the whole estate in memory.
-    return new StreamableFile(
-      Readable.from(
-        this.assets.streamInventoryCsvRows(filters, slice, principal),
-        {
-          objectMode: false,
-        },
-      ),
-      {
-        type: 'text/csv; charset=utf-8',
-        disposition: `attachment; filename="${filename}"`,
-      },
+    filters.purchase = await this.parsePurchaseFilters(
+      { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
+      principal,
     );
+
+    const { purchase, ...rest } = filters;
+    return this.exports.exportCsv({
+      resource: 'ASSETS',
+      principal,
+      response,
+      filters: { ...rest, ...purchase, deleted: slice },
+      filename: 'assets',
+      stamp: true,
+      ...(await this.assets.inventoryExport(filters, slice, principal)),
+    });
   }
 
   // SELF-SCOPE carve-out (issue #947) — STATIC route declared BEFORE the `:id` param route so

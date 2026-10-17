@@ -7,12 +7,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useProvisionLocalUserAccount } from "@/lib/api/hooks/use-user-mutations";
-import { notifyError } from "@/lib/api/notify-error";
+import { notifyUserError } from "./role-ceiling";
 import { TemporaryPasswordReveal } from "./temporary-password-reveal";
 
 /**
- * Local-mode onboarding (ADR-0086 §5 amendment, issue #1072) — the counterpart to the OIDC
- * {@link ProvisionAccountButton} when `AUTH_MODE=local`. After a bulk import every person lands as a
+ * Local-mode onboarding (ADR-0086 §5 amendment, issue #1072), rendered by {@link ProvisionAccountButton}
+ * when `AUTH_MODE=local`. After a bulk import every person lands as a
  * login-less directory row and, in local mode, ALL self-service onboarding paths are closed by
  * construction. So an ADMIN explicitly mints a ONE-TIME temporary password here: the person becomes a
  * real login account (keeping their role — no privilege widening) and must change the password at first
@@ -40,7 +40,7 @@ export function ProvisionLocalAccountButton({ user }: { user: User }) {
           }),
         );
       },
-      onError: (error) => notifyError(error, t("directory.provisionLocal.error")),
+      onError: (error) => notifyUserError(error, t("directory.provisionLocal.error"), t),
     });
   }
 

@@ -23,7 +23,7 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
 
 - **Vos** — tu nombre, email, rol y fecha de alta, con un atajo a **Mi perfil**.
 - **Tus páginas** — tarjetas para **Mi perfil**, [Correos de notificación](/help/notifications-activity-email-preferences),
-  **IA y apps conectadas** (solo si podés conectar apps de IA y tu instancia tiene el asistente — ver
+  **IA y apps conectadas** (solo si tu instancia tiene el asistente — ver
   [Apps conectadas](/help/ai-assistant-connected-apps)) y el **Secret Manager** (solo si podés leer
   secretos — ahí está tu contraseña personal de bóveda).
 - **Contraseña y sesiones** — quién gestiona tu contraseña (lazyit o el proveedor de inicio de sesión de
@@ -62,9 +62,9 @@ el que realmente te conocen.
 2. Cambiá el nombre, el apellido o los dos (de 1 a 100 caracteres cada uno) y elegí **Guardar**.
 
 El nombre nuevo aparece en todos lados al instante: en el menú de arriba a la derecha, en los
-responsables de activos y concesiones, y en la lista de **Usuarios**. Si tu organización inicia sesión
-con el servicio de inicio de sesión incluido en lazyit, tu nombre también se actualiza ahí. El cambio
-queda registrado en tu historial de usuario, como cualquier otro cambio de nombre.
+responsables de activos y concesiones, y en la lista de **Usuarios**. El cambio queda registrado en tu
+historial de usuario, como cualquier otro cambio de nombre. Si tu organización inicia sesión con su
+propio proveedor de identidad, tu nombre ahí no cambia.
 
 Solo se puede editar el nombre. Tu correo, rol, legajo, nombre de usuario y responsable siguen en manos
 de los administradores.
@@ -74,9 +74,8 @@ Active Directory o LDAP y vos sos una de ellas, el directorio es dueño de tu no
 lo muestra de solo lectura, con una nota que lo explica: un cambio acá solo se sobrescribiría en la
 próxima sincronización. Pedile a un administrador que lo cambie en el directorio.
 
-**Si no se puede guardar.** Si en ese momento no se puede actualizar el servicio de inicio de sesión,
-lazyit no cambia nada y te lo avisa: probá de nuevo en un momento. Las cuentas de servicio no tienen
-perfil, así que no pueden editar un nombre.
+**Si no se puede guardar.** lazyit no cambia nada y te lo avisa: probá de nuevo en un momento. Las
+cuentas de servicio no tienen perfil, así que no pueden editar un nombre.
 
 ## Tu idioma y tu tema en todos tus dispositivos
 
@@ -154,6 +153,10 @@ inicio de sesión único de tu organización), tu perfil también tiene un panel
 - Ingresá tu contraseña **actual** y luego tu **nueva** contraseña dos veces. La nueva debe cumplir la
   lista de requisitos en vivo (longitud, mayúscula y minúscula, un número y un símbolo) y debe ser
   distinta de la actual.
+- Después de cinco contraseñas **actuales** incorrectas lazyit te hace esperar antes de reintentar
+  ("Demasiadas contraseñas incorrectas"), por un tiempo que crece con cada fallo, hasta 15 minutos, y
+  te dice cuánto falta. La espera es compartida con las confirmaciones con contraseña del chat de IA y
+  de la pantalla de consentimiento de MCP.
 - Al cambiarla **seguís con la sesión iniciada en este dispositivo**; cualquier *otra* sesión se cierra
   y tus apps de IA y tokens personales se desconectan, así que cambiar la contraseña también sirve para
   cerrar una sesión olvidada, compartida, perdida o robada.

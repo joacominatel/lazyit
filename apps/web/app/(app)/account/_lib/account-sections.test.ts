@@ -11,17 +11,16 @@ const keys = (ctx: Parameters<typeof accountSections>[0]) =>
 
 describe("accountSections", () => {
   test("everyone sees overview, profile and notifications", () => {
-    expect(keys({ canConnectAi: false, aiStatusAvailable: false })).toEqual([
+    expect(keys({ aiStatusAvailable: false })).toEqual([
       "overview",
       "profile",
       "notifications",
     ]);
   });
 
-  test("AI needs both ai:connect and a live /ai/status", () => {
-    expect(keys({ canConnectAi: true, aiStatusAvailable: false })).not.toContain("ai");
-    expect(keys({ canConnectAi: false, aiStatusAvailable: true })).not.toContain("ai");
-    expect(keys({ canConnectAi: true, aiStatusAvailable: true })).toEqual([
+  test("AI needs only a live /ai/status, not ai:connect (AUD-083)", () => {
+    expect(keys({ aiStatusAvailable: false })).not.toContain("ai");
+    expect(keys({ aiStatusAvailable: true })).toEqual([
       "overview",
       "profile",
       "notifications",
@@ -52,7 +51,7 @@ describe("activeAccountSection", () => {
   });
 
   test("a hidden section is not active", () => {
-    const visible = accountSections({ canConnectAi: false, aiStatusAvailable: false });
+    const visible = accountSections({ aiStatusAvailable: false });
     expect(activeAccountSection("/account/ai", visible)).toBeNull();
   });
 });

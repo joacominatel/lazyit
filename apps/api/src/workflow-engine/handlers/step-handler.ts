@@ -150,9 +150,21 @@ export interface StepRequestMeta {
  * Reveal the connection's credential PLAINTEXT at call time, in memory only (INV-6). Returns `null`
  * when the connection has no credential configured (e.g. an unauthenticated REST target, or a
  * WEBHOOK_OUT with no signing secret). The CORE wires this to
- * `SecretService.revealById`. NEVER returned across an API boundary.
+ * `SecretService.revealById`. NEVER returned across an API boundary. Rejects with a
+ * {@link CredentialUnavailableError} when the referenced credential is revoked or cannot be decrypted.
  */
 export type RevealSecret = () => Promise<string | null>;
+
+export const CREDENTIAL_UNAVAILABLE_REASON =
+  "the connection's credential is unavailable (revoked or undecryptable) — attach a new credential to the connection";
+
+/** An expected failure (revoked or undecryptable credential): handlers fail the step, never throw. */
+export class CredentialUnavailableError extends Error {
+  constructor() {
+    super(CREDENTIAL_UNAVAILABLE_REASON);
+    this.name = 'CredentialUnavailableError';
+  }
+}
 
 /**
  * Everything a handler needs to EXECUTE one step. Generic over the connection config + step shapes so
@@ -250,7 +262,7 @@ export interface ManualTaskSpec {
  *  - `SUCCEEDED` — the external operation completed; `externalCorrelationId` may carry the created
  *    external id (so a later revoke deprovisions the EXACT account).
  *  - `FAILED` — the operation failed; `retryable` tells the CORE whether a transient failure may be
- *    re-attempted (mirrors the zitadel-management posture: 4xx permanent, 5xx/429/network transient —
+ *    re-attempted (4xx permanent, 5xx/429/network transient —
  *    AND only when the step is idempotent, so a non-idempotent create is single-shot).
  *  - `AWAITING_INPUT` — a MANUAL step: `manualTask` is set and the run pauses in Postgres.
  */
@@ -288,7 +300,7 @@ export interface TestConnectionResult {
 
 /**
  * One connector type's executor. Selected by {@link kind} from the `ConnectorRegistry`
- * (capability-by-key, mirroring the in-tree `IdentityProvider` factory — not `instanceof`). Stateless
+ * (capability-by-key, not `instanceof`). Stateless
  * and effectively-once by key.
  */
 export interface StepHandler<
@@ -306,12 +318,12 @@ export interface StepHandler<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Shared outcome classification (the zitadel-management retry posture, mirrored)
+// Shared outcome classification (the retry posture)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * HTTP statuses worth a bounded retry: a transient upstream blip, NOT a permanent client error
- * (mirrors `zitadel-management.service.ts` `RETRYABLE_STATUSES`). `408` request-timeout, `429`
+ * `408` request-timeout, `429`
  * too-many-requests, and the `5xx` family. Any other `4xx` (esp. `400/401/403/404/409`) is permanent.
  */
 export const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([

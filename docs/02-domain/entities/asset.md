@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-16
 ---
 
 # Asset
@@ -53,7 +53,10 @@ concrete instance of a generic [[asset-model]].
   label when the status does not change and clears it when it does. The bulk status change and bulk receive
   take `statusLabelId` the same way. A label's kind is frozen while any asset carries it, and archiving a
   label in use moves its assets (live and archived) elsewhere first — so an asset never points at an
-  archived label. Existing assets read `statusLabelId = null`.
+  archived label. Existing assets read `statusLabelId = null`. A status write — `PATCH` or the bulk status
+  change — locks the named custom status, then the asset rows, inside its transaction and decides
+  whether to keep or clear the custom status from the rows read under that lock, so a concurrent edit
+  cannot leave an asset in a status its label does not map to (audit 2026-10-10, AUD-044).
 - `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
   `409`); a soft-deleted value is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 - **`id` vs `assetTag` — two different identities.** `id` is the internal `cuid()` primary key
@@ -83,9 +86,12 @@ concrete instance of a generic [[asset-model]].
   Two modes: `untagged-only` (default, safe — only assets with no tag) and `normalize-non-conforming`
   (opt-in, behind a warning — also retags tags that don't match the scheme; **conforming manual tags
   are never touched**). Optional `modelId` filter + per-row deselect.
-- FKs (`modelId`, `locationId`) are `onDelete: SetNull`: deleting a model/location **detaches**
-  assets, never deletes them (auditability > strict referential integrity). Combined with soft
-  delete everywhere, references are preserved in practice.
+- FKs (`modelId`, `locationId`) are `onDelete: SetNull`: a hard delete of a model/location would
+  **detach** assets, never delete them (auditability > strict referential integrity). The API only
+  soft-deletes, which fires no referential action. Deleting a **location** with live assets needs one
+  resolution for all of them — detach or move, each with a `LOCATION_CHANGED` history row (see
+  [[location]], AUD-024). Deleting a **model** in use takes the same one resolution, each asset with a
+  `MODEL_CHANGED` row (see [[asset-model]], SEC-041).
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
 
@@ -162,16 +168,21 @@ concrete instance of a generic [[asset-model]].
 > [[asset-model]]`.specs` carries the same write bound (#1329), since its defaults are merged into a
 > new asset's specs; `AssetModelSchema` reads stay unbounded too.
 
-> [!note] Expanded read shape (reads only)
-> `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
-> (with the model's `category` nested), its `location`, and `activeAssignments` — the **active**
-> owners (`releasedAt = null`), each with its `user` inlined. This lets the web render the
-> table/detail in one call instead of fanning out to several list endpoints (resolved by a single
-> nested Prisma `include` — a constant number of queries, no N+1). `model`/`location` are `null`
-> when unset; `activeAssignments` is `[]` when there are no active owners. **Writes are unchanged** —
-> `POST`/`PATCH` still take and return the lean `Asset`. Schemas: `AssetWithRelationsSchema`,
-> `AssetModelWithCategorySchema`, `AssetAssignmentWithUserSchema` in `@lazyit/shared`
-> (`packages/shared/src/schemas/asset-expanded.ts`).
+> [!note] Read shapes — lean list, expanded detail
+> **`GET /assets/:id`** returns an **`AssetWithRelations`**: the asset plus its `model` (with the
+> model's `category` nested), its `location`, its `statusLabel`, the computed `currentBookValue`, and
+> `activeAssignments` — the **active** owners (`releasedAt = null`), each with its `user` inlined through
+> the public column allowlist. One nested Prisma `include` — a constant number of queries, no N+1.
+> `model`/`location` are `null` when unset; `activeAssignments` is `[]` when there are no active owners.
+>
+> **`GET /assets`** and **`GET /assets/mine`** are **paginated** ([[0030-list-pagination-contract]]):
+> `Page<AssetListItem>` = `{ items, total, limit, offset }`. Each row is the **lean** projection
+> (`AssetListItemSchema`, `packages/shared/src/schemas/asset-list.ts`): the asset **without** `specs`,
+> with trimmed joins — `model` `{ id, name, manufacturer, category: { id, name } }`, `location`
+> `{ id, name, type }`, `statusLabel`, and `activeAssignments` `{ id, userId, user: { id, firstName,
+> lastName, email, deletedAt } }`. **Writes are unchanged** — `POST`/`PATCH` take and return the lean
+> `Asset`. Schemas: `AssetWithRelationsSchema`, `AssetListItemSchema`, `AssetListPageSchema` in
+> `@lazyit/shared`.
 >
 > **Soft-deleted users are included** in `activeAssignments` (returned with their `deletedAt` set):
 > an owner who left the company still appears as an active owner until the assignment is explicitly
@@ -236,8 +247,11 @@ three stored fields are echoed on create/update.
 
 `apps/api/src/assets/` (`AssetsModule`):
 
-- `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
-  with optional filters **`?categoryId=&modelId=&locationId=&status=&statusLabelId=&company=&q=&assignedToUserId=&warranty=`**:
+- `GET /assets` (`asset:read`) — **paginated lean** list (`Page<AssetListItem>`, see the read-shapes
+  note above; live assets only, newest first). Paging is `limit` (default 50, max 200) with `offset`
+  or `page`; `deleted=only` lists the archived assets instead and is **ADMIN-only** (`403` otherwise,
+  [[0041-soft-delete-reuse-and-restore]]). Optional filters
+  **`?categoryId=&modelId=&locationId=&status=&statusLabelId=&company=&q=&assignedToUserId=&ownership=&warranty=`**:
   `categoryId` matches the asset's **model's** category, `modelId` matches the asset's **exact**
   model (#943 — distinct from `categoryId`; deep-linked from the asset detail page's Model link),
   `status` is validated against the enum (invalid → `400`) and matches the **built-in** status — so it
@@ -250,15 +264,19 @@ three stored fields are echoed on create/update.
   (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation — and
   `warranty` (#955; invalid → `400`) filters on `warrantyEnd`: `expiring90d` = `now < warrantyEnd <=
   now + 90d` (the not-yet-lapsed window the dashboard "Needs attention" warranty tile deep-links to),
-  `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. The same 90-day window
+  `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. `ownership`
+  (`HAS` | `NONE`; invalid → `400`) slices by live assignments: assets with an active owner, or none.
+  The same 90-day window
   also drives a proactive **`warranty_expiring`** notification (bell + email, admin broadcast) — a daily
-  look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070).
-  `assetTags` / `serials` (#1387, list only — the CSV export does not take them) are **exact,
+  look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070). Each pass
+  sends at most 200 new heads-ups per type, soonest expiry first, so a bulk-imported backlog drains over
+  consecutive days.
+  `assetTags` / `serials` (#1387; the CSV export takes them too) are **exact,
   case-sensitive** value lists, comma-separated, at most 200 distinct values each (more → `400`; a value
   cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
   field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
   batch create uses them for its duplicate check.
-  **Purchase filters** (#1476, list only — the CSV export does not take them): `purchaseOrderLineId` (the
+  **Purchase filters** (#1476; the CSV export takes them too, with the same check): `purchaseOrderLineId` (the
   assets linked to that line), `purchaseOrderId` (linked to any line of that purchase) and
   `purchaseLinked` (`true` = linked to some purchase line, `false` = to none), AND-combined; an id that is
   not a cuid is a `400`. They reveal provenance, so any of them needs **`purchaseOrder:read`** on top of the
@@ -274,6 +292,19 @@ three stored fields are echoed on create/update.
   (amounts compare as stored, whatever their currency label; an asset without a purchase date, warranty
   end or cost sorts last in both directions). Every order ends with the unique `id`, so a page boundary is
   stable ([[0030-list-pagination-contract]] §9). The model's manufacturer is not sortable.
+- `GET /assets/export` (`asset:read`) — the **whole** filtered inventory as CSV (#872), on the export
+  engine ([[0103-data-export-streaming-path]]): every list filter (the purchase ones behind the same
+  `purchaseOrder:read` check), `deleted=only` ADMIN-only, the list's own `where` and lean projection, read
+  newest first by keyset on `(createdAt, id)` so an asset created mid-export is never sent twice. Over
+  100,000 matching assets → `422`; every export appends a [[data-export-log]] row. The file starts with a
+  UTF-8 BOM and the `# lazyit` provenance line the Migrator reads back ([[0069-migrator-import]]), then
+  the header and CRLF rows. Its column names and order are an importer contract: they only grow at the
+  end. Dates and the cost are typed cells (raw), text cells carry the formula guard; `specs` is not
+  exported. See the purchases note for the extra columns.
+- `GET /assets/mine` — the caller's **own** assets: those with a live assignment to them (#947). A
+  self-read like `GET /users/me`, so **no** `asset:read` is needed; any authenticated human may call it
+  and a service account gets `403`. The user comes only from the principal. Paginated like the list,
+  and each row inlines only the caller's own assignment, never a co-owner's, and no cost.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — feeds the list's company filter ([[0076-asset-company-grouping-field]]). The form's
   smart-entry company field reads `GET /suggestions/company` instead (use counts and last use, merged with
@@ -285,19 +316,33 @@ three stored fields are echoed on create/update.
 - `GET /assets/:id/history?limit=&before=` — the asset's append-only event log
   (`AssetHistory[]`, newest first; cursor on the autoincrement id, `limit` default 50 / max 100).
   `404` if missing/soft-deleted. See [[asset-history]].
+- `GET /assets/:id/articles?q=&status=&categoryId=` (`article:read`) — the **published**
+  knowledge-base articles linked to this asset ([[0042-article-versioning-and-linking]], #220), paginated
+  (`Page<ArticleListItem>`, no markdown). Pinned to the folders the caller may read
+  ([[0060-kb-folder-access-control]]); `404` if the asset is missing or soft-deleted.
 - `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — lean `Asset` shape; an invalid
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). So does an
   **archived** one (#1476): a soft-deleted model or location still passes the FK, so `POST`, bulk receive
   (one upfront `400`, also for a receive from a purchase line) and a `PATCH` that **changes** the model or
   location refuse it. Write-only: reads, and a `PATCH` that re-sends the asset's current (legacy archived)
   model or location, are not checked. Each write
-  takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
-  (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+  takes its actor from the authenticated principal — a human or a [[service-account]] — and emits an
+  [[asset-history]] event (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally
+  ([[0033-asset-history-event-model]]). `POST` and `PATCH` need `asset:write`; `DELETE` needs
+  `asset:delete`.
   `STATUS_CHANGED` also fires when only the custom status changes, and names the custom statuses
   (`fromLabel` / `toLabel`) when either side has one ([[0101-custom-asset-statuses]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
   salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
   no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
+- `POST /assets/batch/delete` · `POST /assets/batch/restore` · `POST /assets/batch/status` —
+  **bulk actions** (`asset:delete`, ADMIN by default; [[0030-list-pagination-contract]] amendment). Body
+  `{ ids }` (1–200 cuids); the status action adds `status` and/or `statusLabelId`, checked like a
+  `PATCH`. Each runs in **one transaction** and writes one history event **per asset** (`DELETED` /
+  `RESTORED` / `STATUS_CHANGED`), never one per batch. Ids that are missing, or already deleted,
+  restored or in the target status, are **skipped** and reported, not errors. The response is a
+  `BatchResult` `{ requested, succeeded, skipped: { id, reason }[] }`. A restore that hits a freed
+  serial or tag taken meanwhile is a `409` and rolls the whole batch back.
 - `POST /assets/batch/receive` — **bulk receive** (ADR-0089 Part A, #1029): mint `quantity` assets from
   one [[asset-model]] in a single action (`asset:write` — ADMIN or MEMBER; creating assets is that verb,
   no new permission). Body `{ modelId, quantity (1..200), status, locationId?, company?, purchaseDate?,

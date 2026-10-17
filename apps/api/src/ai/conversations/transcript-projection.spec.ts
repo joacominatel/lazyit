@@ -449,3 +449,123 @@ describe('approval cards', () => {
     });
   });
 });
+
+describe('tool-use ids reused across runs (AUD-075)', () => {
+  const RUN_A = 'crun0000000000000000000001';
+  const RUN_B = 'crun0000000000000000000002';
+
+  const call = (runId: string, toolName: string) =>
+    row(
+      'assistant',
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', toolCallId: 'call_0', toolName, input: {} },
+        ],
+      },
+      'aisdk-v7',
+      runId,
+    );
+  const result = (runId: string | null, summary: string, ok = true) =>
+    row(
+      'tool',
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call_0',
+            output: {
+              type: 'json',
+              value: {
+                ok,
+                kind: 'read',
+                data: {},
+                summary,
+                mutated: false,
+                entityRefs: [],
+              },
+            },
+          },
+        ],
+      },
+      'aisdk-v7',
+      runId,
+    );
+
+  it('keeps each run’s call with its own result and its own invocation', () => {
+    const proposal = {
+      id: 'cinv00000000000000000000001',
+      channel: 'CHAT',
+      conversationId: CONV,
+      runId: RUN_B,
+      toolUseId: 'call_0',
+      toolName: 'update_asset',
+      toolClass: 'write',
+      status: 'AWAITING_APPROVAL',
+      preview: null,
+      expiresAt: null,
+      decidedAt: null,
+      result: null,
+      createdAt: T0,
+    } as unknown as AiToolInvocation;
+    const out = projectTranscript({
+      conversationId: CONV,
+      rows: [
+        row('user', { role: 'user', content: 'first' }, 'aisdk-v7', RUN_A),
+        call(RUN_A, 'find_assets'),
+        // The repair of a step left open writes its tool message with no run.
+        result(null, '2 assets'),
+        row('user', { role: 'user', content: 'second' }, 'aisdk-v7', RUN_B),
+        call(RUN_B, 'update_asset'),
+      ],
+      invocations: [proposal],
+      classOf,
+    });
+    expect(out.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    expect(out[1].parts).toEqual([
+      expect.objectContaining({
+        type: 'tool',
+        toolCallId: 'call_0',
+        name: 'find_assets',
+        status: 'SUCCEEDED',
+        result: expect.objectContaining({ summary: '2 assets' }) as unknown,
+      }),
+    ]);
+    expect(out[3].parts).toEqual([
+      {
+        type: 'tool',
+        toolCallId: 'call_0',
+        name: 'update_asset',
+        class: 'write',
+        status: 'AWAITING_APPROVAL',
+      },
+    ]);
+  });
+
+  it('folds a later run’s result into that run’s call only', () => {
+    const out = projectTranscript({
+      conversationId: CONV,
+      rows: [
+        call(RUN_A, 'find_assets'),
+        result(RUN_A, 'first answer'),
+        call(RUN_B, 'find_assets'),
+        result(RUN_B, 'second answer'),
+      ],
+      invocations: [],
+      classOf,
+    });
+    expect(out).toHaveLength(2);
+    expect(out[0].parts[0]).toMatchObject({
+      result: { summary: 'first answer' },
+    });
+    expect(out[1].parts[0]).toMatchObject({
+      result: { summary: 'second answer' },
+    });
+  });
+});

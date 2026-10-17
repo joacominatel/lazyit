@@ -58,8 +58,8 @@ days. Full reasoning in §16.
   multi-grant allowed (no uniqueness); actor attributed human-XOR-service-account
   (`grantedById`/`grantedBySaId`, `revokedById`/`revokedBySaId` + at-most-one CHECK, ADR-0048).
   `apps/api/src/access-grants/access-grants.service.ts` — `create()` and `revoke()` are the two
-  hook points for v1. `expiresAt` is informative; **no scheduler revokes at expiry** today
-  ([[0023-access-management-design]], deferred in ADR-0053).
+  hook points for v1. `expiresAt` **auto-revokes**: `AccessGrantExpirySweeper` revokes a grant once it
+  passes, through `revoke()`, so `ACCESS_REVOKED` fires ([[0023-access-management-design]], amended).
 - **The two write paths we hook:** `AccessGrantsService.create()` (→ `ACCESS_GRANTED`) and
   `AccessGrantsService.revoke()` (→ `ACCESS_REVOKED`). `batchRevoke()` fans out to one event per
   grant (preserving the per-grant idempotency, §9).

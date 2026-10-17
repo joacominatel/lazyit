@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -13,11 +14,17 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { createZodDto } from 'nestjs-zod';
 import {
   DismissAllNotificationsQuerySchema,
+  MarkNotificationGroupReadSchema,
+  NOTIFICATION_TYPES,
+  NotificationGroupKeySchema,
+  NotificationGroupsQuerySchema,
   type DismissNotificationsResult,
   type MarkReadResult,
   type Notification,
+  type NotificationGroup,
   type Page,
   type UnreadCount,
 } from '@lazyit/shared';
@@ -28,6 +35,13 @@ import {
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { parsePageQuery } from '../common/parse-page-query';
+
+export class MarkNotificationGroupReadDto extends createZodDto(
+  MarkNotificationGroupReadSchema,
+) {}
+
+const TZ_DESCRIPTION =
+  'IANA time zone the calendar days are bucketed in (default UTC). The web sends the instance zone, NEXT_PUBLIC_DEFAULT_TIME_ZONE.';
 
 /**
  * The in-app notification bell endpoints (ADR-0056 §2) — POLL delivery in v1. SSE is a Phase-2 upgrade
@@ -76,6 +90,89 @@ export class NotificationsController {
     );
   }
 
+  @Get('groups')
+  @ApiOperation({
+    summary:
+      "The caller's bell grouped by (type, calendar day in tz), newest group first, paged. Each group carries its count, unread count, newest timestamp and a preview of its newest items.",
+  })
+  @ApiQuery({
+    name: 'tz',
+    required: false,
+    type: String,
+    description: TZ_DESCRIPTION,
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOkResponse({ description: 'A page of groups (Page<NotificationGroup>).' })
+  findGroups(
+    @CurrentPrincipal() principal?: Principal,
+    @Query('tz') tz?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ): Promise<Page<NotificationGroup>> {
+    const viewer = this.requireViewer(principal);
+    const parsed = NotificationGroupsQuerySchema.safeParse({ tz });
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Invalid tz: expected an IANA time zone name',
+      );
+    }
+    return this.notifications.findGroups(
+      viewer,
+      parsed.data.tz,
+      parsePageQuery({ limit, offset, page }),
+    );
+  }
+
+  @Get('groups/items')
+  @ApiOperation({
+    summary:
+      "One group's notifications (type + day in tz), newest first, paged — only what the caller can see and has not dismissed.",
+  })
+  @ApiQuery({ name: 'type', required: true, enum: NOTIFICATION_TYPES })
+  @ApiQuery({
+    name: 'day',
+    required: true,
+    type: String,
+    description: 'YYYY-MM-DD',
+  })
+  @ApiQuery({
+    name: 'tz',
+    required: false,
+    type: String,
+    description: TZ_DESCRIPTION,
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOkResponse({
+    description: 'A page of notifications (Page<Notification>).',
+  })
+  findGroupItems(
+    @CurrentPrincipal() principal?: Principal,
+    @Query('type') type?: string,
+    @Query('day') day?: string,
+    @Query('tz') tz?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ): Promise<Page<Notification>> {
+    const viewer = this.requireViewer(principal);
+    const parsed = NotificationGroupKeySchema.safeParse({ type, day, tz });
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Invalid group: type must be a notification type, day YYYY-MM-DD and tz an IANA time zone name',
+      );
+    }
+    return this.notifications.findGroupItems(
+      viewer,
+      parsed.data,
+      parsePageQuery({ limit, offset, page }),
+    );
+  }
+
   @Get('unread-count')
   @ApiOperation({
     summary:
@@ -114,6 +211,22 @@ export class NotificationsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<MarkReadResult> {
     return this.notifications.markAllRead(this.requireViewer(principal));
+  }
+
+  @Patch('read-group')
+  @ApiOperation({
+    summary:
+      'Mark every notification of one group (type + day in tz) read for the caller, in one statement. Idempotent, scoped to what the caller can see. Returns the rows marked + the fresh unread count.',
+  })
+  @ApiOkResponse({ description: 'The mark-read result: { marked, unread }.' })
+  markGroupRead(
+    @Body() body: MarkNotificationGroupReadDto,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<MarkReadResult> {
+    return this.notifications.markGroupRead(
+      this.requireViewer(principal),
+      body,
+    );
   }
 
   @Patch('dismiss-all')

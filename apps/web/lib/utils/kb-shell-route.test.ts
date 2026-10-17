@@ -88,4 +88,15 @@ describe("kbFolderHref", () => {
   test("preserves other filters when clearing to All articles", () => {
     expect(kbFolderHref("status=PUBLISHED", null)).toBe("/kb?status=PUBLISHED");
   });
+  test("leaves the Recent view when a folder is picked (#1539)", () => {
+    expect(kbFolderHref("view=recent", "folder1")).toBe("/kb?categoryId=folder1");
+  });
+  test("keeps include-subfolders between folders, drops it outside one (#1539)", () => {
+    expect(kbFolderHref("categoryId=a&includeSubfolders=true", "b")).toBe(
+      "/kb?categoryId=b&includeSubfolders=true",
+    );
+    expect(kbFolderHref("categoryId=a&includeSubfolders=true&sort=title", null)).toBe(
+      "/kb?sort=title",
+    );
+  });
 });

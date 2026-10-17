@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-09-23
+updated: 2026-10-16
 ---
 
 # RolePermission
@@ -43,7 +43,11 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   may grant MEMBER or VIEWER a `:delete` or a coarse verb (`settings:manage` / `user:manage` /
   `accessGrant:grant`); the only guardrails are *ADMIN-immutable* + *catalog-membership*. The UI marks
   these ⚠ "Admin-level" and confirms, but the server does not block — an admin-initiated delegation is
-  accepted by design.
+  accepted by design. A delegated `user:manage` is bounded by the **role ceiling** (SEC-088, 2026-10-15):
+  the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the
+  Users API ([[user]] → *RBAC safety guards*). A delegated `settings:manage` reads the matrix but cannot
+  save it: `PUT /config/permissions` is ADMIN-only (SEC-088, 2026-10-16), as are the directory connection
+  writes and the SMTP save. It manages [[service-account]]s only within its own role's verbs.
 - **Seeded behavior-preserving, with two pre-tightened reads.** The seed is derived 1:1 from a single
   source-of-truth constant `DEFAULT_ROLE_PERMISSIONS` ([[shared-package]]) so the documented matrix and
   the seeded rows can never drift (a wrong seed fails the golden test). The seeded matrix:
@@ -80,8 +84,9 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   has no ledger row, so every instance receives its defaults exactly once, on the first deploy that
   ships it — no per-permission data migration. The seed never deletes a grant: admin-added rows and
   rows for permissions that left the defaults stay as they are.
-- **Permissions are lazyit-local.** They are NEVER mirrored to the IdP (BYOI-safe); only the three
-  coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
+- **Permissions are lazyit-local.** They are NEVER mirrored to the IdP, and neither are the three coarse
+  roles: the `grantRole` write-back of [[0043-zitadel-source-of-truth]] §3 was removed with the bundled
+  Zitadel ([[0102-remove-bundled-zitadel]]).
 
 ## Conventions
 
@@ -134,7 +139,8 @@ audit row. Operators should review the permission matrix once after the update t
 ## Endpoints
 
 `apps/api/src/config/` (`ConfigModule`), both `@RequirePermission('settings:manage')` (ADMIN-only in
-the seed):
+the seed). The PUT also carries `AdminOnlyGuard`: only a human ADMIN saves the matrix, even when
+`settings:manage` is delegated (**403** `ADMIN_REQUIRED`, SEC-088, [[0046-roles-permissions-v2]]):
 
 - `GET /config/permissions` — returns the current `RolePermissionMatrix` (ADMIN reported as the COMPLETE
   catalog — what the resolver enforces, never the rows).
@@ -147,9 +153,10 @@ the seed):
   `{ role, permissions: Permission[] }` via the same resolver, so the web can derive `can('domain:action')`
   without polluting the `User` wire shape.
 
-**Web:** the role-first editor at `settings/roles/permissions` (presets + plain-language capability
-toggles + a fine-tune disclosure; NOT a comparison grid) edits one editable role at a time, ADMIN shown
-locked. The `can()` infra (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed) gates
+**Web:** one role × capability matrix at `settings/roles` (#1540; `settings/roles/permissions`
+redirects there): capabilities in rows, ADMIN shown locked, MEMBER and VIEWER editable side by side with
+a preset per column, a fine-tune disclosure for raw per-permission control, and one save for the whole
+matrix. The `can()` infra (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed) gates
 all write/delete affordances ([[0046-roles-permissions-v2]] P6b/P7).
 
 Related: [[user]] · [[permission-audit-log]] · [[service-account-permission]] · [[shared-package]] ·

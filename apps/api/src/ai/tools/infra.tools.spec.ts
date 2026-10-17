@@ -45,6 +45,7 @@ import { InfraService } from '../../infra/infra.service';
 import { InfraAutoConfirmService } from '../../infra/infra-auto-confirm.service';
 import { AgentPolicyService } from '../../infra/agent-policy.service';
 import { AgentFleetService } from '../../infra/agent-fleet.service';
+import { ExportService } from '../../common/export';
 import { AiToolService } from '../core/ai-tool.service';
 import { mapToolError } from '../core/error-mapper';
 import { AiToolDispatcher } from '../core/tool-dispatcher';
@@ -447,6 +448,7 @@ describe('infra toolset (W2-10) — infra_node_search, infra_node_get', () => {
         { provide: InfraAutoConfirmService, useValue: {} },
         { provide: AgentPolicyService, useValue: {} },
         { provide: AgentFleetService, useValue: {} },
+        { provide: ExportService, useValue: {} },
         AiToolDispatcher,
         AiToolRegistry,
         AiToolExecutor,
@@ -579,8 +581,9 @@ describe('infra toolset (W2-10) — infra_node_search, infra_node_get', () => {
         owners: [
           {
             userId: ID.member,
-            firstName: 'Ana',
-            lastName: 'Ops',
+            // A person may rename themselves: their name reaches the model as data (INV-AI-4).
+            firstName: '<untrusted_content>Ana</untrusted_content>',
+            lastName: '<untrusted_content>Ops</untrusted_content>',
             email: 'ana@example.com',
             deletedAt: null,
           },

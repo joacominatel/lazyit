@@ -13,6 +13,7 @@ import {
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
   type ArticleListItem,
+  type ArticleListSort,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleAlias,
@@ -25,6 +26,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Article, User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import {
   isHumanPrincipal,
   isServicePrincipal,
@@ -39,6 +41,14 @@ import {
   type FolderTreeCache,
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
+import { expandFolderSubtrees } from '../article-categories/folder-tree';
+import { claimableWikiLinksWhere } from './wiki-link-claim';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import { visibleFolderPath, type ArticleExportRow } from './article-export';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -75,7 +85,31 @@ export interface ArticleListFilters {
    * counterpart of {@link assetId}; selecting any id implies `linked=only`.
    */
   applicationId?: string[];
+  /**
+   * Widen {@link categoryId} to each selected folder **plus every live descendant** (#1539). Folder access
+   * still ANDs on top, so a descendant the caller may not read stays out. No effect without `categoryId`.
+   */
+  includeSubfolders?: boolean;
+  /**
+   * The list order (#1539). Not a filter, but it travels with them: `updated` (the default when omitted)
+   * newest-updated first, `title` A to Z, `created` newest-created first. Every order ends with `id`.
+   */
+  sort?: ArticleListSort;
 }
+
+/**
+ * The `orderBy` for each `?sort=` key (#1539). Each key fixes its own direction, and every order ends with
+ * the unique `id` so two rows that tie on the sort column keep one stable relative order — offset paging
+ * never repeats or skips a row between pages. `title` is ordered by the database collation.
+ */
+const ARTICLE_LIST_ORDER: Record<
+  ArticleListSort,
+  Prisma.ArticleOrderByWithRelationInput[]
+> = {
+  updated: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  title: [{ title: 'asc' }, { id: 'asc' }],
+  created: [{ createdAt: 'desc' }, { id: 'asc' }],
+};
 
 /**
  * Filters for the **reverse** KB lookups (`GET /assets/:id/articles`, `GET /applications/:id/articles`
@@ -132,6 +166,11 @@ const ARTICLE_AUTHOR_INCLUDE = {
   author: { select: { firstName: true, lastName: true, deletedAt: true } },
 } satisfies Prisma.ArticleInclude;
 
+// restoreVersion re-applies a snapshot's null excerpt; the PATCH contract still cannot clear it.
+type ArticleUpdateInput = Omit<UpdateArticle, 'excerpt'> & {
+  excerpt?: string | null;
+};
+
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; the author — or, since
  * #877, an ADMIN / `article:manage` holder — may write) is enforced here from the authenticated User
@@ -152,8 +191,9 @@ export class ArticlesService {
   ) {}
 
   /**
-   * A single page of non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT
-   * only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
+   * A single page of live articles — or, with `page.deleted === 'only'` (#1647, ADMIN-gated by the
+   * controller), of archived ones — newest-updated first by default. PUBLISHED is visible to
+   * all; DRAFT only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
    * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
    * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
    * `$transaction`, so the `total` can't drift from the page. Optional filters: category, author,
@@ -161,6 +201,10 @@ export class ArticlesService {
    * keeps only articles with ≥1 ArticleLink (optionally narrowed to an asset/application target).
    * Each row carries the precomputed `readingMinutes` and a `linkCount` (relation `_count`, flattened
    * here) so the card UI gets a reading metric + "linked" indicator with no body load and no N+1.
+   *
+   * `filters.sort` picks the order ({@link ARTICLE_LIST_ORDER}; newest-updated when omitted), and
+   * `filters.includeSubfolders` widens a `categoryId` filter to each folder's live subtree (#1539). The
+   * count shares the page's `where` and needs no order.
    */
   async findPage(
     filters: ArticleListFilters,
@@ -168,20 +212,29 @@ export class ArticlesService {
     currentUser?: User,
     principal?: Principal,
   ) {
-    // Folder access (ADR-0060 §4): pin the list to the folders the caller may see, so a folder-hidden
-    // article never even appears in the list (existence-hiding). ADMIN ('ALL') gets no folder pin.
-    const visible = await this.folderAccess.visibleFolderIds(principal);
-    const where = this.buildWhere(filters, currentUser, visible);
+    const { where: scope } = await this.listScope(
+      filters,
+      currentUser,
+      principal,
+    );
+    const where = { ...scope, ...deletedWhere(page.deleted) };
+    // Same opaque spread as the assets list: Prisma's args type does not carry the ADR-0032 escape hatch.
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(
+      page.deleted,
+    )
+      ? { includeSoftDeleted: true }
+      : {};
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: ARTICLE_LIST_ORDER[filters.sort ?? 'updated'],
         take,
         skip,
         select: ARTICLE_LIST_SELECT,
+        ...escapeHatch,
       }),
-      this.prisma.article.count({ where }),
+      this.prisma.article.count({ where, ...escapeHatch }),
     ]);
     // Flatten Prisma's nested `_count.links` into the flat `linkCount` the DTO exposes. The lean rows
     // carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same as findOne) —
@@ -191,6 +244,103 @@ export class ArticlesService {
       linkCount: _count.links,
     }));
     return pageOf(items, total, page);
+  }
+
+  /**
+   * The list's `where` for this caller, shared by {@link findPage} and {@link exportSource}: the folder
+   * pin (ADR-0060 §4, existence-hiding; ADMIN 'ALL' gets none), the draft rule (ADR-0022: PUBLISHED, plus
+   * the caller's own DRAFTs) and the filters. `visible` is returned so the export names only these folders.
+   */
+  private async listScope(
+    filters: ArticleListFilters,
+    currentUser?: User,
+    principal?: Principal,
+  ): Promise<{ where: Prisma.ArticleWhereInput; visible: VisibleFolders }> {
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const categoryId = await this.expandCategoryFilter(filters);
+    const where = this.buildWhere(
+      { ...filters, categoryId },
+      currentUser,
+      visible,
+    );
+    return { where, visible };
+  }
+
+  /** The list's own `where` and lean rows for `GET /articles/export`, walked by keyset (ADR-0103). */
+  async exportSource(
+    filters: ArticleListFilters,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
+    const { where, visible } = await this.listScope(
+      filters,
+      currentUser,
+      principal,
+    );
+    const folderOf = await this.exportFolderNames(visible, principal);
+    return {
+      count: () => this.prisma.article.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<string> | null,
+        take: number,
+      ): Promise<ArticleExportRow[]> => {
+        const rows = await this.prisma.article.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          select: ARTICLE_LIST_SELECT,
+        });
+        return rows.map(({ _count, ...row }) => ({
+          ...row,
+          linkCount: _count.links,
+          folder: folderOf(row.categoryId),
+        }));
+      },
+    };
+  }
+
+  // Folder names follow the folder list's `category:read`; without it the cell keeps the id the list returns.
+  private async exportFolderNames(
+    visible: VisibleFolders,
+    principal?: Principal,
+  ): Promise<(categoryId: string) => string> {
+    if (!(await this.permissions.principalHas(principal, 'category:read'))) {
+      return (categoryId) => categoryId;
+    }
+    const folders = await this.prisma.articleCategory.findMany({
+      select: { id: true, parentId: true, name: true },
+    });
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const paths = new Map<string, string>();
+    return (categoryId) => {
+      let path = paths.get(categoryId);
+      if (path === undefined) {
+        path = visibleFolderPath(categoryId, byId, visible) || categoryId;
+        paths.set(categoryId, path);
+      }
+      return path;
+    };
+  }
+
+  /**
+   * The `categoryId` set the list filters on (#1539). Without `includeSubfolders` (or without a
+   * `categoryId` filter) it is the caller's selection unchanged. With it, each selected folder widens to
+   * itself plus every LIVE descendant: ONE query loads the live folder tree (`id`, `parentId`) and the
+   * pure {@link expandFolderSubtrees} walks it, cycle-safe, so depth never costs extra queries. This only
+   * widens the folder FILTER — the folder-access pin (ADR-0060 §4) is still ANDed on top by
+   * {@link buildWhere}, so a descendant the caller may not read contributes nothing.
+   */
+  private async expandCategoryFilter(
+    filters: ArticleListFilters,
+  ): Promise<string[] | undefined> {
+    if (!filters.includeSubfolders || !filters.categoryId?.length) {
+      return filters.categoryId;
+    }
+    const folders = await this.prisma.articleCategory.findMany({
+      where: { deletedAt: null },
+      select: { id: true, parentId: true },
+    });
+    return expandFolderSubtrees(filters.categoryId, folders);
   }
 
   /**
@@ -328,7 +478,7 @@ export class ArticlesService {
   }
 
   /**
-   * A readable article by id. 404 if missing, soft-deleted, a draft the caller doesn't own (ADR-0022),
+   * A readable article by id. 404 if missing, soft-deleted, a draft the caller neither owns nor manages (ADR-0022),
    * OR in a home folder the caller can't see (ADR-0060 §4 — folder-hidden → 404, NOT 403, so the
    * server never leaks the existence of a restricted article). The three layers compose
    * most-restrictive-wins (folder access AND draft visibility, both 404 on failure). `article:read`
@@ -348,7 +498,7 @@ export class ArticlesService {
       where: { id },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article ${id} not found`);
     }
     await this.assertFolderVisible(
@@ -362,6 +512,19 @@ export class ArticlesService {
     return article;
   }
 
+  // The #877 edit gate already lets a manager write a foreign draft; reading it directly must match (AUD-086).
+  private async isHiddenDraft(
+    article: Pick<Article, 'status' | 'authorId'>,
+    currentUserId: string | undefined,
+    principal?: Principal,
+  ): Promise<boolean> {
+    return (
+      article.status === 'DRAFT' &&
+      article.authorId !== currentUserId &&
+      !(await this.canManageAny(principal))
+    );
+  }
+
   /** Same visibility rules as findOne (draft + folder access — ADR-0022/0060), looked up by slug. */
   async findBySlug(slug: string, currentUser?: User, principal?: Principal) {
     const cu = this.resolveCurrentUser(currentUser);
@@ -369,7 +532,7 @@ export class ArticlesService {
       where: { slug },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
     }
     await this.assertFolderVisible(article.categoryId, principal, () => {
@@ -404,6 +567,7 @@ export class ArticlesService {
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
     const article = await this.prisma.$transaction(async (tx) => {
+      await this.lockLiveFolder(tx, data.categoryId);
       const created = await tx.article.create({
         data: {
           slug,
@@ -426,6 +590,7 @@ export class ArticlesService {
       // Materialize the outgoing `[[slug]]` wiki-link edges from the body (ADR-0059 §3), in the SAME
       // transaction as the article + version write so the edge can never drift from the content.
       await this.rebuildWikiLinks(tx, created.id, created.content);
+      await this.resolveInboundWikiLinks(tx, created.slug, created.id);
       return created;
     });
     // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
@@ -448,7 +613,7 @@ export class ArticlesService {
    * read is refused — ADR-0060 §9) and, unlike other metadata, it DOES append a version so the move is
    * auditable. Moving OUT of a restricted folder into a more permissive one stays allowed by design.
    */
-  async update(id: string, data: UpdateArticle, principal?: Principal) {
+  async update(id: string, data: ArticleUpdateInput, principal?: Principal) {
     const cu = this.requireAuthor(principal);
     const manageAny = await this.canManageAny(principal);
     const current = await this.loadOwned(id, cu, manageAny, principal);
@@ -464,6 +629,9 @@ export class ArticlesService {
     }
     const { metadata, ...rest } = data;
     const article = await this.prisma.$transaction(async (tx) => {
+      if (data.categoryId && data.categoryId !== current.categoryId) {
+        await this.lockLiveFolder(tx, data.categoryId);
+      }
       const updated = await tx.article.update({
         where: { id },
         data: {
@@ -503,6 +671,9 @@ export class ArticlesService {
       // untouched, so the edges are left as-is (the `[[slug]]`s in the body didn't move).
       if (data.content !== undefined && current.content !== updated.content) {
         await this.rebuildWikiLinks(tx, id, updated.content);
+      }
+      if (current.slug !== updated.slug) {
+        await this.resolveInboundWikiLinks(tx, updated.slug, id);
       }
       return updated;
     });
@@ -562,9 +733,13 @@ export class ArticlesService {
     if (article.deletedAt === null) {
       return article; // already live — idempotent
     }
-    const restored = await this.prisma.article.update({
-      where: { id },
-      data: { deletedAt: null, lastEditedById: cu },
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.article.update({
+        where: { id },
+        data: { deletedAt: null, lastEditedById: cu },
+      });
+      await this.resolveInboundWikiLinks(tx, row.slug, row.id);
+      return row;
     });
     // Re-index honoring draft privacy: PUBLISHED is indexed, a DRAFT stays out (ADR-0022 / ADR-0035).
     this.syncSearch(restored);
@@ -632,9 +807,10 @@ export class ArticlesService {
 
   /**
    * A page of an article's version history, newest version first (ADR-0030/0042). Visibility
-   * mirrors the article reads: a DRAFT's history is only visible to its author (404 otherwise), so
-   * snapshots never leak a private draft's content. Runs the page `findMany(take/skip)` and the
-   * `count` over the same `where` inside one `$transaction` so `total` can't drift from the page.
+   * mirrors the article reads: a DRAFT's history is only visible to its author, an ADMIN or an
+   * `article:manage` holder (AUD-086; 404 otherwise), so snapshots never leak a private draft's
+   * content. Runs the page `findMany(take/skip)` and the `count` over the same `where` inside one
+   * `$transaction` so `total` can't drift from the page.
    */
   async listVersions(
     articleId: string,
@@ -705,14 +881,12 @@ export class ArticlesService {
         `Version ${version} of article ${id} not found`,
       );
     }
-    // excerpt is restored only when the old version had one (UpdateArticle's excerpt is a
-    // non-empty string); a version without an excerpt leaves the current excerpt untouched.
     return this.update(
       id,
       {
         title: snapshot.title,
         content: snapshot.content,
-        ...(snapshot.excerpt ? { excerpt: snapshot.excerpt } : {}),
+        excerpt: snapshot.excerpt,
       },
       principal,
     );
@@ -992,7 +1166,7 @@ export class ArticlesService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         select: ARTICLE_LIST_SELECT,
@@ -1226,6 +1400,21 @@ export class ArticlesService {
     }
   }
 
+  // A folder delete holds FOR UPDATE on its rows, so this waits it out and the re-read then sees it gone.
+  private async lockLiveFolder(
+    tx: Prisma.TransactionClient,
+    categoryId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT "id" FROM "article_categories" WHERE "id" = ${categoryId} FOR SHARE`;
+    const live = await tx.articleCategory.findFirst({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!live) {
+      throw this.unusableCategory(categoryId);
+    }
+  }
+
   /**
    * The 400 an unusable `categoryId` raises. Shared by the "not live" check and the move-destination
    * visibility check so an INVISIBLE folder is byte-for-byte indistinguishable from a NON-EXISTENT
@@ -1320,6 +1509,18 @@ export class ArticlesService {
         targetSlug,
         resolvedTargetId: idBySlug.get(targetSlug) ?? null,
       })),
+    });
+  }
+
+  /** `[[slug]]` references left unresolved or on a soft-deleted holder resolve to this article now (ADR-0059 §3). */
+  private async resolveInboundWikiLinks(
+    tx: Prisma.TransactionClient,
+    slug: string,
+    articleId: string,
+  ): Promise<void> {
+    await tx.articleWikiLink.updateMany({
+      where: claimableWikiLinksWhere(slug),
+      data: { resolvedTargetId: articleId },
     });
   }
 

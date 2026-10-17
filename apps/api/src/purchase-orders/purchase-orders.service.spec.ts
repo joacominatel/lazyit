@@ -732,13 +732,41 @@ describe('PurchaseOrdersService', () => {
       await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
       expect(lockedBefore(prisma, prisma.asset.groupBy)).toBe(true);
       expect(lockedBefore(prisma, prisma.purchaseOrderLine.update)).toBe(true);
+      expect(rawQuery(prisma, 1).sql).toContain('"purchase_order_lines"');
     });
 
-    it('an update that does not touch the kind takes no lock', async () => {
+    it('an update that does not touch the kind takes the purchase FOR KEY SHARE, not FOR UPDATE', async () => {
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
       prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+      prisma.$queryRaw.mockResolvedValue([]);
       await service.updateLine(PO, LINE, { description: 'Laptop 14' }, human);
-      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      const purchase = rawQuery(prisma, 0);
+      expect(purchase.sql).toContain('"purchase_orders"');
+      expect(purchase.sql).toContain('FOR KEY SHARE');
+      expect(purchase.values).toEqual([PO]);
+    });
+
+    it('locks purchase then line before reading the quantities it checks, as cancel remaining does (AUD-028)', async () => {
+      // A concurrent cancel-remaining committed 5 cancelled units: quantity 3 must be checked against that.
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(
+        lineRow({ quantity: 5, cancelledQuantity: 5 }),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await expect(
+        service.updateLine(PO, LINE, { quantity: 3 }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      const line = rawQuery(prisma, 1);
+      expect(line.sql).toContain('"purchase_order_lines"');
+      expect(line.sql).toContain('FOR UPDATE');
+      expect(line.values).toEqual([LINE]);
+      const order = prisma.$queryRaw.mock.invocationCallOrder;
+      expect(order[0]).toBeLessThan(order[1]);
+      expect(order[1]).toBeLessThan(
+        prisma.purchaseOrderLine.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
     });
 
     it('a line of another purchase is not found here: 404 on update and removal, scoped by purchaseOrderId', async () => {

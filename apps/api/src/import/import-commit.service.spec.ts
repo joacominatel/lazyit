@@ -47,6 +47,7 @@ jest.mock('../../generated/prisma/client', () => {
 });
 
 import { Prisma } from '../../generated/prisma/client';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 
 /**
  * Unit tests for the migrator COMMIT ENGINE (ADR-0069 wave 4a, #633). Drives `commit()` with fixture
@@ -360,7 +361,7 @@ function makeCategories() {
 /**
  * A UsersService double for the directory-person branch (ADR-0069 REDESIGN §4.5). Records every create()
  * call (payload + opts) and mints a uuid-shaped id. The commit only ever calls it with
- * `{ skipIdpWriteBack: true }`.
+ * `{ directoryOnly: true }`.
  */
 function makeUsers() {
   const calls: { data: any; actorId: any; opts: any }[] = [];
@@ -689,7 +690,9 @@ describe('ImportCommitService.commit', () => {
     const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
       code: 'P2002',
       clientVersion: 'test',
-      meta: { target: 'assets_serial_active_key' },
+      meta: adapterPgUniqueViolationMeta({
+        index: 'assets_serial_active_key',
+      }),
     });
     const assets = makeAssets({
       failOn: (d) => (d.name === 'COLLIDE' ? p2002 : undefined),
@@ -1755,7 +1758,7 @@ describe('ImportCommitService.commit', () => {
 
   // ===== Etapa 2: directory person + AssetAssignment (ADR-0069 REDESIGN §4.5/§4.6) ===============
   describe('directory person + assignment (Etapa 2)', () => {
-    it('creates a directory person (skipIdpWriteBack) and opens its assignment', async () => {
+    it('creates a directory person (directoryOnly) and opens its assignment', async () => {
       const state = sessionWithPerson(
         [
           {
@@ -1778,10 +1781,10 @@ describe('ImportCommitService.commit', () => {
 
       expect(result.committed).toBe(1);
       expect(result.failed).toBe(0);
-      // The person is created via UsersService with skipIdpWriteBack + import provenance + directoryOnly.
+      // The person is created via UsersService as a directory-only person with import provenance.
       expect(users.create).toHaveBeenCalledTimes(1);
       const { data, opts } = users._calls[0];
-      expect(opts.skipIdpWriteBack).toBe(true);
+      expect(opts.directoryOnly).toBe(true);
       expect(opts.createdPayload).toEqual({
         source: 'import',
         sessionId: 'sess-1',
@@ -2280,7 +2283,9 @@ describe('ImportCommitService.commit', () => {
       const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
         code: 'P2002',
         clientVersion: 'test',
-        meta: { target: 'assets_serial_active_key' },
+        meta: adapterPgUniqueViolationMeta({
+          index: 'assets_serial_active_key',
+        }),
       });
       const assets = makeAssets({ failOn: () => p2002 });
       const { service, prisma } = makeService(state, { assets });
@@ -2311,7 +2316,9 @@ describe('ImportCommitService.commit', () => {
       const p2002tag = new Prisma.PrismaClientKnownRequestError('dupe', {
         code: 'P2002',
         clientVersion: 'test',
-        meta: { target: 'assets_assetTag_active_key' },
+        meta: adapterPgUniqueViolationMeta({
+          index: 'assets_assetTag_active_key',
+        }),
       });
       const assets = makeAssets({ failOn: () => p2002tag });
       const { service, prisma } = makeService(state, { assets });
@@ -2404,6 +2411,82 @@ describe('ImportCommitService.commit', () => {
 
       const lastCall = permissions.hasAll.mock.calls.at(-1) as any;
       expect(lastCall[1]).not.toContain('user:manage');
+    });
+  });
+
+  // AUD-087: a created model find-or-creates its category from modelConfig, so that path writes AssetCategory.
+  describe('enqueueCommit AND-check for categories created through a model', () => {
+    const createModel = plan({
+      conflicts: [
+        {
+          entity: 'AssetModel',
+          field: 'modelId',
+          normalizedValue: 'X1',
+          outcome: 'create',
+          targetId: null,
+        },
+      ],
+    });
+    const rows: FixtureRow[] = [
+      {
+        id: 1,
+        rowIndex: 0,
+        status: 'VALID',
+        raw: { Name: 'A', Status: 'active', Model: 'X1', Category: 'Laptop' },
+      },
+    ];
+
+    it('requires category:write when a created model carries a category — denies (403) without it', async () => {
+      const permissions = makePermissions(async (_role, required: string[]) => {
+        return !required.includes('category:write');
+      });
+      const { service, queue } = makeService(
+        sessionWithMapping(rows, createModel, MODEL_CONFIG_MAPPING),
+        { permissions },
+      );
+
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(queue.add).not.toHaveBeenCalled();
+      const required = permissions.hasAll.mock.calls[0][1] as string[];
+      expect([...required].sort()).toEqual(
+        ['asset:write', 'assetModel:write', 'category:write'].sort(),
+      );
+    });
+
+    it('does NOT require category:write when the model only matches, or modelConfig has no category', async () => {
+      const matchModel = plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'X1',
+            outcome: 'match',
+            targetId: 'cmod000000000000000000001',
+          },
+        ],
+      });
+      const noCategory = mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        enums: [],
+        references: [{ field: 'modelId', column: 'Model' }],
+        modelConfig: { manufacturerColumn: 'Manufacturer' },
+      });
+
+      for (const state of [
+        sessionWithMapping(rows, matchModel, MODEL_CONFIG_MAPPING),
+        sessionWithMapping(rows, createModel, noCategory),
+      ]) {
+        const permissions = makePermissions(async () => true);
+        const { service } = makeService(state, { permissions });
+        await service.enqueueCommit('sess-1', OWNER);
+        const required = permissions.hasAll.mock.calls[0][1] as string[];
+        expect(required).not.toContain('category:write');
+      }
     });
   });
 });

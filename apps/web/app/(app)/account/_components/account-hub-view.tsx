@@ -40,8 +40,9 @@ interface HubCard {
  *
  * - **Identity** — `GET /users/me` (open to every signed-in human).
  * - **Cards** — My profile (`/profile`, #947), Notification emails (`/account/notifications`, #879),
- *   AI & connected apps (`/account/ai`, ADR-0097; `ai:connect` + a live `GET /ai/status`, the user-menu
- *   rule), Secret Manager (`/secrets`, `secret:read`) where the personal vault password lives.
+ *   AI & connected apps (`/account/ai`, ADR-0097; a live `GET /ai/status`, the user-menu rule —
+ *   no `ai:connect` needed, AUD-083), Secret Manager (`/secrets`, `secret:read`) where the personal
+ *   vault password lives.
  * - **Security** — who owns the password (`GET /config/status` `authMode`) and the existing sign-out.
  * - **Preferences** — the language cookie (ADR-0051) and the theme (next-themes), both client-side.
  *
@@ -59,7 +60,7 @@ export function AccountHubView() {
     { key: "profile", href: "/profile", icon: UserCircleIcon },
     { key: "notifications", href: "/account/notifications", icon: BellAlertIcon },
   ];
-  if (can("ai:connect") && aiStatus.isSuccess) {
+  if (aiStatus.isSuccess) {
     cards.push({ key: "ai", href: "/account/ai", icon: PuzzlePieceIcon });
   }
   if (can("secret:read")) {

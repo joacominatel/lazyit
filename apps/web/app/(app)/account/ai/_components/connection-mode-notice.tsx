@@ -23,10 +23,26 @@ const code = (chunks: ReactNode) => (
  * why OAuth is not available there), what cloud connectors need, and what a switched-off MCP server
  * means for existing connections. Derived from `GET /ai/status` `mcp` and the page's own protocol.
  */
-export function ConnectionModeNotice({ mode }: { mode: McpConnectMode }) {
+export function ConnectionModeNotice({
+  mode,
+  canConnect,
+}: {
+  mode: McpConnectMode;
+  /** `ai:connect`; without it `/ai/status` reports MCP unavailable even when the server is on. */
+  canConnect: boolean;
+}) {
   const t = useTranslations("oauth.mode");
 
   if (mode.kind === "unknown") return null;
+
+  if (mode.kind === "unavailable" && !canConnect) {
+    return (
+      <Callout tone="info" icon={<LockClosedIcon />} className="text-sm">
+        <p className="font-medium">{t("unavailableRole.title")}</p>
+        <p className="mt-1 text-muted-foreground">{t("unavailableRole.body")}</p>
+      </Callout>
+    );
+  }
 
   if (mode.kind === "unavailable") {
     return (

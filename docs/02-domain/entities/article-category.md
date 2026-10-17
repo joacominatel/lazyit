@@ -3,7 +3,7 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-15
 ---
 
 # ArticleCategory
@@ -15,7 +15,7 @@ updated: 2026-10-05
 > (shipped #392): a self-ref `parentId` gives a tree, and the existing **required
 > one-category-per-article FK is the one home [[folder]] per article**. Folder-name uniqueness is now
 > per-parent (a live-only PARTIAL unique index on `(parentId, name)` — [[0041-soft-delete-reuse-and-restore]]),
-> with a DFS **cycle guard** and a **no-silent-orphan** child-folder 409. The **model and table keep
+> with a **cycle guard** and a **no-silent-orphan** child-folder 409. The **model and table keep
 > the names `ArticleCategory` / `article_categories`** and the endpoints stay `/article-categories`
 > (the rename to `Folder` / `folders` is a follow-up). The folder is also the **access boundary**
 > ([[0060-kb-folder-access-control]], shipped #404) — a bounded, named data-scoping axis layered
@@ -43,7 +43,9 @@ and soft-deleted from the app; the seed set is just an initial, non-special list
   still rejects duplicate names ([[0041-soft-delete-reuse-and-restore]]). A soft-deleted name is freed
   for reuse / restore within its parent.
 - **No cycles** (#392) — a folder may not be its own ancestor; a reparent that would close a loop is a
-  **400** (a DFS walk up the chain, like the manager chain — [[0058-user-manager-and-clone-actions]]).
+  **400** (a walk of the subject's subtree, soft-deleted folders included, like the manager chain —
+  [[0058-user-manager-and-clone-actions]]). Every tree-shape write checks and writes under one
+  folder-tree advisory lock — see [[folder]].
 - Seeded with eight starter categories (Networking, Servers, Access Management, Datacenter,
   Procedures, Troubleshooting, Onboarding, Tools) with heroicon `icon`s and a `order`. The seed is
   idempotent (find-among-live-then-create, never clobbers edits) — see `apps/api/prisma/seed.ts`.
@@ -52,7 +54,7 @@ and soft-deleted from the app; the seed set is just an initial, non-special list
 - **Deleting a category that still has live CHILD folders is refused with `409`** (#392) — a non-empty
   subtree is never silently orphaned; reparent or delete the children first.
 - **Cascade delete** (`DELETE /:id?cascade=true`, #415, `category:delete` ADMIN-only) — soft-deletes
-  the folder, **all descendant folders** (full BFS subtree), and **all articles** in the subtree in a
+  the folder, **all descendant folders** (full subtree), and **all articles** in the subtree in a
   single `$transaction`. Hard-deletes all [[article-alias]] rows in the subtree (folder-side) and any
   article-side aliases whose article was just deleted. Returns `{ deletedFolders, deletedArticles }`.
   The author-only article gate is bypassed (ADMIN folder operation). See [[folder]] for full rules.
@@ -93,11 +95,14 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 
 `apps/api/src/article-categories/` (`ArticleCategoriesModule`): `GET /article-categories` (excludes
 soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST` (optional
-`parentId` → nest; absent = root; `400` if the parent isn't live), `PATCH /:id` (`parentId` nullable —
-`null` moves to root, a cuid reparents; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
+`parentId` → nest; absent = root; `400` if the parent isn't live or the caller cannot read it — the
+same 400 for both, [[0060-kb-folder-access-control]] §10), `PATCH /:id` (`parentId` nullable — `null`
+moves to root, a cuid reparents; a **change** of `parentId` needs `settings:manage`, else `403`, and is
+recorded on the subtree's articles' version history; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
 folder still has live articles **or** live child folders; add `?cascade=true` for the full subtree
 cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` ADMIN-only, #415),
-`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and
+`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]; `409` if
+the folder's parent is still deleted), and
 `PUT /:id/access-rules` (#404, `settings:manage` ADMIN-only — set/clear the folder's access rules;
 body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
 the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). **No write returns
@@ -109,6 +114,10 @@ The list read shape carries a **computed `articleCount`** (`.nullish()`, ADR-009
 Prisma `_count` of that folder's **live** articles scoped to the caller's visibility (folder-access
 rules + own drafts), so it never reveals a count a viewer couldn't reach; it is **not a stored column**
 (no migration) and the UI **hides the number when absent** (older API / a folder the caller can't read).
+Beside it, **`totalArticleCount`** (`.nullish()`, #1651) is that count summed over the folder **and every
+live descendant**: what the folder rail shows. It is computed in memory from the same rows (no extra
+query), a descendant the caller cannot read adds 0 (so a restricted subfolder never shows through its
+parent), and it is `null` exactly where `articleCount` is.
 
 Both read shapes also carry a **derived `hasAccessRules` boolean** (`.optional()`, #1299 —
 [[0060-kb-folder-access-control]] §3 amendment): whether the folder carries an access restriction,

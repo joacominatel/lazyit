@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canManageRole,
   CreateDirectoryPersonSchema,
   CreateUserSchema,
   ManagerInputSchema,
@@ -54,7 +55,7 @@ describe("CreateUserSchema (SEC-006)", () => {
   });
 
   // ADR-0040 — role is OPTIONAL on create (omitted → server default MEMBER) but must be one of the
-  // three enum values when present. The Users controller is ADMIN-gated, so accepting it is safe.
+  // three enum values when present. The API bounds it by the caller's own role (SEC-088).
   test("accepts an optional role on create", () => {
     expect(CreateUserSchema.safeParse({ ...valid, role: "ADMIN" }).success).toBe(
       true,
@@ -69,8 +70,8 @@ describe("CreateUserSchema (SEC-006)", () => {
   });
 });
 
-// ADR-0064 (issue #411) — optional admin-provisioned TEMPORARY password. Honored only on the bundled-
-// Zitadel management path by the API; here we just guard the wire contract (optional + complexity).
+// ADR-0064 (issue #411) — optional admin-provisioned TEMPORARY password. Honored only in local mode by
+// the API; here we just guard the wire contract (optional + complexity).
 describe("CreateUserSchema temporary password (ADR-0064)", () => {
   const valid = { email: "a@b.com", firstName: "Ada", lastName: "Lovelace" };
 
@@ -98,8 +99,8 @@ describe("CreateUserSchema temporary password (ADR-0064)", () => {
   });
 
   // The policy mirrors the bootstrap SetupPasswordSchema rule-for-rule (min 8 / max 70 / upper / lower /
-  // digit / symbol) so Zitadel never rejects an admin-provisioned temp password mid-mirror.
-  test("TempPasswordSchema enforces the Zitadel default complexity policy", () => {
+  // digit / symbol).
+  test("TempPasswordSchema enforces the shared password policy", () => {
     expect(TempPasswordSchema.safeParse("Str0ng!Pass").success).toBe(true);
     expect(TempPasswordSchema.safeParse("nouppercas3!").success).toBe(false);
     expect(TempPasswordSchema.safeParse("NOLOWERCASE3!").success).toBe(false);
@@ -156,6 +157,22 @@ describe("UserSchema role (ADR-0040)", () => {
     expect(UserSchema.safeParse({ ...withoutRole, role: "VIEWER" }).success).toBe(
       true,
     );
+  });
+});
+
+describe("canManageRole (SEC-088)", () => {
+  test("a caller may grant and act on its own role and below", () => {
+    expect(canManageRole("ADMIN", "ADMIN")).toBe(true);
+    expect(canManageRole("ADMIN", "VIEWER")).toBe(true);
+    expect(canManageRole("MEMBER", "MEMBER")).toBe(true);
+    expect(canManageRole("MEMBER", "VIEWER")).toBe(true);
+    expect(canManageRole("VIEWER", "VIEWER")).toBe(true);
+  });
+
+  test("a caller can never reach a role above its own", () => {
+    expect(canManageRole("MEMBER", "ADMIN")).toBe(false);
+    expect(canManageRole("VIEWER", "MEMBER")).toBe(false);
+    expect(canManageRole("VIEWER", "ADMIN")).toBe(false);
   });
 });
 
@@ -470,5 +487,25 @@ describe("UI preferences (#1422)", () => {
     expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
     expect(UserSchema.safeParse({ ...READ_BASE, locale: null, theme: null }).success).toBe(true);
     expect(UserSchema.safeParse({ ...READ_BASE, locale: "es", theme: "dark" }).success).toBe(true);
+  });
+});
+
+describe("job title and department on manual create and edit (#1646)", () => {
+  const base = { email: "ada@x.com", firstName: "Ada", lastName: "Lovelace" };
+
+  test("create accepts both, trimmed", () => {
+    const parsed = CreateUserSchema.parse({ ...base, jobTitle: " Engineer ", department: "IT" });
+    expect(parsed.jobTitle).toBe("Engineer");
+    expect(parsed.department).toBe("IT");
+  });
+
+  test("create rejects an empty or over-long value", () => {
+    expect(CreateUserSchema.safeParse({ ...base, jobTitle: "  " }).success).toBe(false);
+    expect(CreateUserSchema.safeParse({ ...base, department: "x".repeat(201) }).success).toBe(false);
+  });
+
+  test("update sets a value or clears it with null", () => {
+    expect(UpdateUserSchema.parse({ department: "Finance" }).department).toBe("Finance");
+    expect(UpdateUserSchema.parse({ jobTitle: null }).jobTitle).toBeNull();
   });
 });

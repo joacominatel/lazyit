@@ -33,7 +33,7 @@ nunca sobrescribe secretos existentes.
 
 Cuando termina, abre **`https://tu-host/setup`** — el resto de esta página recorre ese asistente.
 
-Para configuraciones avanzadas (usar tu propio proveedor de identidad, un Postgres externo, TLS en un
+Para configuraciones avanzadas (tu propio proveedor de identidad OIDC, un Postgres externo, TLS en un
 dominio real), consulta [Autoalojamiento](/help/deployment-operations-self-hosting). Para actualizar
 una instancia existente más adelante, ejecuta `./infra/update.sh`.
 
@@ -42,26 +42,30 @@ una instancia existente más adelante, ejecuta `./infra/update.sh`.
 Cómo inician sesión las personas se elige **una sola vez, al desplegar**, y queda fijo durante toda la
 vida de la instancia. Hay dos familias:
 
-- **Cuentas locales** (`AUTH_MODE=local`) — lazyit es dueño del inicio de sesión. Cada persona tiene un
-  nombre de usuario/correo y una contraseña guardados en la app. **No** hay proveedor de identidad
-  externo, ni subdominio `auth.`, ni nada extra que ejecutar — la forma más simple de levantar lazyit en
-  una LAN. Creas el primer administrador (con contraseña) durante la configuración.
-- **Inicio de sesión único (OIDC)** — lazyit no guarda contraseñas; el inicio de sesión se delega en un
-  **proveedor de identidad (IdP)**. Dentro de esta familia eliges una de dos en el primer arranque:
-  - **Inicio de sesión integrado** — lazyit incluye un servicio de inicio de sesión (Zitadel) ya
-    configurado. Nada que configurar aparte, y defines la contraseña del primer administrador durante la
-    configuración.
-  - **Usa tu propio proveedor (BYOI)** — conecta lazyit a tu proveedor OIDC existente (por ejemplo, el
-    SSO de tu empresa). lazyit lee tres variables de entorno para encontrarlo:
+- **Cuentas locales** (`AUTH_MODE=local`, la opción por defecto) — lazyit se encarga del inicio de
+  sesión. Cada persona tiene un nombre de usuario/correo y una contraseña guardados en la app (como
+  hash). **No** hay proveedor de identidad externo ni nada extra que ejecutar — la forma más simple de
+  levantar lazyit. Creas el primer administrador (con contraseña) durante la configuración.
+- **Tu propio proveedor OIDC** (`AUTH_MODE=oidc`) — lazyit no guarda contraseñas; el inicio de sesión se
+  delega en un **proveedor de identidad (IdP)** que ya administras, como el SSO de tu empresa. lazyit lo
+  encuentra con unas pocas variables de entorno, que el instalador guiado te pide y el asistente de
+  configuración vuelve a mostrar:
 
-    ```
-    AUTH_ISSUER=https://auth.example.com
-    AUTH_CLIENT_ID=your-client-id
-    AUTH_CLIENT_SECRET=your-client-secret
-    ```
+  ```
+  # App web
+  AUTH_ISSUER=https://auth.example.com
+  AUTH_CLIENT_ID=your-client-id
+  AUTH_CLIENT_SECRET=your-client-secret
 
-    Con tu propio proveedor, ese proveedor es el dueño de las contraseñas y de la creación de cuentas —
-    lazyit nunca define ni almacena una contraseña de inicio de sesión.
+  # API
+  AUTH_MODE=oidc
+  OIDC_ISSUER=https://auth.example.com
+  OIDC_CLIENT_ID=your-client-id
+  OIDC_JWKS_URI=https://auth.example.com/.well-known/jwks.json
+  ```
+
+  Tu proveedor se encarga de las contraseñas y del inicio de sesión; los usuarios y los roles quedan en
+  lazyit.
 
 > **El modo de autenticación es inmutable.** Cambiar una instancia entre cuentas locales y OIDC después
 > de que tenga usuarios no está soportado (sus credenciales no se trasladan). Decídelo desde el
@@ -73,28 +77,27 @@ vida de la instancia. Hay dos familias:
 La primera vez que abres una instancia nueva, lazyit muestra un breve **asistente de configuración**
 a pantalla completa. El asistente se ejecuta **una sola vez**: en cuanto existe un administrador, la
 instancia queda configurada y el asistente te lleva a la página de inicio de sesión. Los pasos se
-adaptan a la opción de inicio de sesión que elijas.
+adaptan a cómo se desplegó la instancia.
 
-### Paso 1 — Bienvenida y elección de inicio de sesión
+### Paso 1 — Bienvenida
 
-En una instancia **OIDC**, elige cómo iniciarán sesión las personas: **inicio de sesión integrado** o
-**usar tu propio proveedor**. La elección se muestra como dos tarjetas; selecciona una para continuar.
-Elegir *usar tu propio proveedor* revela las tres variables de entorno de arriba para que confirmes que
-están definidas.
+Aquí no hay nada que elegir — el modo de inicio de sesión queda fijo al desplegar. Una tarjeta lo
+explica:
 
-En una instancia de **cuentas locales** no hay nada que elegir aquí — el modo queda fijo al desplegar.
-El paso solo confirma que estás configurando cuentas locales y te lleva directo a crear el primer
-administrador.
+- En una instancia de **cuentas locales**, confirma que estás configurando las cuentas propias de
+  lazyit.
+- En una instancia **OIDC**, indica que se usa tu propio proveedor OIDC y muestra las variables de
+  entorno de arriba, con un botón para copiarlas, para que compruebes que están definidas en la app web
+  y en la API.
 
-### Paso 2 — Configurar (solo para tu propio proveedor)
+### Paso 2 — Configurar (solo OIDC)
 
-Si elegiste el inicio de sesión integrado, este paso se omite — el servicio integrado ya está
-aprovisionado, así que no hay nada que ingresar. (Puede que aún esté terminando su propio arranque la
-primera vez; es normal.)
+En una instancia de cuentas locales este paso se omite.
 
-Si elegiste tu propio proveedor, este paso vuelve a mostrar las tres variables de entorno para que
-las confirmes antes de crear el primer administrador. El correo del administrador **debe existir ya
-en tu proveedor** para que pueda iniciar sesión.
+En una instancia OIDC, este paso vuelve a mostrar las variables de entorno y te pide confirmar que tu
+proveedor está conectado antes de crear el primer administrador. El correo del administrador **debe
+existir ya en tu proveedor**, verificado, para que pueda iniciar sesión: en ese primer inicio de sesión
+lazyit vincula ambas cuentas por el correo.
 
 ### Paso 3 — Crear el primer administrador
 
@@ -102,12 +105,11 @@ Ingresa el **nombre, apellido y correo** del primer administrador. El rol está 
 **Administrador** — este paso existe solo para crear el primer administrador, por eso el rol se
 muestra como una insignia bloqueada, no como un campo editable.
 
-- Con **cuentas locales** o el **inicio de sesión integrado**, aquí también defines una **contraseña
-  inicial**, con una lista de verificación en vivo de las reglas de la contraseña. Con cuentas locales
-  lazyit guarda esa contraseña él mismo; con el inicio de sesión integrado la define en el servicio de
-  inicio de sesión. En ambos casos el nuevo administrador puede entrar de inmediato, y a este primer
-  administrador no se le obliga a cambiarla en el primer inicio de sesión (ese cambio obligatorio aplica
-  a los miembros del equipo que agregues después).
+- Con **cuentas locales**, aquí también defines una **contraseña inicial**, con una lista de
+  verificación en vivo de las reglas de la contraseña. lazyit la guarda (como hash), el nuevo
+  administrador puede entrar de inmediato, y a este primer administrador no se le obliga a cambiarla en
+  el primer inicio de sesión (ese cambio obligatorio aplica a los miembros del equipo que agregues
+  después).
 - Con **tu propio proveedor OIDC**, no se pide ni se envía ninguna contraseña — tu proveedor es el dueño
   de la credencial.
 

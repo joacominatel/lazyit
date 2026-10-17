@@ -50,6 +50,10 @@ fila (u objeto) se convierte en un activo.
   que importas, la subida se rechaza con un mensaje claro — actualiza este servidor (o re-exporta desde
   una versión compatible) antes de importar. Las hojas de cálculo o archivos de terceros habituales no
   tienen esa línea y se importan con normalidad.
+- Si el análisis en segundo plano no puede terminar — normalmente un archivo demasiado grande o complejo
+  para procesar — la subida se marca como **fallida** con un mensaje en lugar de quedarse esperando;
+  divide o simplifica el archivo y vuelve a subirlo. También se rechaza una columna llamada literalmente
+  `__proto__`: renómbrala antes.
 
 ## 2. Confirma el resumen
 
@@ -179,7 +183,7 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
 **asignará el activo** — la asignación se registra igual que se haría en la app, con historial.
 
 - **Una persona importada no tiene acceso.** Es una persona de **directorio**: una entrada real en tu
-  lista de Usuarios (con la insignia **Directorio**), pero sin cuenta en tu proveedor de identidad.
+  lista de Usuarios (con la insignia **Directorio**), pero sin cuenta de acceso.
   Existe para que el activo tenga un propietario registrado; no puede iniciar sesión hasta tener cuenta.
 - **Para asignar, mapea el Nombre de la persona *y* una clave de identidad.** El **Nombre** (la
   columna *Asignado a*) es **obligatorio** para asignar un activo, además de al menos uno de **Correo**,
@@ -189,19 +193,18 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
   **fila inválida** en la vista previa, para que la corrijas antes de confirmar — nunca falla en
   silencio al final. Una fila con nombre pero sin clave de identidad importa el activo **sin asignar**,
   con una advertencia.
-- **Se vinculan a una cuenta real automáticamente — solo con un correo que coincida.** Cuando esa
-  persona inicie sesión más tarde a través de tu proveedor de identidad (OIDC) usando el **mismo correo
-  verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
+- **Con tu propio proveedor OIDC, se vinculan a una cuenta real automáticamente — solo con un correo
+  que coincida.** Cuando esa persona inicie sesión más tarde a través de tu proveedor usando el **mismo
+  correo verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
   **Directorio** desaparece. **Una persona importada sin un correo real nunca se vincula
   automáticamente** — no hay correo con el que coincidir. Promuévela a mano (siguiente punto) cuando
   necesite iniciar sesión.
-- **Puedes crear su cuenta ahora.** Un administrador puede abrir la página de la persona y elegir
-  **Crear cuenta OIDC** para aprovisionarla en el proveedor de identidad de inmediato, en vez de esperar
-  a un inicio de sesión. El proveedor de identidad exige un correo real, así que el botón está
-  **deshabilitado hasta que la persona tenga uno** — edita la persona y agrega un correo real primero.
-  Esto solo está disponible con el **proveedor de identidad integrado**; en modo de autenticación local
-  o con tu propio proveedor OIDC lazyit no puede crear la cuenta, y las personas importadas inician
-  sesión a través de tu proveedor de identidad.
+- **Puedes darle una cuenta ahora.** Con **cuentas locales**, un administrador puede abrir la página de
+  la persona y elegir **Dar de alta con una contraseña temporal**: crea su acceso al momento y muestra
+  una contraseña de un solo uso para entregar — no hace falta correo. Con **tu propio proveedor OIDC**,
+  lazyit no puede crear cuentas allí: crea a la persona en tu proveedor con un correo real y
+  verificado, asegúrate de que ese mismo correo figure en su registro de lazyit, y su primer inicio de
+  sesión vincula ambas.
 
 El activo siempre se importa de cualquier modo; solo la **asignación** depende de identificar a la
 persona.
@@ -254,6 +257,9 @@ Cuando el plan está listo, la importación se ejecuta en segundo plano. Es **po
   éxito.
 - Si alguien tomó un valor entre la vista previa y la confirmación, esa fila se registra como un
   **fallo** (no se descarta en silencio), y el resto continúa.
+- Si el propio trabajo en segundo plano sufre un error transitorio (por ejemplo, una caída breve de la
+  base de datos), **reintenta automáticamente** y continúa después de las filas ya guardadas. La
+  importación se marca como fallida solo cuando se agotan los reintentos.
 
 El informe de resultados muestra cuántas filas se **crearon**, **fallaron** y se **omitieron**, además
 del id de la **ejecución de importación** para tu auditoría. Si algunas filas fallaron, corrígelas en
@@ -285,5 +291,5 @@ vigentes **antes** de confirmar, así que nunca es una sorpresa.
 - **Las sesiones expiran.** Una sesión de importación en curso se conserva 24 horas y luego se
   descarta. El registro de auditoría de una importación *completada* es permanente.
 - **Los permisos siguen aplicándose al confirmar.** Más allá de `import:run`, crear un modelo o una
-  ubicación nuevos durante un conflicto requiere el permiso de escritura correspondiente; el importador
-  lo comprueba antes de escribir nada.
+  ubicación nuevos durante un conflicto requiere el permiso de escritura correspondiente, igual que la
+  categoría que trae consigo un modelo nuevo; el importador lo comprueba antes de escribir nada.

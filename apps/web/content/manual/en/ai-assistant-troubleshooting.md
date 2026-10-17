@@ -128,8 +128,9 @@ now use the category an archive would affect). Nothing was applied. **Fix:** rev
 ### "Too many wrong passwords. Try again in …"
 
 **Cause:** five wrong passwords in a row. lazyit locks further attempts for a time that grows with each
-failure, from one second up to 15 minutes. The count is shared between chat cards and the MCP consent
-screen. **Fix:** wait the time shown; the **Approve** button comes back by itself.
+failure, from one second up to 15 minutes. The count is shared between chat cards, the MCP consent
+screen and the current password when you change your password. **Fix:** wait the time shown; the
+**Approve** button comes back by itself.
 
 ### "Password confirmation isn't available with your sign-in method"
 
@@ -152,7 +153,8 @@ whose last decision was refused. **Fix:** decide those on their own page. See
 
 **Cause:** auto-approve never covers critical changes, changes proposed after the assistant read free
 text in the same turn (anyone's, including your own notes), or anything in a chat that searched the web.
-**Fix:** approve it on its card. See [Auto-approve](/help/ai-assistant-approvals#auto-approve).
+Your own name counts as free text, and the assistant reads it at the start of most chats, so that turn is
+never auto-approved. **Fix:** approve it on its card. See [Auto-approve](/help/ai-assistant-approvals#auto-approve).
 
 ## External AI agents (MCP)
 

@@ -38,13 +38,13 @@ export class ImportCommitWorker extends WorkerHost {
         (p) => void job.updateProgress({ phase: 'commit', ...p }),
       );
     } catch (err) {
-      // An UNEXPECTED orchestration fault (not a per-row failure — those are isolated + recorded). Mark
-      // the session FAILED so it never sits COMMITTING forever; per-row keep-partial means anything
-      // already COMMITTED is durable and a re-run resumes. PII-free reason.
       this.logger.error(
         `import-commit job for session ${sessionId} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
-      await this.failSessionSafely(sessionId);
+      // Only the last attempt may flip FAILED: commit() refuses a FAILED session, so an earlier flip kills the retry.
+      if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
+        await this.failSessionSafely(sessionId);
+      }
       throw err;
     }
   }

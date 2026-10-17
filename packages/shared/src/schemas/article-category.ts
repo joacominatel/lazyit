@@ -34,6 +34,10 @@ export const ArticleCategorySchema = z.object({
   // legacy/older server omits the field entirely — `.nullish()` accepts both, and the UI hides the
   // number when it is null/absent (self-heals on any operator upgrade without a client change).
   articleCount: int4({ min: 0, example: 0 }).nullish(),
+  // The folder's `articleCount` plus every live descendant's (#1651): what the folder rail shows. Same
+  // visibility as `articleCount` — a descendant the caller cannot read adds 0 — and `null` for a folder
+  // the caller cannot read. Computed, not stored; an older server omits it, hence `.nullish()`.
+  totalArticleCount: int4({ min: 0, example: 0 }).nullish(),
   // Derived "this folder carries an access rule" flag (ADR-0060 §3 carve-out, #1299). A COMPUTED read
   // aggregate over the `accessRules` jsonb — NOT a stored column, no migration, no data touch. It is
   // the SAME public-vs-restricted question `isPublicAccessRules` answers (`null`/empty = PUBLIC, a
@@ -69,7 +73,7 @@ export const CreateArticleCategorySchema = z.strictObject({
 /**
  * Partial update; any subset of the editable fields (an empty body is rejected). `parentId` is
  * nullable here (unlike create): pass `null` to MOVE this folder to the root, or a cuid to reparent
- * it. The service rejects a move that would create a cycle (a folder may not be its own ancestor).
+ * it. A change needs `settings:manage` (403), and a move that would create a cycle is a 400 (ADR-0060 §10).
  */
 export const UpdateArticleCategorySchema = requireAtLeastOneKey(
   z

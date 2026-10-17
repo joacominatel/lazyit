@@ -14,7 +14,7 @@ trustworthy.
 
 ## Granting access
 
-Open an application and, under **Active access**, choose **Grant access**. You pick:
+Open an application and choose **Grant access** at the top of the page. You pick:
 
 - **User** — the person who gets access. They must be an active user.
 - **Access level** *(optional)* — a free-form label such as `admin`, `developer` or `viewer`.
@@ -38,22 +38,23 @@ already has some, the dialog shows what they already hold so you can decide inte
 
 ## Editing a grant
 
-From an application's **Active access** list, you can **edit** a grant to change its **expiry** or
-**notes**. The grant itself — who, which application, and the access level — is intentionally
+From an application's **Access** tab, open a grant's **⋯** menu and choose **Edit expiry and notes**
+to change its **expiry** or **notes**. The grant itself — who, which application, and the access level — is intentionally
 fixed. To change the **access level**, revoke the grant and create a new one; that keeps the
-history honest about what was held and when.
+history honest about what was held and when. The expiry can't be earlier than the date the grant was
+made.
 
 ## Revoking access
 
-**Revoke** ends a grant. This is the offboarding action: the grant stops being active, but the
-record stays in the application's **History**, showing who had access, who granted it, who revoked
+**Revoke** (in the grant's **⋯** menu) ends a grant. This is the offboarding action: the grant stops
+being active, but the record stays under **Revoked** in the application's **Access** tab, showing who had access, who granted it, who revoked
 it and when. Revoking is **not** a deletion — there is no way to erase a grant, by design.
 
 ## Expiry
 
 When a grant passes its expiry date, lazyit **automatically revokes it** — a background sweep runs
 periodically and revokes any active grant whose expiry is in the past. The auto-revoke goes through
-the normal revoke path, so it ends up in the application's **History** and triggers any
+the normal revoke path, so it ends up under **Revoked** in the application's **Access** tab and triggers any
 deprovisioning workflow exactly as a manual revoke would; it is recorded as an automatic (system)
 revoke rather than attributed to a person. There is a short window between the moment a grant expires
 and the next sweep during which it still counts as active and is flagged **Expired**. **Clear the
@@ -61,21 +62,30 @@ expiry** to make a grant permanent — leaving an expiry in place now means the 
 
 ## Where access shows up
 
-- On each **application**, the **Active access** panel lists current grants and a **History**
-  panel shows revoked ones.
-- A grantee who has since been deactivated is flagged on their grants, so you can quickly find
-  access that should be cleaned up.
+- On each **application**, the **Access** tab lists every grant. Above the list, choose what to see:
+  **Active** (the default), **Expiring** (active grants that expire within 30 days, plus expired ones
+  the sweep has not revoked yet, most urgent first), **Revoked** (most recent first) or **All**. Each
+  choice shows its count.
+- Each row shows the person and their email, the **access level**, when the grant was made and by
+  whom, and its **expiry** — flagged *in N days* when it is close, or **Expired** — or, for a revoked
+  grant, when and by whom it was revoked. Notes appear under the person.
+- A grantee who has since been deactivated is flagged on their grants, and the page's *Needs
+  attention* row counts them, so you can quickly find access that should be cleaned up.
+- The application's **Activity** tab lists every grant and revocation with who did it, newest first
+  (administrators by default).
+- For an access review, **Export CSV** on the **Access** tab downloads the application's active
+  grants when **Active** or **Expiring** is selected, and every grant, revoked ones included, when
+  **Revoked** or **All** is selected. The search box and the level filter do not narrow the file. A
+  person's **Access** tab has the same button for their grants. See
+  [Exporting data](/help/notifications-activity-data-export).
 
 ## Finding a grant
 
-The **Active access** panel groups grants by user — when someone holds more than one, all their
-grants appear together under their name with a count badge. You can **search by name** using the
-filter box above the list to find a specific person's grants quickly. If the list is long, it
-**paginates automatically** (25 per page) so it stays readable no matter how many grants an
-application accumulates.
-
-Each individual grant remains fully visible inside the group with its own **Edit** and **Revoke**
-controls — grouping is display-only and never hides or merges grants.
+The **Access** tab is built for applications with thousands of grants. Type in the search box to
+find a person **by name or email** (accents and capitals don't matter), and use the level filter to
+show only one **access level** — for example everyone with `admin`. The list is sorted by person, so
+someone with several grants appears on consecutive rows, one per grant, each with its own **Edit** and
+**Revoke**. It shows 25 rows per page; the count under the list says how many match.
 
 > Seeing the access map — who has access to what — is available to administrators and members.
 > Viewers do not see the access ledger by default.

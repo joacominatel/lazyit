@@ -8,5 +8,33 @@
   "occurredAt": "Ocurrió {datetime}",
   "dismiss": "Descartar notificación: {title}",
   "dismissFailed": "No se pudo descartar la notificación.",
-  "clearAllFailed": "No se pudieron descartar tus notificaciones."
+  "clearAllFailed": "No se pudieron descartar tus notificaciones.",
+  "markGroupRead": "Marcar grupo como leído",
+  "markGroupReadFailed": "No se pudo marcar el grupo como leído.",
+  "groupUnread": "{count, plural, one {# sin leer} other {# sin leer}}",
+  "loadMore": "Cargar más",
+  "loadFailed": "No se pudieron cargar tus notificaciones.",
+  "day": {
+    "today": "Hoy",
+    "yesterday": "Ayer"
+  },
+  "groupSummary": {
+    "critical_app_access": "{count, plural, one {# acceso a una aplicación crítica} other {# accesos a aplicaciones críticas}}",
+    "admin_granted": "{count, plural, one {# usuario elevado a Administrador} other {# usuarios elevados a Administrador}}",
+    "low_stock": "{count, plural, one {# consumible con stock bajo} other {# consumibles con stock bajo}}",
+    "workflow_manual_task": "{count, plural, one {# tarea manual pendiente} other {# tareas manuales pendientes}}",
+    "workflow_run_failed": "{count, plural, one {# ejecución de flujo fallida} other {# ejecuciones de flujo fallidas}}",
+    "secret_vault_setup": "{count, plural, one {# recordatorio para configurar la bóveda} other {# recordatorios para configurar la bóveda}}",
+    "permission_widened": "{count, plural, one {# permiso sensible otorgado} other {# permisos sensibles otorgados}}",
+    "infra_agent_offline": "{count, plural, one {# agente desconectado} other {# agentes desconectados}}",
+    "infra_identity_conflict": "{count, plural, one {# ID de máquina duplicado} other {# ID de máquina duplicados}}",
+    "update_available": "{count, plural, one {# nueva versión disponible} other {# nuevas versiones disponibles}}",
+    "access_request_created": "{count, plural, one {# nueva solicitud de acceso} other {# nuevas solicitudes de acceso}}",
+    "access_request_decided": "{count, plural, one {# solicitud de acceso resuelta} other {# solicitudes de acceso resueltas}}",
+    "warranty_expiring": "{count, plural, one {# garantía por vencer} other {# garantías por vencer}}",
+    "access_grant_expiring": "{count, plural, one {# acceso por vencer} other {# accesos por vencer}}",
+    "asset_assignment_acknowledged": "{count, plural, one {# recepción de activo confirmada} other {# recepciones de activos confirmadas}}",
+    "mcp_client_connected": "{count, plural, one {# nuevo agente de IA conectado} other {# nuevos agentes de IA conectados}}",
+    "fallback": "{count, plural, one {# notificación} other {# notificaciones}}"
+  }
 }

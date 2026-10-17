@@ -25,7 +25,9 @@ install it on more servers.
 On **Assets › Topology** the page header carries an **Add** button, in both the Map and the Table
 view; pick **Install a reporting agent**. On the **Servers** (Table) view, while you have no agents
 yet, a **Create your first agent** card also sits at the top explaining what an agent is. (You need
-the manage-settings permission either way, because this mints a token.)
+the manage-settings permission either way, because this mints a token. A Member or Viewer an admin gave
+that permission can install agents too: the agent's reporting permission is the one a service account
+may hold beyond your own role.)
 
 Either one opens a short, guided wizard with three steps:
 

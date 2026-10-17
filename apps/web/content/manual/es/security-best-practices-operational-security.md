@@ -18,12 +18,9 @@ aplicación. Una restauración que funcione necesita **más que eso**:
 
 - **La base de datos de la aplicación** — tus activos, usuarios, accesos, Base de Conocimiento y los
   datos *cifrados* del Gestor de Secretos.
-- **Los datos de tu proveedor de identidad** — si ejecutas el servicio de inicio de sesión incluido,
-  sus cuentas y claves viven por separado. Restaura la base de datos de la aplicación sin ellos y
-  todos quedan bloqueados.
 - **Tu archivo de entorno / secretos** — los secretos del despliegue (contraseña de la base de datos,
-  claves de cifrado del servicio de inicio de sesión y de las credenciales de conectores de
-  workflow, el secreto de la app). Algunas de estas claves **no se pueden regenerar**: restaura una
+  los secretos de firma de sesión, la clave de cifrado de las credenciales de conectores de workflow,
+  el secreto de la app). Algunas de estas claves **no se pueden regenerar**: restaura una
   base de datos sin la clave correspondiente y esos datos quedan ilegibles. (Perder `AI_SECRET_KEY`,
   que cifra la clave del proveedor de IA, solo obliga a volver a escribir esa clave del proveedor.)
 
@@ -32,8 +29,8 @@ nunca dejes que el servidor en ejecución sea su única copia. Prueba una restau
 en lazyit para algo real — un respaldo sin probar es una suposición.
 
 > La sección de despliegue y operaciones de este Manual cubre la mecánica de respaldar y restaurar.
-> Aquí lo importante es el **alcance**: base de datos **más** datos del proveedor de identidad **más**
-> el archivo de secretos, guardados juntos y fuera del host.
+> Aquí lo importante es el **alcance**: base de datos **más** el archivo de secretos, guardados juntos y
+> fuera del host.
 
 ## La recuperación del Gestor de Secretos es responsabilidad del operador — y es distinta
 
@@ -110,5 +107,6 @@ controlado.
   proveedor de IA (retención, entrenamiento, región). Revisá **Apps conectadas** cada tanto, usá tokens
   MCP personales de vida corta y dales a las cuentas de servicio el **acceso a IA** más acotado. Mirá
   [Asistente de IA — visión general](/help/ai-assistant-overview).
-- **Mantén tu proveedor de identidad parcheado y protegido** — es la puerta de entrada, y lazyit
-  confía en él.
+- **Si usas tu propio proveedor de identidad, mantenlo parcheado y protegido** — es la puerta de
+  entrada, y lazyit confía en él. Dar de baja en lazyit no desactiva la cuenta allí, así que desactívala
+  en el proveedor como parte del mismo proceso de salida.

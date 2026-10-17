@@ -3,6 +3,7 @@ import type {
   ArticleLinkedFilter,
   ArticleLinkedTo,
   ArticleListPage,
+  ArticleListSort,
   ArticleStatus,
   CreateArticle,
   ImportArticle,
@@ -56,6 +57,11 @@ export const deleteArticle = crud.remove;
  * OR-combine within a param and across the two params (linked to one of these assets OR these apps);
  * selecting any id implies `linked: "only"`. Comma-encoded like the other multi-value filters; each
  * element is validated as a cuid server-side (unknown -> 400).
+ *
+ * `sort` (#1539) picks the order: `updated` (the server default, newest first), `title` (A to Z) or
+ * `created` (newest first). Leave it undefined for the default so the default list keeps one query key.
+ * `includeSubfolders` (#1539) widens a `categoryId` filter to each folder plus its live descendants;
+ * folder access still applies. It is sent only when true.
  */
 export interface ArticleFilters {
   categoryId?: string[];
@@ -66,8 +72,34 @@ export interface ArticleFilters {
   linkedTo?: ArticleLinkedTo[];
   assetId?: string[];
   applicationId?: string[];
+  sort?: ArticleListSort;
+  includeSubfolders?: boolean;
+  // ADMIN only; sent by getArticles alone because the export is live-only.
+  deleted?: "only";
   limit?: number;
   offset?: number;
+}
+
+export const ARTICLE_EXPORT_PATH = `${BASE}/export`;
+
+/** The index's filters, never paging or sort; the CSV export sends exactly these. */
+export function articleFilterParams(filters: ArticleFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
+  if (filters.categoryId?.length)
+    params.set("categoryId", filters.categoryId.join(","));
+  if (filters.authorId) params.set("authorId", filters.authorId);
+  if (filters.status?.length) params.set("status", filters.status.join(","));
+  if (filters.q) params.set("q", filters.q);
+  if (filters.linked) params.set("linked", filters.linked);
+  if (filters.linkedTo?.length)
+    params.set("linkedTo", filters.linkedTo.join(","));
+  // Specific-entity link filters (#213): comma-encode each non-empty array into its one query param.
+  if (filters.assetId?.length) params.set("assetId", filters.assetId.join(","));
+  if (filters.applicationId?.length)
+    params.set("applicationId", filters.applicationId.join(","));
+  if (filters.includeSubfolders) params.set("includeSubfolders", "true");
+  return params;
 }
 
 /**
@@ -84,20 +116,9 @@ export function getArticles(
   // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
   token?: string,
 ): Promise<ArticleListPage> {
-  const params = new URLSearchParams();
-  // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
-  if (filters.categoryId?.length)
-    params.set("categoryId", filters.categoryId.join(","));
-  if (filters.authorId) params.set("authorId", filters.authorId);
-  if (filters.status?.length) params.set("status", filters.status.join(","));
-  if (filters.q) params.set("q", filters.q);
-  if (filters.linked) params.set("linked", filters.linked);
-  if (filters.linkedTo?.length)
-    params.set("linkedTo", filters.linkedTo.join(","));
-  // Specific-entity link filters (#213): comma-encode each non-empty array into its one query param.
-  if (filters.assetId?.length) params.set("assetId", filters.assetId.join(","));
-  if (filters.applicationId?.length)
-    params.set("applicationId", filters.applicationId.join(","));
+  const params = articleFilterParams(filters);
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.deleted) params.set("deleted", filters.deleted);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
@@ -117,6 +138,11 @@ export function getArticleBySlug(slug: string, token?: string): Promise<Article>
   return apiFetch<Article>(`${BASE}/by-slug/${encodeURIComponent(slug)}`, {
     token,
   });
+}
+
+// 409 when another article took the slug while this one was archived.
+export function restoreArticle(id: string): Promise<Article> {
+  return apiFetch<Article>(`${BASE}/${id}/restore`, { method: "POST" });
 }
 
 /** Transition DRAFT -> PUBLISHED (author only). Sets publishedAt on first publish. */

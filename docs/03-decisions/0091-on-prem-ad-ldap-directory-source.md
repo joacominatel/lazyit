@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-10-05
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -19,6 +19,13 @@ pages ship in the frontend lane per CLAUDE.md #3/#7.
 offboard of an **active** person now bumps `User.sessionEpoch`, revoking their local sessions — the
 reconcile's one sanctioned `sessionEpoch` write (see Hard invariants and
 [[0086-local-authentication-mode]] §8).
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: with the IdP write-back gone, the
+`users.service.create` opt this record calls `skipIdpWriteBack` is named `directoryOnly`; the rail is unchanged.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): `PUT /directory/connection` and `POST /directory/sync`
+are ADMIN-only (`AdminOnlyGuard`, **403** `ADMIN_REQUIRED`) until custom roles (#1560). A delegated
+`settings:manage` could repoint the connection and sync to offboard an AD-sourced admin. `GET
+/directory/connection` stays `settings:manage`. The scheduled sweeper is unaffected: it runs the
+configuration an ADMIN saved, with no caller to check.
 
 ## Context
 
@@ -94,6 +101,12 @@ uniques.
   rest of the sweep continues. The next run re-evaluates, so they are offboarded as soon as another active
   ADMIN exists. The predicate is the same one the `PATCH /users` last-admin guard uses
   (`UsersService.hasAnotherActiveAdmin`, [[0040-rbac-roles]]).
+  *Amended 2026-10-14 (AUD-041):* the check runs inside the offboard's own transaction, through
+  `UsersService.wouldRemoveLastAdmin`, under the same admin-set advisory lock as the `PATCH /users` and
+  offboard guards, and judges the person as they stand under that lock. A sync offboard racing an admin
+  demotion of the other remaining ADMIN therefore serialises with it, and one ADMIN always remains.
+  *Amended 2026-10-15 (AUD-040):* "another active ADMIN" now means a usable one — not directory-only and
+  holding a login credential for the auth mode ([[0040-rbac-roles]] → *role ceiling and usable admins*).
   *Amended 2026-10-05 (#1311):* "only when *we* set it" is enforced by never stamping what we did not
   deactivate. The sweep **skips a person who is already inactive** — nothing written, counted as
   `skipped` — so a manual deactivation never carries `directoryOffboardedAt` and a reappearance leaves it

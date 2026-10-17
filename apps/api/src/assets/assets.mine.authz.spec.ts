@@ -9,6 +9,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core';
 import request from 'supertest';
 import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import { AssetsController } from './assets.controller';
+import { ExportService } from '../common/export';
 import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -96,6 +97,7 @@ describe('GET /assets/mine — self-scope carve-out authZ (#947)', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [AssetsController],
       providers: [
+        { provide: ExportService, useValue: {} },
         Reflector,
         { provide: AssetsService, useValue: { findPage, findOne } },
         { provide: AssetAssignmentsService, useValue: {} },

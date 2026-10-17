@@ -37,8 +37,9 @@ typed wrong or invented. What you **can** change is which permissions **Member**
 hold. **Administrator always holds every permission and cannot be edited** — this keeps the instance
 safe to operate (there is always a fully capable admin).
 
-Administrators tune Member and Viewer from the role-permission settings screen, choosing from
-plain-language capabilities grouped by area, with one-click presets as a starting point.
+Administrators tune Member and Viewer from **Settings → Roles & permissions** — one matrix of
+plain-language capabilities grouped by area, with a preset per role as a starting point. See
+[Permission configuration](/help/users-permissions-permission-configuration).
 
 ## Who can do what (defaults)
 
@@ -84,6 +85,18 @@ When you give Member or Viewer an administrator-level capability — such as the
 records or to grant application access — lazyit marks it clearly and asks you to confirm, because it
 is a meaningful delegation. It does not stop you: handing a trusted Member the ability to delete is a
 legitimate choice. Administrator, by contrast, is never editable.
+
+Delegating **Manage users** has a ceiling: a Member or Viewer who holds it can only give out their own
+role or a lower one, and can only act on users at or below their role. Only an admin manages admins.
+See [Roles](/help/users-permissions-roles#built-in-safety-rules).
+
+Delegating **Change instance settings** does not cover three things: editing this permission matrix,
+saving or syncing the [AD / LDAP directory](/help/configuration-directory-sync) connection, and saving
+the [email (SMTP)](/help/configuration-smtp-email) settings. All three stay with admins, because each
+one decides who can do what or who receives a password-reset link. A Member or Viewer holding the
+capability can still view them. It does let them manage
+[service accounts](/help/users-permissions-service-accounts), but only with permissions their own role
+holds.
 
 > Permissions are about **areas**, not individual records. lazyit does not have per-record access
 > control as a general feature — if a role can read assets, it can read all assets. (The Knowledge

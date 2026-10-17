@@ -15,9 +15,8 @@ import { ApplicationsListView } from "./_components/applications-list-view";
  * (filtered/paged/searched) application page so the client `ApplicationsListView` hydrates with data
  * already in cache. The key is derived through the SAME pure code the client uses — `deriveListState`
  * + `deriveApplicationParams` (`./_components/applications-list-query`) — so it's byte-identical to
- * `useApplicationList(...)`'s key and can't drift into a cache-miss double-fetch (#733). Category/
- * criticality are a client-side post-filter, so every URL is prefetchable. The #600 401 handler stays
- * on the client provider.
+ * `useApplicationList(...)`'s key and can't drift into a cache-miss double-fetch (#733). The #600 401
+ * handler stays on the client provider.
  */
 export default async function ApplicationsPage({
   searchParams,

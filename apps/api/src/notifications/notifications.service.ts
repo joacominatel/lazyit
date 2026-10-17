@@ -1,10 +1,13 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
+  NOTIFICATION_GROUP_PREVIEW_SIZE,
   offsetOf,
   pageOf,
   type DismissNotificationsResult,
   type MarkReadResult,
   type Notification as NotificationWire,
+  type NotificationGroup,
+  type NotificationGroupKey,
   type NotificationEntityType,
   type NotificationSeverity,
   type NotificationType,
@@ -41,6 +44,34 @@ export interface EmitNotificationInput {
   recipientUserId?: string | null;
   /** Small, REDACTED extra context (names/ids only). */
   metadata?: Record<string, unknown> | null;
+}
+
+// A function, not a module constant: unit specs stub the generated client without Prisma.sql.
+const itemColumns =
+  () => Prisma.sql`n.id, n.type, n.severity, n.title, n.summary, n."entityType",
+  n."entityId", n."targetUserId", n."recipientUserId", n.metadata, n."createdAt",
+  (r.id IS NOT NULL) AS read`;
+
+interface ItemRow {
+  id: string;
+  type: string;
+  severity: string;
+  title: string;
+  summary: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  targetUserId: string | null;
+  recipientUserId: string | null;
+  metadata: Prisma.JsonValue | null;
+  createdAt: Date;
+  read: boolean;
+}
+
+interface GroupPreviewRow extends ItemRow {
+  day: string;
+  count: number;
+  unread: number;
+  latestAt: Date;
 }
 
 /**
@@ -103,17 +134,25 @@ export class NotificationsService {
   private async visibilityWhere(
     viewer: NotificationViewer,
   ): Promise<Prisma.NotificationWhereInput> {
-    const canReadBroadcast = await this.permissions.hasAll(viewer.role, [
-      'notification:read',
-    ]);
     // (a) own targeted rows — always; (b) broadcast rows — only for a notification:read holder.
     const or: Prisma.NotificationWhereInput[] = [
       { recipientUserId: viewer.userId },
     ];
-    if (canReadBroadcast) {
+    if (await this.canReadBroadcast(viewer)) {
       or.push({ recipientUserId: null });
     }
     return { OR: or };
+  }
+
+  // The raw-SQL twin of visibilityWhere for the grouped queries; keep the two in step.
+  private async visibilitySql(viewer: NotificationViewer): Promise<Prisma.Sql> {
+    return (await this.canReadBroadcast(viewer))
+      ? Prisma.sql`(n."recipientUserId" = ${viewer.userId}::uuid OR n."recipientUserId" IS NULL)`
+      : Prisma.sql`n."recipientUserId" = ${viewer.userId}::uuid`;
+  }
+
+  private canReadBroadcast(viewer: NotificationViewer): Promise<boolean> {
+    return this.permissions.hasAll(viewer.role, ['notification:read']);
   }
 
   /**
@@ -140,7 +179,7 @@ export class NotificationsService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         // Only the CALLER's read row (if any) — the anti-join that yields the per-caller `read` flag.
@@ -239,6 +278,114 @@ export class NotificationsService {
     });
     const unread = await this.unreadCount(viewer);
     return { marked: result.count, unread };
+  }
+
+  /** The caller's bell grouped by (type, calendar day in `tz`), aggregated in SQL (#1649). */
+  async findGroups(
+    viewer: NotificationViewer,
+    tz: string,
+    page: PageQuery,
+  ): Promise<Page<NotificationGroup>> {
+    const { take, skip } = offsetOf(page);
+    const scope = await this.groupScopeSql(viewer);
+    const dayOf = Prisma.sql`((n."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${tz}::text)::date`;
+    const [rows, totals] = await this.prisma.$transaction([
+      this.prisma.$queryRaw<GroupPreviewRow[]>`
+        WITH g AS (
+          SELECT n.type, ${dayOf} AS day,
+                 count(*)::int AS count,
+                 (count(*) FILTER (WHERE r.id IS NULL))::int AS unread,
+                 max(n."createdAt") AS "latestAt"
+            FROM notifications n
+            ${scope}
+           GROUP BY 1, 2
+           ORDER BY "latestAt" DESC, day DESC, n.type ASC
+           LIMIT ${take}::int OFFSET ${skip}::int
+        )
+        SELECT g.type, to_char(g.day, 'YYYY-MM-DD') AS day, g.count, g.unread, g."latestAt", i.*
+          FROM g
+          CROSS JOIN LATERAL (
+            SELECT ${itemColumns()}
+              FROM notifications n
+              ${scope}
+               AND n.type = g.type
+               AND ${this.dayWindowSql(Prisma.sql`g.day`, tz)}
+             ORDER BY n."createdAt" DESC, n.id DESC
+             LIMIT ${NOTIFICATION_GROUP_PREVIEW_SIZE}::int
+          ) i
+         ORDER BY g."latestAt" DESC, g.day DESC, g.type ASC, i."createdAt" DESC, i.id DESC`,
+      this.prisma.$queryRaw<{ total: number }[]>`
+        SELECT count(*)::int AS total FROM (
+          SELECT 1 FROM notifications n ${scope} GROUP BY n.type, ${dayOf}
+        ) g`,
+    ]);
+
+    const groups = new Map<string, NotificationGroup>();
+    for (const row of rows) {
+      const key = `${row.type}|${row.day}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          type: row.type as NotificationType,
+          day: row.day,
+          count: row.count,
+          unread: row.unread,
+          latestAt: row.latestAt.toISOString(),
+          latest: [],
+        };
+        groups.set(key, group);
+      }
+      group.latest.push(this.toWire(row, row.read));
+    }
+    return pageOf([...groups.values()], totals[0]?.total ?? 0, page);
+  }
+
+  /** One group's items, newest first, paged — the expanded view of {@link findGroups} (#1649). */
+  async findGroupItems(
+    viewer: NotificationViewer,
+    key: NotificationGroupKey,
+    page: PageQuery,
+  ): Promise<Page<NotificationWire>> {
+    const { take, skip } = offsetOf(page);
+    const scope = await this.groupScopeSql(viewer);
+    const inGroup = Prisma.sql`n.type = ${key.type}
+      AND ${this.dayWindowSql(Prisma.sql`${key.day}::date`, key.tz)}`;
+    const [rows, totals] = await this.prisma.$transaction([
+      this.prisma.$queryRaw<ItemRow[]>`
+        SELECT ${itemColumns()}
+          FROM notifications n
+          ${scope}
+           AND ${inGroup}
+         ORDER BY n."createdAt" DESC, n.id DESC
+         LIMIT ${take}::int OFFSET ${skip}::int`,
+      this.prisma.$queryRaw<{ total: number }[]>`
+        SELECT count(*)::int AS total
+          FROM notifications n
+          ${scope}
+           AND ${inGroup}`,
+    ]);
+    return pageOf(
+      rows.map((row) => this.toWire(row, row.read)),
+      totals[0]?.total ?? 0,
+      page,
+    );
+  }
+
+  /** Idempotent in one statement: already-read and dismissed rows hit the unique read join (#1649). */
+  async markGroupRead(
+    viewer: NotificationViewer,
+    key: NotificationGroupKey,
+  ): Promise<MarkReadResult> {
+    const visible = await this.visibilitySql(viewer);
+    const marked = await this.prisma.$executeRaw`
+      INSERT INTO notification_reads ("notificationId", "userId")
+      SELECT n.id, ${viewer.userId}::uuid
+        FROM notifications n
+       WHERE ${visible}
+         AND n.type = ${key.type}
+         AND ${this.dayWindowSql(Prisma.sql`${key.day}::date`, key.tz)}
+      ON CONFLICT ("notificationId", "userId") DO NOTHING`;
+    return { marked, unread: await this.unreadCount(viewer) };
   }
 
   /**
@@ -486,6 +633,21 @@ export class NotificationsService {
       default:
         return 'info';
     }
+  }
+
+  // The caller's read join plus the visibility and not-dismissed filters; callers append `AND ...`.
+  private async groupScopeSql(viewer: NotificationViewer): Promise<Prisma.Sql> {
+    return Prisma.sql`
+      LEFT JOIN notification_reads r
+        ON r."notificationId" = n.id AND r."userId" = ${viewer.userId}::uuid
+     WHERE ${await this.visibilitySql(viewer)}
+       AND r."dismissedAt" IS NULL`;
+  }
+
+  // A range on createdAt rather than a day expression, so the (type, createdAt) index serves it.
+  private dayWindowSql(day: Prisma.Sql, tz: string): Prisma.Sql {
+    return Prisma.sql`n."createdAt" >= ((${day})::timestamp AT TIME ZONE ${tz}::text) AT TIME ZONE 'UTC'
+      AND n."createdAt" < (((${day}) + 1)::timestamp AT TIME ZONE ${tz}::text) AT TIME ZONE 'UTC'`;
   }
 
   /**

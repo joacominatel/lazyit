@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-09
+updated: 2026-10-17
 deciders: [Joaquín Minatel]
 ---
 
@@ -102,7 +102,9 @@ per-resource**, validated against an **ALLOWLIST** by each list endpoint. An unk
 **rejected with 400** (`resolveSort` → `UnknownSortFieldError` → `BadRequestException` via
 `common/resolve-sort.ts`), **never silently ignored** — so a sort always means what it says. The
 allowlist maps each PUBLIC `?sort=` key to the Prisma column (the wire key may differ from the
-column, and the surface is bounded so a client can never order by an arbitrary/secret field).
+column, and the surface is bounded so a client can never order by an arbitrary/secret field). Only the
+allowlist's **own** keys count: an inherited `Object.prototype` name such as `?sort=constructor` is
+an unknown field and a 400 like any other (AUD-067, 2026-10-14).
 
 The asset list's previous client-side, page-local sort (a trust bug — it presented as a global sort
 but only re-ordered the loaded page) is replaced by a **real server-side `orderBy` over the full
@@ -113,11 +115,11 @@ Per-resource sortable-field allowlists:
 | Endpoint | `sort` keys | default order |
 | --- | --- | --- |
 | `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost` (the last three added for the list's purchase & warranty columns, #1511; empty values sort last in both directions) | `createdAt desc`; every order then `id desc` (§9 tiebreaker, #1511) |
-| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc` |
-| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
-| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
-| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc` |
-| `GET /asset-models` (§8, #199) | `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt` | `createdAt desc` |
+| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc`; every order then `id desc` (§9, #1644) |
+| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc`; every order then `id desc` (§9, #1644) |
+| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
+| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
+| `GET /asset-models` (§8, #199) | `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
 
 ### 2. Four more lists migrated onto `Page<T>` + server-side `q` + sort
 
@@ -200,12 +202,22 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   consumable unit, user "Updated", …) are intentionally **not** sortable.
 - **Server vs client filters.** Where the API has a real filter param it is threaded through `q`/the
   list params (`assets` → `status`/`categoryId`/`locationId`; `consumables` → `lowStock`; `kb` →
-  `status`/`categoryId`). Filters the API does NOT support are applied **client-side over the current
-  page** and documented as such — `assets` ownership, `applications` category + criticality,
-  `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
+  `status`/`categoryId`; `applications` → `categoryId`/`isCritical`, since #1631). Filters the API does
+  NOT support are applied **client-side over the current page** and documented as such — `assets`
+  ownership, `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
   dashboard deep-links + bookmarks depend on these): `assets` `status`/`category`/`location`/`ownership`;
   `applications` `category`/`criticality`; `consumables` `lowStock`(=`"true"`)/`category`; `users`
   `status`; `locations` `type`; `kb` `status`/`categoryId`.
+
+  > [!note] Correction (2026-10-16, #1631)
+  > None of the four filters this bullet calls client-side still is. Each is now a server param, so
+  > `total`, paging and the CSV export ([[0103-data-export-streaming-path]]) follow it:
+  > - `assets` ownership → `ownership` (#824);
+  > - `consumables` category → `category` (#824);
+  > - `locations` type → `type` (#824);
+  > - `users` active/inactive → `isActive` (API #1375, web #1617).
+  >
+  > The URL param names above are unchanged.
 - **Pagination + RBAC + recovery.** Every list renders the shared `Pagination` footer over `total`;
   the "New X" button, per-row Edit/Delete and the consumables ±1 quick-adjust are gated on
   `useCanWrite()` (ADR-0040) so a VIEWER never sees a control that would 403. Active filters show as
@@ -258,6 +270,10 @@ carries `deletedAt`, so the web can render an archived badge + a Restore button.
 
 Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
 `includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
+
+`GET /articles` joined the slice on 2026-10-17 (#1647), with the same ADMIN gate and helpers. Its folder
+access ([[0060-kb-folder-access-control]] §4) and draft rule ([[0022-draft-visibility-auth-shim]]) still
+apply on top, so an archived draft is listed to its author only.
 
 ### 8. `GET /asset-models` migrated onto `Page<T>` + server-side `q` + the searchable Combobox (issue #199)
 
@@ -316,6 +332,14 @@ query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This
 string per filter name** (no repeated-param refactor). **Repeated params** (`?status=A&status=B`,
 which Express/Nest hand the controller as a `string[]`) are **also accepted** by the parse helpers, so
 either client encoding works.
+
+**Single-value params take one value (AUD-066, 2026-10-14).** The repeated form is accepted only where
+the controller declares the param as `string | string[]` (the multi-value filters above). A param
+declared as a scalar `string` (or number / boolean) that arrives repeated (`?q=a&q=b`) is a **400**
+(`Invalid q: expected a single value`), enforced once for every controller by the global
+`SingleValueQueryPipe` (`apps/api/src/common/single-value-query.pipe.ts`, registered in
+`CommonModule`). Before, the array reached string-only code and surfaced as a 500, or as a fake
+`degraded: true` on `/search`.
 
 **Validation — unchanged 400-on-unknown contract, applied per element.** The controller splits on
 `,`, trims, drops empty segments, **de-duplicates** (`in` is set semantics), and validates **each
@@ -527,6 +551,29 @@ The estate-wide `GET /infra/nodes/:id/impact` traversal is **not computed from t
 payload** and remains estate-wide. If the graph-node cap is exceeded, only canvas highlighting can omit
 nodes that were not delivered to the browser; the impact API's count/list remains complete. The
 canvas's required truncation warning must make that visualization limit explicit.
+
+## Amendment (2026-10-16) — exports page by keyset, never OFFSET ([[0103-data-export-streaming-path]])
+
+This contract governs the **on-screen** list. A bulk export of the same list does not use `limit` /
+`offset`: it walks the whole filtered set newest first over the immutable `(createdAt, id)` pair, with
+an explicit `createdAt < c OR (createdAt = c AND id < i)` predicate and no Prisma `cursor`
+(`keysetBatches` in `apps/api/src/common/export/`). OFFSET would send a boundary row twice when a row is
+inserted mid-export, and costs O(offset) on deep batches. An export also ignores `sort` / `dir`: its
+order is fixed so scripts and the importer see a stable file. The list keeps offset paging; moving the
+activity feed to keyset is possible later with the view's new `sourceKey` but is not decided here.
+
+## Amendment (2026-10-17) — the `id` tiebreaker on every offset list (#1644)
+
+§9 made the unique `id` tiebreaker a contract rule, but only the asset, infra node, purchase order and
+article lists followed it. A demo-data run that walked every page of `GET /users` and `GET /access-grants`
+missed rows that shared a bulk-created timestamp. Every offset-paginated list now ends its `ORDER BY`
+with `id`, allowlisted sort or default: users, applications, consumables, locations, asset models and
+suppliers (after the resolved sort); access grants (`grantedAt desc`), access requests and `/mine`,
+notifications, workflows, workflow connections, workflow secrets, workflow runs and manual tasks
+(`createdAt desc`); the KB reverse lookups (`updatedAt desc`); and the purchase pending-lines read (its
+raw `ORDER BY` gains the line `id`). Lists that already sort by a unique key (`id`, an article's
+`version`) or already break ties (the activity feed, AUD-032) are unchanged. A new list follows the same
+rule.
 
 ## References
 

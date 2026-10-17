@@ -1,7 +1,11 @@
 import 'reflect-metadata';
+import { BadRequestException } from '@nestjs/common';
 import { AUDIT_LOG_CSV_HEADER } from '@lazyit/shared';
 import { AuditService } from './audit.service';
 import { AuditController } from './audit.controller';
+import type { ExportService } from '../common/export';
+import { EXPORT_BATCH_SIZE, keysetBatches } from '../common/export/keyset';
+import { streamCsv } from '../common/export/stream-csv';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -28,6 +32,7 @@ interface FakePrisma {
   secretAuditLog: { findMany: jest.Mock; count: jest.Mock };
   permissionAuditLog: { findMany: jest.Mock; count: jest.Mock };
   serviceAccountAuditLog: { findMany: jest.Mock; count: jest.Mock };
+  dataExportLog: { findMany: jest.Mock; count: jest.Mock };
   user: { findMany: jest.Mock };
   serviceAccount: { findMany: jest.Mock };
   secretVault: { findMany: jest.Mock };
@@ -51,6 +56,10 @@ function makePrisma(): FakePrisma {
       findMany: emptyList(),
       count: jest.fn().mockResolvedValue(0),
     },
+    dataExportLog: {
+      findMany: emptyList(),
+      count: jest.fn().mockResolvedValue(0),
+    },
     user: { findMany: emptyList() },
     serviceAccount: { findMany: emptyList() },
     secretVault: { findMany: emptyList() },
@@ -59,6 +68,22 @@ function makePrisma(): FakePrisma {
 }
 
 const svc = (p: FakePrisma) => new AuditService(p as unknown as PrismaService);
+
+/** The file the engine streams for these filters, minus the limiter and the audit row. */
+async function exportCsv(
+  service: AuditService,
+  filters: Parameters<AuditService['logsExport']>[0],
+): Promise<string> {
+  const { columns, fetchBatch } = service.logsExport(filters);
+  let out = '';
+  for await (const chunk of streamCsv({
+    columns,
+    batches: keysetBatches(fetchBatch),
+  })) {
+    out += chunk;
+  }
+  return out;
+}
 const ACTOR = '11111111-1111-4111-8111-111111111111';
 const TARGET = '22222222-2222-4222-8222-222222222222';
 
@@ -250,13 +275,127 @@ describe('AuditService.getLogs — permission + serviceAccount sources', () => {
   });
 });
 
-describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-injection guard)', () => {
-  async function collect(gen: AsyncGenerator<string>): Promise<string> {
-    let out = '';
-    for await (const chunk of gen) out += chunk;
-    return out;
+describe('AuditService — export source (DataExportLog, ADR-0103)', () => {
+  it('reads an export row: the resource is the action, the row count and filters are the detail', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValue([
+      {
+        id: 4,
+        resource: 'USERS',
+        actorId: null,
+        serviceAccountId: 'sa3',
+        filters: { role: 'VIEWER' },
+        rowCount: 12,
+        createdAt: new Date('2026-10-16T09:00:00.000Z'),
+      },
+    ]);
+    prisma.dataExportLog.count.mockResolvedValue(1);
+    prisma.serviceAccount.findMany.mockResolvedValue([
+      { id: 'sa3', name: 'hr-sync', tokenPrefix: 'lzit_sa_hr' },
+    ]);
+
+    const page = await svc(prisma).getLogs({
+      source: 'export',
+      action: 'USERS',
+      serviceAccountId: 'sa3',
+      from: '2026-10-01T00:00:00.000Z',
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    } as never);
+
+    expect(firstArg(prisma.dataExportLog.findMany).where).toEqual({
+      resource: 'USERS',
+      serviceAccountId: 'sa3',
+      createdAt: { gte: new Date('2026-10-01T00:00:00.000Z') },
+    });
+    expect(firstArg(prisma.dataExportLog.findMany).orderBy).toEqual({
+      id: 'desc',
+    });
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      source: 'export',
+      action: 'USERS',
+      actorId: null,
+      serviceAccountName: 'hr-sync (lzit_sa_hr)',
+      detail: JSON.stringify({ rowCount: 12, filters: { role: 'VIEWER' } }),
+    });
+    // The other sources are not read.
+    expect(prisma.secretAuditLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it('offers the export actors in the actor menu', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValue([{ actorId: ACTOR }]);
+    prisma.user.findMany.mockResolvedValue([
+      { id: ACTOR, firstName: 'Ada', lastName: 'Lovelace' },
+    ]);
+
+    await expect(svc(prisma).getFilterOptions('export')).resolves.toEqual({
+      actors: [{ id: ACTOR, name: 'Ada Lovelace' }],
+    });
+  });
+
+  it('streams export rows through the audit CSV columns with the keyset cursor', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValueOnce([
+      {
+        id: 7,
+        resource: 'ASSETS',
+        actorId: null,
+        serviceAccountId: null,
+        filters: {},
+        rowCount: 3,
+        createdAt: new Date('2026-10-16T09:00:00.000Z'),
+      },
+    ]);
+
+    const csv = await exportCsv(svc(prisma), { source: 'export' });
+
+    expect(csv).toContain('2026-10-16T09:00:00.000Z,export,ASSETS,');
+  });
+});
+
+describe('AuditController — export source', () => {
+  function controller() {
+    const getLogs = jest.fn().mockResolvedValue({ items: [], total: 0 });
+    const ctrl = new AuditController(
+      { getLogs } as unknown as AuditService,
+      {} as unknown as ExportService,
+    );
+    return { ctrl, getLogs };
   }
 
+  it('accepts source=export with a resource as the action filter', async () => {
+    const { ctrl, getLogs } = controller();
+    await ctrl.logs('export', undefined, undefined, undefined, 'USERS');
+    expect(getLogs).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'export', action: 'USERS' }),
+    );
+  });
+
+  it('rejects an action that is not an export resource, and the secret-only filters', async () => {
+    const { ctrl, getLogs } = controller();
+    await expect(
+      ctrl.logs('export', undefined, undefined, undefined, 'GRANT'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      ctrl.logs(
+        'export',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'v1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(getLogs).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuditService.logsExport — export boundary (INV-10 + formula-injection guard)', () => {
   it('streams a header then metadata rows, defusing a formula-injection in a resolved vault name', async () => {
     const prisma = makePrisma();
     // A full batch then an empty one → proves the batching loop terminates.
@@ -273,7 +412,7 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
     };
     prisma.secretAuditLog.findMany
       .mockResolvedValueOnce(
-        Array.from({ length: AuditService.EXPORT_BATCH_SIZE }, () => row),
+        Array.from({ length: EXPORT_BATCH_SIZE }, () => row),
       )
       .mockResolvedValueOnce([]);
     // The vault is literally named with a spreadsheet formula → must be neutralized in the CSV.
@@ -281,22 +420,67 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
       { id: 'v1', name: '=cmd|/c calc' },
     ]);
 
-    const csv = await collect(
-      svc(prisma).streamLogsCsvRows({ source: 'secret' } as never),
-    );
+    const csv = await exportCsv(svc(prisma), { source: 'secret' });
 
     expect(prisma.secretAuditLog.findMany).toHaveBeenCalledTimes(2);
-    // Provenance stamp (#909) then the header.
-    expect(csv.startsWith('# lazyit ')).toBe(true);
-    expect(csv).toContain(`\n${AUDIT_LOG_CSV_HEADER}\n`);
+    // BOM then the header: no provenance stamp, nothing imports this file (ADR-0103 §8).
+    expect(csv.startsWith(`\uFEFF${AUDIT_LOG_CSV_HEADER}\r\n`)).toBe(true);
+    expect(AUDIT_LOG_CSV_HEADER).toBe(
+      'occurredAt,source,action,actorName,serviceAccountName,vaultName,itemLabel,targetUserName,targetServiceAccountName,role,permission,detail',
+    );
     // Formula-injection defused with a leading single quote.
     expect(csv).toContain("'=cmd|/c calc");
     // Every row of the full batch was serialized.
-    expect(csv.split("'=cmd|/c calc").length - 1).toBe(
-      AuditService.EXPORT_BATCH_SIZE,
-    );
+    expect(csv.split("'=cmd|/c calc").length - 1).toBe(EXPORT_BATCH_SIZE);
     // No value/ciphertext column exists in the export.
     expect(csv).not.toContain('ciphertext');
+  });
+});
+
+describe('AuditService.logsExport — live table (AUD-033)', () => {
+  it('emits every row exactly once while newer rows are appended mid-export', async () => {
+    const prisma = makePrisma();
+    const total = EXPORT_BATCH_SIZE * 2 + 5;
+    let table = Array.from({ length: total }, (_, i) => ({
+      id: i + 1,
+      action: 'ITEM_REVEALED',
+      actorId: null,
+      serviceAccountId: null,
+      vaultId: null,
+      itemId: `item-${i + 1}`,
+      targetUserId: null,
+      targetServiceAccountId: null,
+      createdAt: new Date('2026-06-30T10:00:00.000Z'),
+    }));
+    // A newest-first table that grows by three rows after every batch read, honouring skip/take/id.lt.
+    prisma.secretAuditLog.findMany.mockImplementation(
+      (args: {
+        where?: { id?: { lt: number } };
+        take: number;
+        skip?: number;
+      }) => {
+        const lt = args.where?.id?.lt ?? Infinity;
+        const page = [...table]
+          .sort((a, b) => b.id - a.id)
+          .filter((r) => r.id < lt)
+          .slice(args.skip ?? 0, (args.skip ?? 0) + args.take);
+        const next = table.length + 1;
+        table = table.concat(
+          [0, 1, 2].map((k) => ({
+            ...table[0],
+            id: next + k,
+            itemId: `item-${next + k}`,
+          })),
+        );
+        return Promise.resolve(page);
+      },
+    );
+
+    const csv = await exportCsv(svc(prisma), { source: 'secret' });
+
+    const exported = csv.match(/item-\d+/g) ?? [];
+    expect(new Set(exported).size).toBe(exported.length);
+    expect(exported).toHaveLength(total);
   });
 });
 

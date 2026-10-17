@@ -221,14 +221,18 @@ export class AiSettingsService implements AiSettingsReader {
     const row = await this.findRow();
     const provider = draft.provider ?? parseProvider(row?.provider ?? null);
     const model = draft.model ?? row?.model ?? null;
-    if (!provider || !model) {
-      throw badRequest(
-        'PROVIDER_NOT_CONFIGURED',
-        'Choose a provider and a model before testing the connection.',
-      );
-    }
     const baseUrl =
       draft.baseUrl !== undefined ? draft.baseUrl : (row?.baseUrl ?? null);
+    if (
+      !provider ||
+      !model ||
+      (AI_PROVIDER_DESCRIPTORS[provider].requiresBaseUrl && !baseUrl)
+    ) {
+      throw badRequest(
+        'PROVIDER_NOT_CONFIGURED',
+        'Choose a provider and a model (and a base URL where required) before testing the connection.',
+      );
+    }
     const allowPrivateNetwork =
       draft.allowPrivateNetwork ?? row?.allowPrivateNetwork ?? false;
     const providerOptions =
@@ -281,8 +285,9 @@ export class AiSettingsService implements AiSettingsReader {
    *   4. `acknowledgeDisclosure: true` records the disclosure with its author, once;
    *   5. the ENABLE GATE, only when `enabled: true`: not shim (409), the disclosure acknowledged, a
    *      provider + model (+ base URL where required) (422), `AI_SECRET_KEY` usable whenever the provider
-   *      takes a key or one is stored (409), the key itself when the provider needs one (422), and —
-   *      when never verified or the connection changed — a passing inline connection test (422);
+   *      takes a key or one is stored (409), a stored key that decrypts when turning it on, even a
+   *      verified one (422), the key itself when the provider needs one (422), and — when never verified
+   *      or the connection changed — a passing inline connection test (422);
    *   6. one transaction: a CONDITIONAL write of the row as it was read (a concurrent save → 409) plus
    *      the redacted audit rows.
    * A refused write persists NOTHING. The MCP switch and the allowlist overlay pass no gate.
@@ -397,9 +402,17 @@ export class AiSettingsService implements AiSettingsReader {
           'AI_SECRET_KEY is not set — set a 32-byte key (openssl rand -hex 32) before enabling this provider.',
         );
       }
+      const apiKey =
+        plaintextKey ?? (keyStoredAfter && row ? this.tryDecrypt(row) : null);
+      // Even a verified key: after an AI_SECRET_KEY change it no longer decrypts and chat would be down.
+      if (!row?.enabled && keyStoredAfter && apiKey === null) {
+        throw refuse({
+          code: 'API_KEY_REQUIRED',
+          message:
+            'The stored API key cannot be decrypted with the current AI_SECRET_KEY; enter the key again before enabling.',
+        });
+      }
       if (verifiedAt === null) {
-        const apiKey =
-          plaintextKey ?? (keyStoredAfter && row ? this.tryDecrypt(row) : null);
         if (AI_PROVIDER_DESCRIPTORS[provider].requiresApiKey && !apiKey) {
           throw refuse({
             code: 'API_KEY_REQUIRED',

@@ -623,7 +623,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
               <p className="mb-3 text-xs text-muted-foreground">
                 {t.rich(`extraction.hint.${extractionHint}`, {
                   link: (chunks) => (
-                    <Link href="/settings/ai" className="font-medium text-foreground hover:underline">
+                    <Link href="/settings/ai?tab=capabilities" className="font-medium text-foreground hover:underline">
                       {chunks}
                     </Link>
                   ),

@@ -17,8 +17,8 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
@@ -47,11 +47,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useLocationList } from "@/lib/api/hooks/use-locations";
+import { useRestoreLocation } from "@/lib/api/hooks/use-location-mutations";
 import {
-  useDeleteLocation,
-  useRestoreLocation,
-} from "@/lib/api/hooks/use-location-mutations";
-import { restoreLocation } from "@/lib/api/endpoints/locations";
+  LOCATION_EXPORT_PATH,
+  locationFilterParams,
+  restoreLocation,
+} from "@/lib/api/endpoints/locations";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
@@ -60,6 +61,7 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
+import { LocationDeleteDialog } from "./location-delete-dialog";
 import { LocationFormDialog } from "./location-form-dialog";
 import {
   LOCATION_FILTER_DEFAULTS as FILTER_DEFAULTS,
@@ -106,11 +108,9 @@ export function LocationsListView() {
 
   // `deriveLocationParams` is the SAME URL→query mapping the server prefetch uses (`type` is a server
   // filter, #824), so this hook's key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
+  const listParams = deriveLocationParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useLocationList(
-      deriveLocationParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
-    );
-  const deleteLocation = useDeleteLocation();
+    useLocationList(listParams);
   const restoreLocationMutation = useRestoreLocation();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -268,6 +268,13 @@ export function LocationsListView() {
                 }}
               />
             ) : null}
+            <ExportButton
+              path={LOCATION_EXPORT_PATH}
+              params={locationFilterParams(listParams)}
+              total={page?.total}
+              filename="locations"
+              permission="location:read"
+            />
             {canWrite ? (
               <Button onClick={openCreate}>
                 <PlusIcon />
@@ -504,14 +511,12 @@ export function LocationsListView() {
         location={editing}
       />
       {deleting ? (
-        <DeleteConfirmDialog
+        <LocationDeleteDialog
           open
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityKey="location"
-          name={deleting.name}
-          onConfirm={() => deleteLocation.mutateAsync(deleting.id)}
+          location={deleting}
         />
       ) : null}
     </div>

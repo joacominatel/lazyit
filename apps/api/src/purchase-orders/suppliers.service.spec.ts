@@ -66,7 +66,7 @@ describe('SuppliersService (ADR-0099 §2)', () => {
     };
     expect(args.where.deletedAt).toBeNull();
     expect(args.where.OR).toHaveLength(6);
-    expect(args.orderBy).toEqual({ name: 'asc' });
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
   });
 
   it('soft-deletes and 404s a missing supplier', async () => {

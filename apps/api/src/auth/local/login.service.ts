@@ -123,8 +123,9 @@ export class LoginService {
     if (result.needsRehash) {
       try {
         const rehashed = await this.credentials.hash(password);
-        await this.prisma.user.update({
-          where: { id: user!.id },
+        // Only over the hash just verified: a reset or change that landed meanwhile must win (AUD-037).
+        await this.prisma.user.updateMany({
+          where: { id: user!.id, passwordHash: user!.passwordHash },
           data: { passwordHash: rehashed },
         });
       } catch (err) {

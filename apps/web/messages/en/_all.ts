@@ -14,6 +14,7 @@ import auth from "./auth.json";
 import common from "./common.json";
 import consumables from "./consumables.json";
 import dashboard from "./dashboard.json";
+import exportMessages from "./export.json";
 import help from "./help.json";
 import imports from "./imports.json";
 import infra from "./infra.json";
@@ -40,6 +41,7 @@ const messages = {
   marketing,
   shared,
   dashboard,
+  export: exportMessages,
   assets,
   attachments,
   applications,

@@ -93,8 +93,9 @@ function toFormValues(article?: Article): ArticleFormValues {
  *
  * `prefill` (#1106 Phase 4) seeds a CREATE form from a create-on-click on an unresolved `[[slug]]`:
  * the sanitized `title` seeds the title field and the sanitized `slug` is sent on create so the new
- * note takes exactly the wiki-link's target slug (resolving the original red link). Both are already
- * validated by `parseKbNewPrefill` at the page edge; ignored entirely on edit.
+ * note takes exactly the wiki-link's target slug (resolving the original red link). A `categoryId`
+ * (#1539, "New article here") preselects the home folder. All are validated by `parseKbNewPrefill` at
+ * the page edge; ignored entirely on edit.
  */
 export function ArticleForm({
   article,
@@ -144,8 +145,18 @@ export function ArticleForm({
     const values = toFormValues(article);
     // #1106 Phase 4: seed a CREATE form's title from the sanitized wiki-link prefill (never on edit).
     if (!article && prefill?.title) values.title = prefill.title;
+    // #1539: "New article here" preselects the folder — only when it is one of the viewer's live
+    // folders (the KB layout prefetches the list, so it is known on first render). The API still
+    // decides whether the article may be filed there.
+    if (
+      !article &&
+      prefill?.categoryId &&
+      (categories?.some((category) => category.id === prefill.categoryId) ?? false)
+    ) {
+      values.categoryId = prefill.categoryId;
+    }
     return values;
-  }, [article, prefill]);
+  }, [article, prefill, categories]);
 
   const form = useForm<ArticleFormValues>({
     resolver: zodResolver(

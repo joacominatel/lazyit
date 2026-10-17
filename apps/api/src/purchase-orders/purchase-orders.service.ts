@@ -14,6 +14,7 @@ import {
   type CreatePurchaseOrder,
   type CancelRemainingUnits,
   type CreatePurchaseOrderLine,
+  type DeletedFilter,
   type PageQuery,
   type PurchaseOrderReceiptFilter,
   type PurchaseOrderStatus,
@@ -27,6 +28,11 @@ import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import {
   purchaseOrderLineMoneyToDb,
   purchaseOrderLineMoneyToWire,
@@ -95,6 +101,13 @@ type PurchaseOrderRow = Prisma.PurchaseOrderGetPayload<{
   include: typeof PURCHASE_ORDER_INCLUDE;
 }>;
 type LineRow = PurchaseOrderRow['lines'][number];
+
+/** The ADR-0032 escape hatch for the archived slice, spread into a read's args. */
+function softDeleteEscapeHatch(
+  deleted: DeletedFilter,
+): Record<string, unknown> {
+  return includeSoftDeletedFor(deleted) ? { includeSoftDeleted: true } : {};
+}
 
 /** The header fields an update may change, compared field by field for the activity log. */
 const HEADER_FIELDS = [
@@ -198,14 +211,8 @@ export class PurchaseOrdersService {
 
   /** A page of purchases (default newest first) with their supplier, receipt and totals. */
   async findPage(filters: PurchaseOrderFilters, page: PageQuery) {
-    const where: Prisma.PurchaseOrderWhereInput = {
-      AND: [await this.buildWhere(filters), deletedWhere(page.deleted)],
-    };
-    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(
-      page.deleted,
-    )
-      ? { includeSoftDeleted: true }
-      : {};
+    const where = await this.listWhere(filters, page.deleted);
+    const escapeHatch = softDeleteEscapeHatch(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
       resolveSortOrBadRequest<Prisma.PurchaseOrderOrderByWithRelationInput>(
@@ -226,15 +233,51 @@ export class PurchaseOrdersService {
       }),
       this.prisma.purchaseOrder.count({ where, ...escapeHatch }),
     ]);
+    return pageOf(await this.toListItems(rows), total, page);
+  }
+
+  /** The list's `where` for a filter set and soft-delete slice: the page, its count and the export read it. */
+  async listWhere(
+    filters: PurchaseOrderFilters,
+    deleted: DeletedFilter,
+  ): Promise<Prisma.PurchaseOrderWhereInput> {
+    return { AND: [await this.buildWhere(filters), deletedWhere(deleted)] };
+  }
+
+  // Lazy, so a refused export runs no query; once, so the receipt id set counted is the one walked.
+  exportSource(filters: PurchaseOrderFilters, deleted: DeletedFilter) {
+    let where: Promise<Prisma.PurchaseOrderWhereInput> | undefined;
+    const listWhere = () => (where ??= this.listWhere(filters, deleted));
+    const escapeHatch = softDeleteEscapeHatch(deleted);
+    return {
+      count: async () =>
+        this.prisma.purchaseOrder.count({
+          where: await listWhere(),
+          ...escapeHatch,
+        }),
+      fetchBatch: async (after: KeysetCursor<string> | null, take: number) =>
+        this.toListItems(
+          await this.prisma.purchaseOrder.findMany({
+            where: keysetWhere(await listWhere(), after),
+            orderBy: keysetOrderBy(),
+            take,
+            include: PURCHASE_ORDER_INCLUDE,
+            ...escapeHatch,
+          }),
+        ),
+    };
+  }
+
+  /** List rows: the detail without its lines, plus the line count. */
+  private async toListItems(rows: PurchaseOrderRow[]) {
     const received = await receivedByLine(
       this.prisma,
       rows.flatMap((row) => row.lines),
     );
-    const items = rows.map((row) => {
+    return rows.map((row) => {
       const { lines, ...item } = this.toDetail(row, received);
       return { ...item, lineCount: lines.length };
     });
-    return pageOf(items, total, page);
   }
 
   /** The `where` of the list (and its count). The receipt filter resolves to a set of purchase ids. */
@@ -561,13 +604,18 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     const updated = await this.prisma.$transaction(async (tx) => {
-      // A kind change is checked against the linked assets: lock the purchase first so a concurrent link
-      // (which takes KEY SHARE on it) cannot slip a unit in between the check and the write.
+      // Purchase, then line, as cancelRemaining: a kind change holds the purchase against a concurrent link.
+      if (data.kind !== undefined) {
+        await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR UPDATE`;
+      } else {
+        await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
+      }
+      await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
+      // Read under the line lock, so the quantity checks see what a concurrent cancel committed.
       const { line: before } = await this.assertLineLive(
         tx,
         purchaseOrderId,
         lineId,
-        { lock: data.kind !== undefined },
       );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
       const kind = data.kind ?? before.kind;

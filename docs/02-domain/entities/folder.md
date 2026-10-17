@@ -3,7 +3,7 @@ title: Folder
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-13
+updated: 2026-10-15
 ---
 
 # Folder
@@ -49,16 +49,32 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   folder frees its name **within its parent** for reuse/restore. The index is `NULLS NOT DISTINCT`, so
   the **root** level (parentId NULL) still rejects two folders sharing a name — matching the prior flat
   behaviour.
-- **No cycles** — a folder may not be its own ancestor. On create/reparent the service runs a **DFS
-  walk up the chain** from the proposed parent (the same pattern the manager chain — [[0058-user-manager-and-clone-actions]]
-  — and the workflow step graph — [[0054-applications-workflow-engine]] §8 — use); reaching the subject
-  is a **400**. A new folder has no children, so a create can't cycle.
+- **No cycles** — a folder may not be its own ancestor. On reparent the service walks the subject's
+  subtree (the same guard the manager chain — [[0058-user-manager-and-clone-actions]] — and the
+  workflow step graph — [[0054-applications-workflow-engine]] §8 — use); a proposed parent inside it is a
+  **400**. The walk covers **soft-deleted** folders too, so a deleted folder in the chain cannot hide a
+  loop its later restore would close, and it is cycle-safe, so a loop already in the data still ends. A
+  new folder has no children, so a create can't cycle.
+- **Tree writes are serialized** (audit 2026-10-10, AUD-010/AUD-023) — every write that changes the
+  tree's shape (a move, a nested create, a delete, a cascade delete, a restore) runs its checks and its
+  write in **one transaction** holding a single transaction-scoped Postgres **advisory lock** on the
+  folder tree. Two opposing moves therefore cannot both pass the cycle check, and a sub-folder cannot be
+  created under a folder that is being deleted. A delete also locks its folder rows `FOR UPDATE`, which
+  waits out an article insert already in flight into them (the FK's key-share lock) so the emptiness
+  check or the cascade sees it. The article side holds too: an article create, an article move and
+  each import write lock the target folder `FOR SHARE` inside their write transaction and re-check it
+  is live, so an article whose folder check ran before a delete began cannot land after it. Both
+  halves of AUD-023 are closed.
+- **Restore needs a live parent** (AUD-022) — restoring a sub-folder whose parent is still soft-deleted
+  is a **409**: restore the parent first. Restores do not cascade ([[0041-soft-delete-reuse-and-restore]]),
+  so without this a folder could come back live under a deleted one, unreachable for every non-admin.
+  Folders already left in that state by an earlier restore keep loading exactly as before.
 - **No silent orphaning on delete (non-cascade)** — soft-deleting a folder that still has live
   **child folders** is a **409** (same posture as the existing live-articles 409). Reparent or delete
   the children first. Both guards are application logic: the soft delete (UPDATE deletedAt) never fires
   the FK referential action, so the schema FKs are only hard-delete safety nets.
 - **Cascade delete** (#415) — `DELETE /article-categories/:id?cascade=true` (`category:delete`,
-  ADMIN-only) soft-deletes the folder, **all descendant folders** (full subtree, BFS walk), and **all
+  ADMIN-only) soft-deletes the folder, **all descendant folders** (full subtree, cycle-safe walk), and **all
   articles** whose home `categoryId` is anywhere in that subtree, in a **single `$transaction`**.
   Hard-deletes all [[article-alias]] rows whose `folderId` is in the deleted subtree OR whose
   `articleId` points to a newly soft-deleted article (dead aliases are pure noise). Returns
@@ -76,7 +92,10 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   folder — walking segment by segment, find-or-create by `(parentId, name)` among live rows (honouring
   the per-parent partial-unique), so the same name under two parents (`Servers/Linux` vs
   `Workstations/Linux`) yields two distinct folders. A folder created mid-import is reused for sibling
-  entries (a path cache), so the tree is built once per job inside the sandboxed worker child.
+  entries (a path cache), so the tree is built once per job inside the sandboxed worker child. Each
+  find-or-create runs under the folder-tree lock after checking its parent is still live, like a
+  nested create from the API; a folder deleted while the job runs makes the entries below it
+  **skipped** (`failed`) instead of landing in a deleted subtree (AUD-023).
 - **Access attaches to the folder, not to article rows** — a deliberate, bounded carve-out from the
   per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The restriction is
   stored on the folder as a **`accessRules` jsonb** column: `null`/empty = **PUBLIC** (default — any
@@ -99,6 +118,13 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 - **Setting/clearing a folder's rules is `settings:manage`-gated** (ADMIN-only, `PUT
   /article-categories/:id/access-rules`) — re-scoping WHO may read a folder is an authorization-
   management action, distinct from `category:write` (authoring the folder itself).
+- **Moving a folder is `settings:manage`-gated too** ([[0060-kb-folder-access-control]] §10, SEC-089).
+  A folder's position is half of its effective rule (inherit-and-narrow), so any **change** of
+  `parentId`, the root included, is a **403** without `settings:manage`; a body repeating the current
+  parent is not a move. A move writes one `ArticleVersion` per live article in the moved subtree, in the
+  same transaction, attributed to the mover. **Creating** under a parent requires that the caller can
+  read it — an unreadable parent is the same **400** as a missing one; the new folder inherits the
+  parent's rule, so a create widens nothing.
 - **The rule CONTENT is gated; the rule's EXISTENCE is not** (#1299, [[0060-kb-folder-access-control]]
   §3 amendment). `accessRules` itself is returned **only** to a `settings:manage` reader (#554);
   beside it, every folder read carries a **derived `hasAccessRules` boolean** readable by **any**
@@ -121,19 +147,23 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 ## Endpoints
 
 The endpoints stay `/article-categories` (`ArticleCategoriesModule`) — see [[article-category]] — with
-`parentId` now accepted on create (optional; absent = root) and update (nullable; `null` = move to
-root, a cuid = reparent). A reparent that would create a cycle is **400**; a delete of a folder with
-live sub-folders is **409** (non-cascade). **`DELETE /article-categories/:id?cascade=true`** (`category:delete`,
+`parentId` now accepted on create (optional; absent = root; the parent must be readable by the caller)
+and update (nullable; `null` = move to root, a cuid = reparent; a change needs `settings:manage`, else
+**403**). A reparent that would create a cycle is **400**; a delete of a folder with
+live sub-folders is **409** (non-cascade), and so is restoring a sub-folder whose parent is still
+deleted. **`DELETE /article-categories/:id?cascade=true`** (`category:delete`,
 ADMIN-only) performs the cascade delete described above and returns `{ deletedFolders, deletedArticles }`.
 **`PUT /article-categories/:id/access-rules`** (`settings:manage`, ADMIN-only) sets or clears the
 folder's access rules (body `{ accessRules: <rule list> | null }`). Both folder reads (`GET /article-categories`
 and `GET /article-categories/:id`) carry the derived **`hasAccessRules`** boolean for every
 `category:read` caller, plus `accessRules` itself only for a `settings:manage` one; the list read also
-carries the per-folder `articleCount` (`null` for a folder the caller cannot read).
+carries the per-folder `articleCount` (`null` for a folder the caller cannot read) and the rolled-up
+`totalArticleCount` (#1651: the folder plus every live descendant the caller can read; `null` where
+`articleCount` is).
 
 ## Implemented in #392 + #404 + #415; still deferred
 
-- **Built (#392, ADR-0059 §1):** the `parentId` self-FK, the per-parent partial-unique name, the DFS
+- **Built (#392, ADR-0059 §1):** the `parentId` self-FK, the per-parent partial-unique name, the
   cycle guard, the no-silent-orphan child-folder 409, and `parentId` on the create/update/read wire
   shape (`@lazyit/shared` `Folder*` aliases over `ArticleCategory*`).
 - **Built (#404, ADR-0060):** the `accessRules` jsonb column + the closed zod rule vocabulary
@@ -147,7 +177,7 @@ carries the per-folder `articleCount` (`null` for a folder the caller cannot rea
   engine's readable count (the in-app post-filter is kept as a defense-in-depth backstop, #598); the
   read-path folder-tree load is **memoized per request** while live joins stay dynamic (#599); and a
   **cascade folder delete deindexes** its soft-deleted articles from Meilisearch (no ghost hits, #595).
-- **Built (#415):** the `?cascade=true` flag on `DELETE /:id` — BFS subtree walk, single-transaction
+- **Built (#415):** the `?cascade=true` flag on `DELETE /:id` — subtree walk, single-transaction
   soft-delete of all descendant folders + articles, hard-delete of all alias rows in the subtree
   (folder-side and article-side), ADMIN-only (same `category:delete` gate), returns
   `{ deletedFolders, deletedArticles }`.
@@ -155,6 +185,11 @@ carries the per-folder `articleCount` (`null` for a folder the caller cannot rea
   reads — an additive, read-only, computed field (`FolderAccessService.restrictedFolderIds`) that
   shares the request-scoped folder-tree load with the §4 evaluation, so the list read pays no extra
   query. The `settings:manage` gate on `accessRules` itself is unchanged.
+- **Built (#1539):** `GET /articles?categoryId=…&includeSubfolders=true` lists a folder's whole live
+  subtree — one query over the live folder tree, walked in memory and cycle-safe, with the §4 folder
+  pin still ANDed on top, so a restricted descendant stays out for a caller who cannot read it. A
+  `/search` article hit that survives the folder post-filter now ships its `categoryId` (a folder the
+  caller can already read) instead of having it stripped; dropped hits are unchanged.
 - **Still deferred:** the `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a
   separate migration); a guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism
   is the 409 today); the Phase-2 alias-as-share (§7, reserved).

@@ -45,6 +45,13 @@ export const ArticleHitSchema = z.object({
   title: z.string(),
   excerpt: z.string().nullable(),
   status: z.string(),
+  // The hit's home folder (#1539), so a result row can show where the article lives. Shipped only on
+  // hits that survive the folder-access backstop (ADR-0060 §5), which means the caller can already
+  // read that folder. Nullish: a stale index document may lack it, and an older API never sends it.
+  categoryId: z.string().nullish(),
+  // When the article last changed (#1539), read from the database rather than the index, so it is
+  // right without a reindex. Nullish: absent when the row is no longer live or on an older API.
+  updatedAt: z.iso.datetime().nullish(),
 });
 
 export const UserHitSchema = z.object({

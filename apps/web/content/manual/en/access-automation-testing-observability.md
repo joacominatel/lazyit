@@ -46,7 +46,7 @@ mapped field names) and jump to the **manual task** if the run paused.
 > not captured by design.** A run records only the method, the target host, the mapped *field names*
 > (not their values), and a coarse outcome. Secrets are never recorded.
 
-The application's Workflows tab also shows **Recent runs**, and each grant carries a small chip —
+The application's Automation tab also shows **Recent runs**, and each grant carries a small chip —
 **Provisioned**, **Provisioning…**, or **Needs attention** — so you can see at a glance whether a
 grant's automation completed.
 

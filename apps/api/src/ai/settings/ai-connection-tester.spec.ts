@@ -1,5 +1,8 @@
 import type { ModuleRef } from '@nestjs/core';
-import { AiConnectionTestResultSchema } from '@lazyit/shared';
+import {
+  AI_RUN_ERROR_CODES,
+  AiConnectionTestResultSchema,
+} from '@lazyit/shared';
 import { EgressError } from '../../common/egress/types';
 import type { ResolvedAiProviderConfig } from '../core/ports/ai-settings.port';
 import {
@@ -137,6 +140,32 @@ describe('AiConnectionTester', () => {
     expect(result).toMatchObject({
       ok: false,
       error: { code: AI_CONNECTION_TEST_CODES.providerLayerUnavailable },
+    });
+  });
+
+  it('never calls a failure outside the unreachable class "could not be reached"', async () => {
+    for (const code of AI_RUN_ERROR_CODES.filter(
+      (c) => c !== 'PROVIDER_UNAVAILABLE',
+    )) {
+      const port = makePort(() => {
+        throw Object.assign(new Error('x'), { code });
+      });
+      const result = await testerWith(port).test(CONFIG);
+      expect(result.error).toMatchObject({ code });
+      expect(result.error?.message).not.toMatch(/could not be reached/);
+      expect(result.error?.message).toBeTruthy();
+    }
+  });
+
+  it('names an incomplete configuration, not an unreachable provider', async () => {
+    const port = makePort(() => {
+      throw Object.assign(new Error('no base url'), { code: 'AI_DISABLED' });
+    });
+    const result = await testerWith(port).test(CONFIG);
+    expect(result.error).toEqual({
+      code: 'AI_DISABLED',
+      message:
+        'The provider is not fully configured — check the provider and its base URL.',
     });
   });
 

@@ -38,6 +38,9 @@ function pick(row: unknown, fields: readonly string[]): Row {
   return out;
 }
 
+const text = (value: unknown): string | null =>
+  typeof value === 'string' ? value : null;
+
 const sessionContext = defineTool({
   name: 'session_context',
   title: 'Session context',
@@ -69,14 +72,22 @@ const sessionContext = defineTool({
     });
     return {
       data: {
-        user: pick(me, ['id', 'firstName', 'lastName', 'email', 'role']),
+        // Anyone may rename themselves (`PATCH /users/me`), so even the caller's own name is wrapped.
+        user: {
+          ...pick(me, ['id', 'email', 'role']),
+          firstName: untrusted(text((me as Row).firstName)),
+          lastName: untrusted(text((me as Row).lastName)),
+        },
         permissions: permissions.permissions,
         version: version.current,
         assignedAssets: {
           total: assets.total,
-          items: assets.items.map((a) =>
-            pick(a, ['id', 'name', 'assetTag', 'serial', 'status']),
-          ),
+          // A lean row does not say whether a reporting agent wrote the name or serial (assets.tools.ts).
+          items: assets.items.map((a) => ({
+            ...pick(a, ['id', 'assetTag', 'status']),
+            name: untrusted(text(a.name)),
+            serial: untrusted(text(a.serial)),
+          })),
         },
         activeAccess: {
           total: grants.total,
@@ -89,16 +100,19 @@ const sessionContext = defineTool({
   },
 });
 
-/** Per-entity projection of a search hit; free text other people wrote is wrapped as untrusted. */
+/**
+ * Per-entity projection of a search hit; free text other people wrote is wrapped as untrusted. Each index
+ * comes back only for a principal holding its `<domain>:read` (users: a person whose role may read them) —
+ * the controller drops the others (AUD-015).
+ */
 const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
-  assets: ['id', 'name', 'assetTag', 'serial', 'status'],
-  articles: ['id', 'slug', 'title', 'status'],
-  users: ['id', 'firstName', 'lastName', 'email'],
+  assets: ['id', 'assetTag', 'status'],
+  articles: ['id', 'slug', 'status'],
+  users: ['id', 'email'],
   locations: ['id', 'name', 'type'],
   applications: ['id', 'name', 'vendor'],
-  infra: ['id', 'label', 'kind', 'status', 'ipAddress', 'assetName'],
+  infra: ['id', 'kind', 'status', 'ipAddress'],
   consumables: ['id', 'name', 'sku', 'currentStock', 'unit'],
-  // #1499: only present for a principal holding purchaseOrder:read — the controller drops both otherwise.
   purchases: [
     'id',
     'reference',
@@ -109,11 +123,16 @@ const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   ],
   suppliers: ['id', 'name', 'taxId'],
 };
-const HIT_UNTRUSTED_TEXT: Partial<Record<SearchEntity, string>> = {
-  assets: 'notes',
-  articles: 'excerpt',
-  applications: 'description',
-  consumables: 'description',
+const HIT_UNTRUSTED_TEXT: Partial<Record<SearchEntity, readonly string[]>> = {
+  // A hit does not say whether a reporting agent wrote the name or serial, so both are wrapped.
+  assets: ['name', 'serial', 'notes'],
+  articles: ['title', 'excerpt'],
+  // Anyone may rename themselves (`PATCH /users/me`).
+  users: ['firstName', 'lastName'],
+  applications: ['description'],
+  // An agent-reported node's label is its hostname, and so is its auto-created asset's name.
+  infra: ['label', 'assetName'],
+  consumables: ['description'],
 };
 
 const lazyitSearch = defineTool({
@@ -122,7 +141,8 @@ const lazyitSearch = defineTool({
   description:
     'Full-text search across assets, knowledge-base articles, users, locations, applications, ' +
     'infrastructure nodes, consumables, purchases and suppliers. Returns, per entity, the total and the ' +
-    'best hits with their ids. Purchases and suppliers come back only for a caller who may read purchases. ' +
+    'best hits with their ids. Each entity comes back only for a caller who may read it (purchases and ' +
+    'suppliers: one who may read purchases). ' +
     'Use it to find an entity before reading or changing it; never guess an id. It needs text: to ' +
     "LIST records by a filter (every administrator, every low-stock item) use that domain's own search " +
     'tool without a `query` (user_search, asset_search, consumable_search, kb_search…).',
@@ -164,16 +184,13 @@ const lazyitSearch = defineTool({
         entity
       ] as { hits?: unknown[]; total?: number } | undefined;
       if (!block) continue;
-      const textField = HIT_UNTRUSTED_TEXT[entity];
+      const textFields = HIT_UNTRUSTED_TEXT[entity] ?? [];
       data[entity] = {
         total: block.total ?? 0,
         hits: (block.hits ?? []).map((hit) => {
           const projected = pick(hit, HIT_FIELDS[entity]);
-          if (textField) {
-            const text = (hit as Row)[textField];
-            projected[textField] = untrusted(
-              typeof text === 'string' ? text : null,
-            );
+          for (const field of textFields) {
+            projected[field] = untrusted(text((hit as Row)[field]));
           }
           return projected;
         }),

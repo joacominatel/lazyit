@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-09-24
+updated: 2026-10-17
 ---
 
 # Notification
@@ -93,8 +93,9 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 - **Login** (`GET /users/me`, the app-load self-read) → **`secret.vault_setup`**, a **targeted** nudge
   (`recipientUserId = caller`) when the caller holds `secret:read` but has **no** [[user-keypair]] (they
   have never set a vault passphrase, so they can decrypt nothing — [[0061-secret-manager-zero-knowledge]]
-  §7). Dedupe **`secret.vault_setup:<userId>`** (a STABLE key, no time bucket) → **one nudge per user,
-  ever**; none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
+  §7). Dedupe **`secret.vault_setup:<userId>`** (a STABLE key, no time bucket) → **at most one nudge per
+  user per retention window**: the 90-day prune frees the key, so a user still without a keypair is nudged
+  again on a later login (AUD-089); none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
   notification problem never blocks login or `/me`). **INV-10-safe** — carries no key material, only "set
   up your vault passphrase" + a link to `/secrets`.
 - **`PUT /config/permissions`** (`PermissionsConfigService.updateMatrix`) → **`permission_widened`**, a
@@ -130,8 +131,9 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   security notice to the account's owner (`recipientUserId` = `targetUserId` = the user) when an OAuth
   grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
   must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to
-  `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); a grant older than the
-  90-day retention is never announced. Metadata = grant id, kind (`oauth` | `personal`), client name or
+  `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); whether a grant was
+  announced is stored on it ([[oauth-grant]]`.announcedAt`, AUD-014), never inferred from its age, so the
+  90-day prune cannot silence a grant first used months after it was created. Metadata = grant id, kind (`oauth` | `personal`), client name or
   token label, scopes — never a token. Fire-and-forget: it never delays or fails the MCP request.
 
 ## API (poll) — read-path authZ (the auth contract)
@@ -150,6 +152,27 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 
 The feed and its `total` exclude the caller's dismissed rows; the unread count excludes them by
 construction (a dismissed row always has a read join).
+
+### Grouped feed (#1649)
+
+A bulk operation (an import, a seed, a mass grant) can emit hundreds of one type in a day, so the bell
+reads groups instead of the flat feed ([[0056-in-app-notification-bell]] amendment 2026-10-17):
+
+- `GET /notifications/groups?tz=&limit=&offset=` — the caller's notifications grouped by **(type,
+  calendar day in `tz`)** → `Page<NotificationGroup>`: `{ type, day, count, unread, latestAt, latest }`,
+  where `latest` is the newest `NOTIFICATION_GROUP_PREVIEW_SIZE` (3) items as full `Notification` rows.
+  Ordered `latestAt` desc, `day` desc, `type` asc (a total order); `total` counts groups.
+- `GET /notifications/groups/items?type=&day=&tz=&limit=&offset=` — one group's items, newest first,
+  `id` desc as the tiebreaker → `Page<Notification>`.
+- `PATCH /notifications/read-group` with body `{ type, day, tz? }` — marks the whole group read for the
+  caller in one `INSERT … SELECT … ON CONFLICT DO NOTHING` → `{ marked, unread }`. Idempotent.
+
+`tz` is an IANA name, default `UTC`; the web sends the instance display zone
+(`NEXT_PUBLIC_DEFAULT_TIME_ZONE`, [[i18n]]). The API has no zone of its own, so the client must send the
+same `tz` to all three. All three apply the same visibility scope and dismissed-row exclusion as the flat
+feed; the grouping runs in SQL (`GROUP BY`, a `LATERAL` preview per group over the `(type, createdAt)`
+index), never by loading rows. The unread count is unchanged and exact — the UI caps the badge, not the
+API.
 
 **Read-path authZ ([[0056-in-app-notification-bell]] amendment 2026-06-14, #453).** v1 gated all four
 endpoints by `@RequirePermission('notification:read')` (ADMIN-only) — a non-admin was 403'd and could
@@ -183,8 +206,11 @@ amendment, #453; the `/secrets` banner was dropped). Each row carries a per-user
 "Clear all" action that removes the rows currently shown, both optimistic, with no confirmation and no
 undo — a CEO decision of 2026-09-23 ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
 
+The panel lists groups from the grouped feed, expandable to their items and markable read per group,
+with the badge capped at `99+` (#1649).
+
 ## Related
 
 [[0056-in-app-notification-bell]] · [[recent-activity]] · [[manual-task]] · [[access-grant]] ·
 [[consumable-movement]] · [[user-keypair]] · [[0061-secret-manager-zero-knowledge]] (INV-10) ·
-[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453 · issue #1309
+[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453 · issue #1309 · issue #1649

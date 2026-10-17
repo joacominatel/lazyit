@@ -9,6 +9,7 @@ import type { Request } from 'express';
 import type { User } from '../../generated/prisma/client';
 import {
   CONSENT_DECISION_RATE_LIMIT,
+  RATE_LIMIT_MAX_KEYS,
   REGISTER_RATE_LIMIT,
   REVOKE_RATE_LIMIT,
   TOKEN_RATE_LIMIT,
@@ -16,8 +17,13 @@ import {
 
 /**
  * A fixed-window counter per key — the `LoginRateLimitGuard` / `SetupRateLimitGuard` posture: in-memory,
- * per replica (behind N replicas the effective cap is N× the limit, accepted for a 5–20 person instance),
- * self-pruning so the map stays bounded.
+ * per replica (behind N replicas the effective cap is N× the limit, accepted for a 5–20 person instance).
+ * Shared by the OAuth endpoints, the CIMD fetch limit and the MCP resource server.
+ *
+ * Constant work per hit, whatever the number of keys (AUD-005): a bucket is (re)inserted only when its
+ * window opens, so the map's insertion order is window-start order — expired buckets are dropped from the
+ * front until the first live one, and past `maxKeys` the oldest window is evicted (it was the next to
+ * expire; its key starts a fresh count).
  */
 export class FixedWindowRateLimiter {
   private readonly buckets = new Map<
@@ -28,23 +34,39 @@ export class FixedWindowRateLimiter {
   constructor(
     private readonly max: number,
     private readonly windowMs: number,
+    private readonly maxKeys: number = RATE_LIMIT_MAX_KEYS,
   ) {}
 
   /** Count one hit for `key`; false when the key is over its limit for the current window. */
   hit(key: string, now: number = Date.now()): boolean {
-    for (const [bucketKey, bucket] of this.buckets) {
-      if (now - bucket.windowStart >= this.windowMs) {
-        this.buckets.delete(bucketKey);
-      }
-    }
+    this.pruneExpired(now);
     const bucket = this.buckets.get(key);
-    if (!bucket) {
-      this.buckets.set(key, { count: 1, windowStart: now });
+    if (bucket && now - bucket.windowStart < this.windowMs) {
+      if (bucket.count >= this.max) return false;
+      bucket.count += 1;
       return true;
     }
-    if (bucket.count >= this.max) return false;
-    bucket.count += 1;
+    this.buckets.delete(key);
+    if (this.buckets.size >= this.maxKeys) {
+      const oldest = this.buckets.keys().next();
+      if (!oldest.done) this.buckets.delete(oldest.value);
+    }
+    this.buckets.set(key, { count: 1, windowStart: now });
     return true;
+  }
+
+  /** Whether `key` has used up its current window, without counting a hit. */
+  exhausted(key: string, now: number = Date.now()): boolean {
+    const bucket = this.buckets.get(key);
+    if (!bucket || now - bucket.windowStart >= this.windowMs) return false;
+    return bucket.count >= this.max;
+  }
+
+  private pruneExpired(now: number): void {
+    for (const [key, bucket] of this.buckets) {
+      if (now - bucket.windowStart < this.windowMs) return;
+      this.buckets.delete(key);
+    }
   }
 }
 

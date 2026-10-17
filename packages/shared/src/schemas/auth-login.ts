@@ -65,8 +65,8 @@ export type LoginResponse = z.infer<typeof LoginResponseSchema>;
  * mints a one-time temporary password locally (there is no IdP to email a link, and no instance SMTP
  * yet), sets `mustChangePassword`, bumps the subject's `sessionEpoch` (killing their existing sessions)
  * and audits `PASSWORD_RESET_BY_ADMIN`. The plaintext is returned to the admin to hand off ONCE — it is
- * never stored in plaintext or shown again. In OIDC mode the endpoint keeps its 204 No Content shape
- * (Zitadel emails the link), so this body is local-mode only.
+ * never stored in plaintext or shown again. In OIDC mode the operator's IdP owns credentials, so this
+ * body is local-mode only.
  */
 export const AdminPasswordResetResultSchema = z.object({
   temporaryPassword: z.string().min(1),

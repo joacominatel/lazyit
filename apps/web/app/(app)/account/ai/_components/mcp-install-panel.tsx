@@ -5,6 +5,7 @@ import {
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
 import type { AiMcpAuthMode } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -56,7 +57,20 @@ const code = (chunks: ReactNode) => (
  *
  * Every snippet derives from the page's own origin and never carries a real token.
  */
-export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
+const profileLink = (chunks: ReactNode) => (
+  <Link href="/account/ai" className="font-medium underline underline-offset-4">
+    {chunks}
+  </Link>
+);
+
+/** `profile` when the panel is embedded outside `/account/ai`, where the personal-token list is not below it. */
+export function McpInstallPanel({
+  auth,
+  tokenLocation = "below",
+}: {
+  auth: AiMcpAuthMode;
+  tokenLocation?: "below" | "profile";
+}) {
   const t = useTranslations("oauth.install");
   const location = usePageLocation();
   // Clients must use the address the server knows for itself — `GET /ai/status` `mcp.endpoint`
@@ -179,7 +193,9 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
                 <p>
                   {auth === "oauth"
                     ? t.rich("claudeCode.manual.stepSignInOauth", { code })
-                    : t("claudeCode.manual.stepToken")}
+                    : tokenLocation === "profile"
+                      ? t.rich("claudeCode.manual.stepTokenProfile", { link: profileLink })
+                      : t("claudeCode.manual.stepToken")}
                 </p>
               </li>
             </ol>
@@ -193,10 +209,12 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
           <CardDescription>
             {auth === "oauth"
               ? t("clients.descriptionOauth")
-              : t.rich("clients.descriptionToken", {
-                  code,
-                  placeholder: TOKEN_PLACEHOLDER,
-                })}
+              : t.rich(
+                  tokenLocation === "profile"
+                    ? "clients.descriptionTokenProfile"
+                    : "clients.descriptionToken",
+                  { code, link: profileLink, placeholder: TOKEN_PLACEHOLDER },
+                )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">

@@ -3,7 +3,7 @@ title: VaultMembership
 tags: [domain, entity, secret-manager, security, secrets, crypto]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-13
+updated: 2026-10-14
 ---
 
 # VaultMembership
@@ -32,6 +32,19 @@ merely lets a user *enter* the Secret Manager ([[0061-secret-manager-zero-knowle
   ever persisted or logged ([[0031-logging-strategy]]).
 - **Granting = wrapping, with no escalation.** A member is added by wrapping the existing DEK to their
   public key — which requires the granter to **already** be able to unwrap it (**no grant-what-you-can't-read**).
+- **Only a live, active login user can be granted (AUD-042).** A grant to a missing, soft-deleted,
+  deactivated (`isActive = false`) or directory-only [[user]] is a **404** and writes nothing — a wrapped
+  DEK handed to a deactivated user would otherwise come back on reactivation.
+- **Grants are fenced against a concurrent vault delete (AUD-042).** A grant (human or service account)
+  and an item write take a `FOR SHARE` lock on the `secret_vaults` row and re-check liveness inside their
+  transaction; `deleteVault` takes `FOR UPDATE` on the same row before dropping memberships. Whichever
+  commits second sees the other's result, so no membership survives under a deleted vault.
+- **Grants are fenced against a concurrent offboarding too (audit 2026-10-10 follow-up).** A human grant
+  takes `FOR SHARE` on the target `users` row before judging it; offboarding takes `FOR UPDATE` on the same
+  row (right after the last-admin advisory lock) before dropping memberships. A grant that lands first is
+  dropped by the offboarding; one that waits re-reads the user as deleted and gets the 404, so no
+  membership survives for a departed user. Offboarding takes `lazyit.admin_set` then the user row and
+  never the vault row; a grant takes the vault row then the user row, so the two cannot deadlock.
 - **Soft-revoke v1 = DROP the row.** Revoking membership **deletes** the row so the member's wrapped DEK
   copy no longer exists; there is no soft-delete tombstone for v1 (a current-state join).
 - **Offboarding hard-drops ALL of a user's memberships (#869).** Offboarding a [[user]]

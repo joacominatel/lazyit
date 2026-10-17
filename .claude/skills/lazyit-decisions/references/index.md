@@ -44,7 +44,7 @@ tells you what it costs you.
 | 0034 | Consumables design (cached stock + append-only movements) | accepted |
 | 0035 | Cross-cutting search architecture (Meilisearch) | accepted |
 | 0036 | Integer fields bounded to the Postgres int4 range in shared schemas | accepted |
-| 0037 | IdP choice — Zitadel, BYOI strategy, own Postgres | accepted |
+| 0037 | IdP choice — Zitadel, BYOI strategy, own Postgres | superseded |
 | 0038 | JIT user provisioning on first OIDC login | accepted |
 | 0039 | Auth.js v5 for frontend OIDC login | accepted |
 | 0040 | Minimal RBAC — ADMIN / MEMBER / VIEWER role on User | accepted |
@@ -109,3 +109,4 @@ tells you what it costs you.
 | 0099 | Purchases — scope, model, and optionality | accepted |
 | 0100 | Money as 64-bit integer minor units | accepted |
 | 0101 | Custom asset statuses — operator-named labels mapped to the built-in AssetStatus | accepted |
+| 0102 | Remove the bundled Zitadel IdP; generic OIDC (BYOI) stays opt-in | accepted |

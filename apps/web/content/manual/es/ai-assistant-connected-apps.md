@@ -9,7 +9,8 @@ subcategory: connected-apps
 
 Cada app de IA que puede actuar en tu nombre aparece en **Apps conectadas**, en **IA y apps conectadas**
 (menú de usuario → **IA y apps conectadas**, en `/account/ai`). Revisala cada tanto y cortá todo lo que
-no reconozcas.
+no reconozcas. La lista está para todos: aunque no puedas conectar apps de IA nuevas, igual ves y podés
+revocar las que tenés, y una nota arriba de la página indica que tu rol no puede conectar apps nuevas.
 
 ## Qué muestra la lista
 
@@ -65,7 +66,7 @@ funcionar ahí, pero siguen en la lista hasta que vencen para que los puedas rev
 | **Cerrás sesión** en lazyit | **Nada** — las conexiones son de tu cuenta, no de tu sesión en el navegador. |
 | Tu **contraseña cambia** o se restablece | **Todas** las apps y tokens dejan de funcionar y desaparecen de la lista. Reconectalas después. |
 | Tu cuenta se **desactiva o se da de baja** | **Todas** las apps y tokens dejan de funcionar. |
-| Tu rol **pierde un permiso** | Tus apps también — una conexión nunca tiene más acceso que vos. |
+| Tu rol **pierde un permiso** | Tus apps también — una conexión nunca tiene más acceso que vos. Si era el permiso para conectar apps de IA, todas las apps y tokens dejan de funcionar, pero siguen en la lista para que puedas revocarlos. |
 | Un administrador desactiva **Agentes de IA externos (MCP)** | Todas las conexiones quedan **en pausa**, y vuelven a funcionar al reactivar MCP. |
 | Un token llega a su **vencimiento** | Deja de funcionar; creá uno nuevo. |
 

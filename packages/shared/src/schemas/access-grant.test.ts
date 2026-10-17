@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AccessGrantSchema,
   CreateAccessGrantSchema,
   UpdateAccessGrantNotesSchema,
 } from "./access-grant";
@@ -68,5 +69,35 @@ describe("UpdateAccessGrantNotesSchema — empty body", () => {
     expect(UpdateAccessGrantNotesSchema.safeParse({ notes: null }).success).toBe(
       true,
     );
+  });
+});
+
+describe("AccessGrantSchema — service-account attribution", () => {
+  const row = {
+    id: "clh1abc0000xyz0000000grnt",
+    ...base,
+    accessLevel: null,
+    grantedAt: "2026-10-01T00:00:00.000Z",
+    revokedAt: "2026-10-02T00:00:00.000Z",
+    expiresAt: null,
+    grantedById: null,
+    revokedById: null,
+    notes: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-02T00:00:00.000Z",
+  };
+
+  test("carries the service-account actor ids the API returns", () => {
+    const parsed = AccessGrantSchema.parse({
+      ...row,
+      grantedBySaId: "clh1abc0000xyz0000000sa01",
+      revokedBySaId: null,
+    });
+    expect(parsed.grantedBySaId).toBe("clh1abc0000xyz0000000sa01");
+    expect(parsed.revokedBySaId).toBeNull();
+  });
+
+  test("still reads a row without them", () => {
+    expect(AccessGrantSchema.safeParse(row).success).toBe(true);
   });
 });

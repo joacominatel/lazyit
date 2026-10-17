@@ -1,9 +1,12 @@
 import type {
   ApplicationCategory,
+  ApplicationCategoryDeleteImpact,
   CreateApplicationCategory,
   UpdateApplicationCategory,
+  DeleteResolution,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Data-access for Application categories. The list read powers the Access list filter and the
@@ -34,11 +37,18 @@ export function updateApplicationCategory(
   });
 }
 
-/** Soft-delete an application category (returns the now-archived record). */
+export function getApplicationCategoryDeleteImpact(
+  id: string,
+): Promise<ApplicationCategoryDeleteImpact> {
+  return apiFetch<ApplicationCategoryDeleteImpact>(`/application-categories/${id}/delete-impact`);
+}
+
+/** Soft-delete a category; while items are still filed under it, `resolution` says where they go. */
 export function deleteApplicationCategory(
   id: string,
+  resolution?: DeleteResolution,
 ): Promise<ApplicationCategory> {
-  return apiFetch<ApplicationCategory>(`/application-categories/${id}`, {
+  return apiFetch<ApplicationCategory>(`/application-categories/${id}${deleteResolutionQuery(resolution)}`, {
     method: "DELETE",
   });
 }

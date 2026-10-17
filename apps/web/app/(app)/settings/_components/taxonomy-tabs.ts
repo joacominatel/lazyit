@@ -1,22 +1,44 @@
 /**
- * The Settings → Taxonomies tabs: the four category kinds, asset models, and the custom asset statuses
- * (ADR-0101). The visible label is translated at render via `settings.taxonomies.tabs.<key>`; the key is
- * also the `?tab=` value that links straight to a tab.
+ * Settings → Taxonomies (#1540): a grouped list on the left, the selected taxonomy on the right. The
+ * pane key is also the `?tab=` value, kept identical to the old tab values so every existing link (the
+ * AI assistant links `?tab=statuses`) still opens the same thing. Labels are translated at render via
+ * `settings.taxonomies.panes.<key>` and `settings.taxonomies.groups.<group>`.
  */
-export const TAXONOMY_TABS = [
+export const TAXONOMY_PANES = [
   "asset",
-  "application",
-  "consumable",
-  "article",
   "models",
   "statuses",
+  "application",
+  "consumable",
 ] as const;
 
-export type TaxonomyTab = (typeof TAXONOMY_TABS)[number];
+export type TaxonomyPane = (typeof TAXONOMY_PANES)[number];
 
-/** The `?tab=` value → a tab; absent or unknown falls back to the first one (the page's old default). */
-export function parseTaxonomyTab(value: string | null | undefined): TaxonomyTab {
-  return (TAXONOMY_TABS as readonly string[]).includes(value ?? "")
-    ? (value as TaxonomyTab)
-    : TAXONOMY_TABS[0];
+/**
+ * What a `?tab=` value selects: a taxonomy pane, or `kb` — the old "Article categories" tab, whose
+ * categories are the Knowledge Base folders now managed in the KB itself. `kb` renders a pointer there.
+ */
+export type TaxonomySelection = TaxonomyPane | "kb";
+
+/** The left-hand list: module groups and the panes under each. The Knowledge group is a link to /kb. */
+export const TAXONOMY_GROUPS: readonly {
+  key: "assets" | "applications" | "consumables";
+  panes: readonly TaxonomyPane[];
+}[] = [
+  { key: "assets", panes: ["asset", "models", "statuses"] },
+  { key: "applications", panes: ["application"] },
+  { key: "consumables", panes: ["consumable"] },
+];
+
+/** Old and alias `?tab=` values that do not name a pane directly. */
+const TAB_ALIASES: Record<string, TaxonomySelection> = {
+  article: "kb",
+  kb: "kb",
+};
+
+/** The `?tab=` value → a selection; absent or unknown falls back to asset categories (the old default). */
+export function parseTaxonomyTab(value: string | null | undefined): TaxonomySelection {
+  if (value == null) return TAXONOMY_PANES[0];
+  if ((TAXONOMY_PANES as readonly string[]).includes(value)) return value as TaxonomyPane;
+  return TAB_ALIASES[value] ?? TAXONOMY_PANES[0];
 }

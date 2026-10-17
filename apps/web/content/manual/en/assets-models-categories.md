@@ -38,7 +38,7 @@ like the asset's [Company](/help/assets-asset-basics) field, and you can still t
   the top of the category list and save. The model (and every asset of it) is then uncategorized, so
   it no longer matches a category filter on the Assets list.
 
-Manage models under **Settings → Taxonomies → Asset models**. The model picker in the asset form is
+Manage models under **Settings → Taxonomies → Assets → Models**. The model picker in the asset form is
 searchable, so a long catalog stays easy to use.
 
 ## Asset categories
@@ -54,7 +54,7 @@ Categories drive grouping and the category filter on the Assets list.
 - A model points at a category, and an asset inherits its category **through its model**. The category
   filter on the Assets list matches an asset by its model's category.
 
-Manage categories under **Settings → Taxonomies → Asset categories**.
+Manage categories under **Settings → Taxonomies → Assets → Categories**.
 
 ### Specs dictionary (field hints)
 
@@ -76,7 +76,7 @@ straitjacket.
 - Editing the dictionary later does **not** rewrite assets already saved; it only changes the hints
   shown next time someone edits one.
 
-Set a category's dictionary from its editor under **Settings → Taxonomies → Asset categories**.
+Set a category's dictionary from its editor under **Settings → Taxonomies → Assets → Categories**.
 
 ## How they fit together
 
@@ -89,9 +89,39 @@ filling them in is what makes filtering, grouping and reporting useful.
 
 ## Removing a model or category
 
-Models and categories are **soft-deleted**, never destroyed. Removing one does **not** delete or
-break the assets that reference it — those assets simply keep their snapshot and become unclassified
-for that link. This keeps your history intact: lazyit favors auditability over strict tidiness.
+Models and categories are **soft-deleted**, never destroyed, and removing one never deletes anything
+that points to it. When it is still in use, lazyit first shows you what will be affected and asks for
+**one decision for all of it** — you cannot choose item by item.
+
+**Removing a model** that still has **assets**, or **open purchase lines** mapped to it, offers:
+
+- **Leave them without a model** — the assets keep their details but no longer have a model, and the
+  purchase lines lose their model mapping.
+- **Move them to another model** — everything goes to the model you pick. It can belong to another
+  category: an asset's category comes from its model, so the assets then show that category.
+- **Create a new model** — type a name: lazyit creates it with the same manufacturer and category as
+  the one you are removing, then moves everything there. If that category has itself been removed, the
+  new model is created without a category, and the dialog says so. This choice appears only if you can
+  also create models.
+
+**Removing a category** that still has **models** offers the same three choices for those models:
+leave them without a category, move them to another category, or create a new category and move them
+into it. Only the models are moved; their assets follow their model, so the dialog also lists the
+assets whose category changes.
+
+The dialog names up to 50 of each kind and counts all of them; each purchase line links to its
+purchase. If you are not allowed to view a kind (purchases, say), you see only how many there are — the
+decision still applies to them.
+
+The move and the removal happen together, and every asset moved off a model gets a model change in its
+history. Records that are already history keep pointing at the removed model or category: archived
+assets and models, purchase lines already received, and the lines of cancelled purchases. A model or
+category nothing points to is removed straight away.
+
+There is no list of removed models in Settings yet: an administrator can restore one through the API
+(`POST /api/asset-models/{id}/restore`) or ask the assistant to. Restoring a model or category does not
+bring back what was moved off it. Restoring a model whose category is still removed is refused — restore
+the category first.
 
 ## What's next
 

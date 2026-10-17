@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
-  CONTAINER_ID_SEPARATOR,
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
@@ -19,13 +18,13 @@ import {
   disambiguateExternalId,
   guestExternalId,
   guestExternalIdPrefix,
-  GUEST_ID_SEPARATOR,
   guestNodeKind,
   guestNodeStatus,
   hostIdentityEvidence,
   identityDiscriminator,
   inferNodeKind,
   isClonedMachineId,
+  isContainerChildExternalId,
   isGuestChildExternalId,
   isNewerVersion,
   isPlausibleEdge,
@@ -91,6 +90,12 @@ import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { appVersion } from '../common/export-provenance';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import type { Principal } from '../auth/principal';
 import { isServicePrincipal } from '../auth/principal';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
@@ -98,6 +103,7 @@ import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { AgentPolicyService } from './agent-policy.service';
+import { infraNodeRoleWhere } from './infra-node-role';
 
 /**
  * The 400 a RE-POINT gets (#1117) — `PATCH /infra/nodes/:id` with an `assetId` on a node that already
@@ -121,6 +127,15 @@ export const INFRA_NODE_ASSET_REPOINT_ERROR =
  */
 export const INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR =
   'Detaching this node would ARCHIVE the asset lazyit auto-created for it — a soft delete, with its assignments and its place in inventory and search — and archiving an asset requires the `asset:delete` permission, here exactly as it does on `DELETE /assets/:id`. Your `infra:manage` still covers every other edit to this node, including detaching an asset a human curated (that only removes the link and leaves the row untouched). Ask an admin to grant `asset:delete` to your role, or have someone who holds it run this detach. ADR-0070 §5.';
+
+/**
+ * The 409 an attach gets when another live node already links that asset (AUD-030/031): two nodes on one
+ * asset meant either node's detach could archive the row the other still used.
+ *
+ * Exported so the spec asserts the message the caller actually receives, not a copy of it.
+ */
+export const INFRA_NODE_ASSET_SHARED_ERROR =
+  'This asset already backs another node on the map, and an asset backs one node at a time. Detach it from that node first, or, if both nodes are the same machine, merge them instead. ADR-0070 §5.';
 
 /**
  * The policy-related columns one report writes (#1140) — spread into the node `data` on every branch.
@@ -462,9 +477,10 @@ export interface InfraNodeFilters {
   ids?: string[];
   /**
    * Case-insensitive search over the row's visible text — label, IP, the linked Asset's inventory
-   * name, and each ACTIVE owner's name/email. It has to run in the DATABASE: the Servers table used
-   * to filter the loaded array in memory, which under a page becomes a false "no results" for
-   * anything outside the window (the exact bug ADR-0030 §2 fixed for four other lists).
+   * name, and each ACTIVE owner's name (and email, for a `user:read` caller only — #1627). It has to
+   * run in the DATABASE: the Servers table used to filter the loaded array in memory, which under a
+   * page becomes a false "no results" for anything outside the window (the exact bug ADR-0030 §2
+   * fixed for four other lists).
    */
   q?: string;
 }
@@ -474,23 +490,6 @@ export type LegacyInfraNodeFilters = Pick<
   InfraNodeFilters,
   'kind' | 'status' | 'state'
 >;
-
-/** Child identity is namespaced in `externalId`; it is deliberately independent of node `kind`. */
-const INFRA_CHILD_IDENTITY_WHERE = {
-  OR: [
-    { externalId: { contains: CONTAINER_ID_SEPARATOR } },
-    { externalId: { contains: GUEST_ID_SEPARATOR } },
-  ],
-} satisfies Prisma.InfraNodeWhereInput;
-
-function infraNodeRoleWhere(
-  role: InfraNodeListRole,
-): Prisma.InfraNodeWhereInput {
-  if (role === 'CHILD') return INFRA_CHILD_IDENTITY_WHERE;
-  return {
-    OR: [{ externalId: null }, { NOT: INFRA_CHILD_IDENTITY_WHERE }],
-  };
-}
 
 /**
  * Sortable fields for `GET /infra/nodes/page` (ADR-0030 §1) — public `?sort=` key → Prisma column. An
@@ -586,8 +585,17 @@ type InfraNodeListRow = Prisma.InfraNodeGetPayload<{
   select: typeof INFRA_NODE_LIST_SELECT;
 }>;
 
-/** Privacy-safe flattening shared by the compatibility array and the first-party page. */
-function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
+/** One Servers row as the page returns it; the CSV export maps its columns from this. */
+export type InfraNodeExportRow = ReturnType<typeof projectInfraNodeListRow>;
+
+/**
+ * Privacy-safe flattening shared by the compatibility array and the first-party page. Owner emails
+ * only reach a caller holding `user:read` (#1627): `infra:read` alone is VIEWER-default.
+ */
+function projectInfraNodeListRow(
+  { asset, ...node }: InfraNodeListRow,
+  ownerEmails: boolean,
+) {
   const liveAsset = asset?.deletedAt === null ? asset : null;
   return {
     ...node,
@@ -597,7 +605,7 @@ function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
       userId: assignment.user.id,
       firstName: assignment.user.firstName,
       lastName: assignment.user.lastName,
-      email: assignment.user.email,
+      email: ownerEmails ? assignment.user.email : null,
       deletedAt: assignment.user.deletedAt,
     })),
   };
@@ -656,6 +664,18 @@ const IDENTITY_CONFLICT_REMEDY: Partial<
   windows: { command: 'sysprep /generalize', identity: 'MachineGuid' },
 };
 
+// A serial is agent free text: swap its slashes only when they would make the key read as a child key (AUD-102).
+export function childSafeDisambiguatedId(
+  externalId: string,
+  discriminator: string,
+): string {
+  const key = disambiguateExternalId(externalId, discriminator);
+  if (!isContainerChildExternalId(key) && !isGuestChildExternalId(key)) {
+    return key;
+  }
+  return disambiguateExternalId(externalId, discriminator.replaceAll('/', '_'));
+}
+
 /**
  * How the nudge opens, and what it calls the colliding fact, for the reporting host's OS family.
  *
@@ -705,10 +725,10 @@ export class InfraService {
     private readonly autoConfirm: InfraAutoConfirmService,
     // The #1140 policy channel — resolution only; every WRITE to a policy scope is a human route.
     private readonly agentPolicy: AgentPolicyService,
-    // The RolePermission matrix (ADR-0046). Injected for exactly ONE decision: whether the caller may
-    // ARCHIVE the auto-created Asset a detach would soft-delete (#1202). It answers a question the
-    // `@RequirePermission` decorator cannot, because the answer depends on a stored row — see
-    // {@link detachAsset}. AuthModule is @Global, so no module wiring is needed.
+    // The RolePermission matrix (ADR-0046), for two decisions the route decorator cannot make: whether
+    // the caller may see owner emails (#1627), and whether it may ARCHIVE the auto-created Asset a
+    // detach would soft-delete (#1202), which depends on a stored row — see {@link detachAsset}.
+    // AuthModule is @Global, so no module wiring is needed.
     private readonly permissions: PermissionResolverService,
   ) {}
 
@@ -753,6 +773,7 @@ export class InfraService {
         // Link an existing asset — 404 (not silent) if it is missing/soft-deleted, so the node never
         // dangles a non-existent link. The asset is left fully intact (we only reference it).
         await this.assets.assertExists(data.assetId);
+        await this.assertAssetNotLinkedElsewhere(data.assetId);
       } else {
         // No assetId → create a minimal backing Asset (ponytail: only the two REQUIRED fields, name +
         // status). Stamp the auto-created marker into specs for the detach-provenance check (§5). The
@@ -770,18 +791,24 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const node = await this.prisma.infraNode.create({
-      data: {
-        ...rest,
-        // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
-        // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
-        assetId: assetId ?? null,
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-        ...(shortcuts !== undefined ? { shortcuts } : {}),
-      },
-    });
+    const node = await this.prisma.infraNode
+      .create({
+        data: {
+          ...rest,
+          // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
+          // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
+          assetId: assetId ?? null,
+          // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+          ...(shortcuts !== undefined ? { shortcuts } : {}),
+        },
+      })
+      .catch((err: unknown) => this.rethrowSharedAssetLink(err, assetId));
     // Fire-and-forget search sync after the write (ADR-0035): un-awaited, never throws, no-op when
     // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
     void this.syncNodeToSearch(node.id);
@@ -1926,7 +1953,10 @@ export class InfraService {
         report.agentVersion,
       );
     }
-    const externalId = disambiguateExternalId(report.externalId, discriminator);
+    const externalId = childSafeDisambiguatedId(
+      report.externalId,
+      discriminator,
+    );
     // Everything the marker says except WHEN — identical whether it is being stamped or re-stamped.
     const conflictFacts = {
       reportedExternalId: report.externalId,
@@ -3182,25 +3212,17 @@ export class InfraService {
           data: { endedAt: now },
         });
         if (!canonicalEdge) {
-          try {
-            await tx.infraEdge.create({
-              data: {
+          // Not a caught P2002: a failed statement aborts the Postgres tx and COMMIT rolls back (AUD-060).
+          await tx.infraEdge.createMany({
+            data: [
+              {
                 sourceId: canonicalNodeId,
                 targetId: childEdge.targetId,
                 kind: 'RUNS_ON',
               },
-            });
-          } catch (err) {
-            // A concurrent report opened it first — the invariant held; not a failure.
-            if (
-              !(
-                err instanceof Prisma.PrismaClientKnownRequestError &&
-                err.code === 'P2002'
-              )
-            ) {
-              throw err;
-            }
-          }
+            ],
+            skipDuplicates: true,
+          });
         }
       }
     });
@@ -3276,12 +3298,10 @@ export class InfraService {
       } catch (err) {
         // A concurrent report from the same host opened it first — the invariant HELD, so this is
         // the success case arriving by another route, not a failure worth propagating.
-        if (
-          !(
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === 'P2002'
-          )
-        ) {
+        if (!(
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        )) {
           throw err;
         }
       }
@@ -3464,58 +3484,102 @@ export class InfraService {
       return this.getNodeDetail(id, principal);
     }
 
+    // Claim before minting: of two concurrent confirms only one may mint an Asset (AUD-059).
+    const claimed = await this.prisma.infraNode.updateMany({
+      where: { id, state: 'PENDING', deletedAt: null },
+      data: { state: 'CONFIRMED' },
+    });
+    if (claimed.count === 0) return this.getNodeDetail(id, principal);
+
     const trackAsAsset = dto.trackAsAsset ?? true;
     const label = dto.label ?? node.label;
 
     // Mint the backing Asset only when tracking AND the node isn't already linked. Reuse the exact
     // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
     let assetId = node.assetId ?? undefined;
+    let adopted = false;
     if (trackAsAsset && !node.assetId) {
-      const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
-      // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
-      // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
-      // `specs.host.hardware.serial`, so on a unique-serial collision we retry WITHOUT the serial
-      // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
-      const host = (hostSpecs.host ?? {}) as AgentReportHost;
-      const serial = sanitizeSerial(host);
-
-      // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
-      // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
-      const adopted = await this.adoptableAsset(hostSpecs, serial);
-      if (adopted) {
-        // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
-        // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
-        // already carries it. The node's label/kind/state transitions below are unchanged.
-        //
-        // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
-        // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
-        // stamping it here would mean a later detach silently deleted the operator's curated
-        // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
-        // is left intact and merely un-linked"). See {@link detachAsset}.
-        await this.recordAgentLink(adopted.id, node, principal);
-        assetId = adopted.id;
-      } else {
-        assetId = await this.mintBackingAsset(
-          hostSpecs,
-          serial,
+      try {
+        ({ id: assetId, adopted } = await this.resolveBackingAsset(
+          node,
           label,
           principal,
-        );
+        ));
+      } catch (err) {
+        // Hand the node back to the tray so a retry can mint; the claim alone linked nothing.
+        await this.prisma.infraNode.updateMany({
+          where: { id, state: 'CONFIRMED', assetId: null },
+          data: { state: 'PENDING' },
+        });
+        throw err;
       }
     }
 
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        state: 'CONFIRMED',
-        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
-        ...(dto.label !== undefined ? { label: dto.label } : {}),
-        ...(assetId !== undefined ? { assetId } : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          state: 'CONFIRMED',
+          ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+          ...(dto.label !== undefined ? { label: dto.label } : {}),
+          ...(assetId !== undefined ? { assetId } : {}),
+        },
+      })
+      .catch(async (err: unknown) => {
+        // Whatever failed, hand the node back to the tray so a retry can confirm it.
+        await this.prisma.infraNode.updateMany({
+          where: { id, state: 'CONFIRMED', assetId: null },
+          data: { state: 'PENDING' },
+        });
+        return this.rethrowSharedAssetLink(err, assetId, id);
+      });
+    // Only once the link is written: a confirm that lost the race must not leave a false AGENT_LINKED row.
+    if (adopted && assetId !== undefined) {
+      await this.recordAgentLink(assetId, node, principal);
+    }
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
+  }
+
+  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link and which it was. */
+  private async resolveBackingAsset(
+    node: {
+      id: string;
+      specs: Prisma.JsonValue | null;
+      reportingSource: string | null;
+      externalId: string | null;
+    },
+    label: string,
+    principal?: Principal,
+  ): Promise<{ id: string; adopted: boolean }> {
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
+    // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
+    // `specs.host.hardware.serial`, so on a unique-serial collision we retry WITHOUT the serial
+    // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const serial = sanitizeSerial(host);
+
+    // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
+    // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
+    const adopted = await this.adoptableAsset(hostSpecs, serial);
+    if (adopted) {
+      // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
+      // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
+      // already carries it. The node's label/kind/state transitions below are unchanged.
+      //
+      // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
+      // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
+      // stamping it here would mean a later detach silently deleted the operator's curated
+      // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
+      // is left intact and merely un-linked"). See {@link detachAsset}.
+      return { id: adopted.id, adopted: true };
+    }
+    return {
+      id: await this.mintBackingAsset(hostSpecs, serial, label, principal),
+      adopted: false,
+    };
   }
 
   /**
@@ -3533,7 +3597,8 @@ export class InfraService {
    * request — but only ever once per node, since confirm is a one-way transition.
    *
    * Two guards, both fail-closed toward MINTING, which is recoverable by hand where a mis-link is not:
-   * no sanitized serial at all (absent, or an OEM placeholder), and the §3a corroboration gate.
+   * no sanitized serial at all (absent, or an OEM placeholder), and the §3a corroboration gate. The
+   * lookup also skips an asset another live node already links (AUD-030), so that case mints too.
    */
   private async adoptableAsset(
     hostSpecs: Record<string, unknown>,
@@ -3542,7 +3607,8 @@ export class InfraService {
     if (serial === undefined) return null;
     if (!corroboratesAdoption(hostSpecs, serial)) return null;
     return this.prisma.asset.findFirst({
-      where: { serial },
+      // Nested relation filters bypass the soft-delete extension, hence the explicit `deletedAt` (AUD-030).
+      where: { serial, infraNodes: { none: { deletedAt: null } } },
       select: { id: true },
     });
   }
@@ -3553,9 +3619,10 @@ export class InfraService {
    *
    * The serial promotion (#1081) and its collision retry both survive, but the retry's ROLE has
    * changed: under §3 a serial that would collide is a serial that corroborates, and a corroborating
-   * serial adopts, so this catch is no longer the designed path — it is a RACE BACKSTOP for two
-   * confirms landing at once. Retrying without the serial remains strictly better than failing an
-   * operator's confirm, and the raw value still survives in `specs.host.hardware.serial`.
+   * serial adopts, so this catch is no longer the designed path — it is the BACKSTOP for two different
+   * nodes confirming at once, and for a serial whose asset already backs another live node (AUD-030).
+   * Retrying without the serial remains strictly better than failing an operator's confirm, and the
+   * raw value still survives in `specs.host.hardware.serial`.
    */
   private async mintBackingAsset(
     hostSpecs: Record<string, unknown>,
@@ -3612,7 +3679,7 @@ export class InfraService {
    * report at a five-minute cadence would drown every human edit this row ever received. What MOVED is
    * audited on the NODE instead ([[infra-node-fact-change]], #1143), one join away.
    *
-   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been decided
+   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been written
    * by the time this runs; losing the audit row would be a real loss, but failing the confirm over it
    * would be a worse one — and on the auto-confirm path (#1145) it would fail a REPORT.
    */
@@ -3777,13 +3844,14 @@ export class InfraService {
    * projection and privacy mapper are shared with the first-party page, so compatibility does not
    * preserve the archived-Asset disclosure bug.
    */
-  async listNodes(filters: LegacyInfraNodeFilters) {
+  async listNodes(filters: LegacyInfraNodeFilters, principal?: Principal) {
+    const ownerEmails = await this.canReadOwnerEmails(principal);
     const rows = await this.prisma.infraNode.findMany({
-      where: this.buildNodeListWhere(filters),
+      where: this.buildNodeListWhere(filters, ownerEmails),
       orderBy: INFRA_NODE_DEFAULT_ORDER,
       select: INFRA_NODE_LIST_SELECT,
     });
-    return rows.map(projectInfraNodeListRow);
+    return rows.map((row) => projectInfraNodeListRow(row, ownerEmails));
   }
 
   /**
@@ -3828,8 +3896,13 @@ export class InfraService {
    * (soft-deleted) USER still surfaces with its `deletedAt` set, so the UI renders the same "left the
    * company" affordance (history kept, ADR-0019).
    */
-  async listNodePage(filters: InfraNodeFilters, page: PageQuery) {
-    const where = this.buildNodeListWhere(filters);
+  async listNodePage(
+    filters: InfraNodeFilters,
+    page: PageQuery,
+    principal?: Principal,
+  ) {
+    const ownerEmails = await this.canReadOwnerEmails(principal);
+    const where = this.buildNodeListWhere(filters, ownerEmails);
     const { take, skip } = offsetOf(page);
     // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
     // the tie the default order closed — two hosts can share a label — and under a window a partial
@@ -3859,8 +3932,39 @@ export class InfraService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    const items = rows.map(projectInfraNodeListRow);
+    const items = rows.map((row) => projectInfraNodeListRow(row, ownerEmails));
     return pageOf(items, total, page);
+  }
+
+  /**
+   * The Servers CSV export's reads (ADR-0103): the page's `where` and projection, walked by keyset.
+   * `ownerEmails` only decides whether `q` may match an owner's email; the CSV never carries one.
+   */
+  nodeExportSource(filters: InfraNodeFilters, ownerEmails: boolean) {
+    const where = this.buildNodeListWhere(filters, ownerEmails);
+    return {
+      count: () => this.prisma.infraNode.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<string> | null,
+        take: number,
+      ): Promise<InfraNodeExportRow[]> =>
+        (
+          await this.prisma.infraNode.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            select: INFRA_NODE_LIST_SELECT,
+          })
+        ).map((row) => projectInfraNodeListRow(row, ownerEmails)),
+    };
+  }
+
+  /**
+   * Whether owner emails may reach this caller (#1627) — the `user:read` the directory itself requires.
+   * Public because the export route asks it before choosing its `where`.
+   */
+  canReadOwnerEmails(principal?: Principal): Promise<boolean> {
+    return this.permissions.principalHas(principal, 'user:read');
   }
 
   /**
@@ -3870,6 +3974,7 @@ export class InfraService {
    */
   private buildNodeListWhere(
     filters: InfraNodeFilters,
+    ownerEmails: boolean,
   ): Prisma.InfraNodeWhereInput {
     const q = filters.q?.trim();
     return {
@@ -3919,12 +4024,17 @@ export class InfraService {
                                 mode: 'insensitive' as const,
                               },
                             },
-                            {
-                              email: {
-                                contains: q,
-                                mode: 'insensitive' as const,
-                              },
-                            },
+                            // Matching an email the row then withholds would make `q` an email oracle.
+                            ...(ownerEmails
+                              ? [
+                                  {
+                                    email: {
+                                      contains: q,
+                                      mode: 'insensitive' as const,
+                                    },
+                                  },
+                                ]
+                              : []),
                           ],
                         },
                       },
@@ -4071,7 +4181,10 @@ export class InfraService {
         // promise an outcome the detach does not perform.
         assetAutoCreated = assetSpecs[INFRA_AUTO_ASSET_MARKER] === true;
       }
-      owners = await this.resolveOwners(node.assetId);
+      owners = await this.resolveOwners(
+        node.assetId,
+        await this.canReadOwnerEmails(principal),
+      );
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
 
@@ -4272,7 +4385,7 @@ export class InfraService {
   }
 
   /** Active owners of an asset (multi-owner), each a lean summary; via the active AssetAssignment join. */
-  private async resolveOwners(assetId: string) {
+  private async resolveOwners(assetId: string, ownerEmails: boolean) {
     const rows = await this.assignments.findAll({
       assetId,
       activeOnly: true,
@@ -4285,7 +4398,7 @@ export class InfraService {
         userId: user.id,
         firstName: user.firstName,
         lastName: user.lastName,
-        email: user.email,
+        email: ownerEmails ? user.email : null,
         deletedAt: user.deletedAt,
       };
     });
@@ -4336,42 +4449,47 @@ export class InfraService {
         throw new BadRequestException(INFRA_NODE_ASSET_REPOINT_ERROR);
       }
       await this.assets.assertExists(data.assetId);
+      await this.assertAssetNotLinkedElsewhere(data.assetId, id);
     }
 
     // Detach branch: assetId explicitly set to null while a link exists → run the §5 detach semantics.
     if (data.assetId === null && node.assetId) {
-      await this.detachAsset(node.assetId, principal);
+      await this.detachAsset(node.assetId, id, principal);
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        ...rest,
-        // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
-        // curated value — derived server-side (never client-settable) so `source` stays a trusted
-        // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
-        ...(data.ipAddress !== undefined
-          ? { ipAddressSource: 'MANUAL' as const }
-          : {}),
-        ...(specs !== undefined
-          ? {
-              specs:
-                specs === null
-                  ? Prisma.DbNull
-                  : (specs as Prisma.InputJsonValue),
-            }
-          : {}),
-        ...(shortcuts !== undefined
-          ? {
-              shortcuts:
-                shortcuts === null
-                  ? Prisma.DbNull
-                  : (shortcuts as Prisma.InputJsonValue),
-            }
-          : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          ...rest,
+          // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
+          // curated value — derived server-side (never client-settable) so `source` stays a trusted
+          // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? {
+                specs:
+                  specs === null
+                    ? Prisma.DbNull
+                    : (specs as Prisma.InputJsonValue),
+              }
+            : {}),
+          ...(shortcuts !== undefined
+            ? {
+                shortcuts:
+                  shortcuts === null
+                    ? Prisma.DbNull
+                    : (shortcuts as Prisma.InputJsonValue),
+              }
+            : {}),
+        },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, data.assetId, id),
+      );
     // Fire-and-forget search re-sync: label/kind/status/ipAddress (and the asset link, on detach) may
     // have changed (ADR-0035). Un-awaited, never throws, no-op when Meili is disabled.
     void this.syncNodeToSearch(updated.id);
@@ -4403,15 +4521,24 @@ export class InfraService {
    *
    * It throws BEFORE any write: the node's `assetId` is still set when the 403 lands, so a retry after
    * the grant starts from the state the operator was looking at rather than from a half-done detach.
+   *
+   * An asset another live node still links is only un-linked, never archived (AUD-030/031).
    */
-  private async detachAsset(assetId: string, principal?: Principal) {
+  private async detachAsset(
+    assetId: string,
+    nodeId: string,
+    principal?: Principal,
+  ) {
     const asset = await this.prisma.asset.findFirst({
       where: { id: assetId },
       select: { specs: true },
     });
     if (!asset) return; // already gone — nothing to detach (the node update still nulls assetId).
     const specs = (asset.specs ?? {}) as Record<string, unknown>;
-    if (specs[INFRA_AUTO_ASSET_MARKER] === true) {
+    if (
+      specs[INFRA_AUTO_ASSET_MARKER] === true &&
+      !(await this.assetLinkedElsewhere(assetId, nodeId))
+    ) {
       if (!(await this.principalHoldsAssetDelete(principal))) {
         throw new ForbiddenException(INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR);
       }
@@ -4438,6 +4565,50 @@ export class InfraService {
     return this.permissions.hasAll(principal.user.role, ['asset:delete']);
   }
 
+  /** Another LIVE node linking `assetId`, if any — the soft-delete extension scopes the read. */
+  private async assetLinkedElsewhere(
+    assetId: string,
+    nodeId?: string,
+  ): Promise<boolean> {
+    const holders = await this.prisma.infraNode.count({
+      where: {
+        assetId,
+        ...(nodeId !== undefined ? { id: { not: nodeId } } : {}),
+      },
+    });
+    return holders > 0;
+  }
+
+  private async assertAssetNotLinkedElsewhere(
+    assetId: string,
+    nodeId?: string,
+  ): Promise<void> {
+    if (await this.assetLinkedElsewhere(assetId, nodeId)) {
+      throw new ConflictException(INFRA_NODE_ASSET_SHARED_ERROR);
+    }
+  }
+
+  /**
+   * The race the check above loses: a concurrent link lands first and `infra_nodes_assetId_active_key`
+   * refuses this write. Re-asked of the database rather than read off `meta`, whose shape the driver
+   * adapter decides. Anything else is rethrown untouched.
+   */
+  private async rethrowSharedAssetLink(
+    err: unknown,
+    assetId: string | null | undefined,
+    nodeId?: string,
+  ): Promise<never> {
+    if (
+      assetId &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      (await this.assetLinkedElsewhere(assetId, nodeId))
+    ) {
+      throw new ConflictException(INFRA_NODE_ASSET_SHARED_ERROR);
+    }
+    throw err;
+  }
+
   /** PATCH a node's canvas position (x/y). Cheap + debounce-friendly (ADR-0070 MVP). 404 if missing. */
   async updatePosition(id: string, x: number, y: number) {
     await this.getNode(id);
@@ -4457,7 +4628,7 @@ export class InfraService {
     return removed;
   }
 
-  /** Restore a soft-deleted node. 404 if it never existed; idempotent if already live. */
+  /** Restore a soft-deleted node. 404 if it never existed; idempotent if live; 409 if another live node now links its Asset. */
   async restoreNode(id: string) {
     const node = await this.prisma.infraNode.findFirst({
       where: { id },
@@ -4467,10 +4638,17 @@ export class InfraService {
       throw new NotFoundException(`Infra node ${id} not found`);
     }
     if (node.deletedAt === null) return node; // already live — no-op.
-    const restored = await this.prisma.infraNode.update({
-      where: { id },
-      data: { deletedAt: null },
-    });
+    if (node.assetId) {
+      await this.assertAssetNotLinkedElsewhere(node.assetId, id);
+    }
+    const restored = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, node.assetId, id),
+      );
     // Back on the map → re-index it. Fire-and-forget, never throws, no-op when disabled (ADR-0035).
     void this.syncNodeToSearch(restored.id);
     return restored;
@@ -4763,8 +4941,8 @@ export class InfraService {
   }
 
   /**
-   * Map a partial-unique P2002 from the infra_edges indexes to a friendly 409 (ADR-0070 §3). The two
-   * raw indexes surface their NAME as `meta.target` (adapter-pg, raw SQL indexes Prisma can't see):
+   * Map a partial-unique P2002 from the infra_edges indexes to a friendly 409 (ADR-0070 §3). adapter-pg
+   * names the violated raw index in the P2002's driver-adapter cause, so it is matched exactly:
    *   - infra_edges_source_active_runs_on_key  → a duplicate active RUNS_ON for the source.
    *   - infra_edges_connects_to_pair_active_key → a duplicate active CONNECTS_TO for the canonical pair.
    * Anything else propagates unchanged (the global filter handles it).
@@ -4774,14 +4952,13 @@ export class InfraService {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      const target = err.meta?.target;
-      const name = Array.isArray(target) ? target.join(',') : String(target);
-      if (name.includes('runs_on')) {
+      const targets = uniqueViolationTargets(err);
+      if (targets.includes('infra_edges_source_active_runs_on_key')) {
         return new ConflictException(
           'This source already has an active host (RUNS_ON). Close the existing one first, or the migration retry raced — try again.',
         );
       }
-      if (name.includes('connects_to')) {
+      if (targets.includes('infra_edges_connects_to_pair_active_key')) {
         return new ConflictException(
           'These two nodes are already connected (CONNECTS_TO is symmetric — the pair already has an active connection).',
         );
@@ -4930,8 +5107,8 @@ export class InfraService {
 const IMPACT_MAX_DEPTH = 64;
 
 /**
- * Is this error a unique-serial collision on `Asset.serial` (#1081)? A P2002 whose target names the
- * `assets_serial_active_key` partial-unique — i.e. a discovered serial already belongs to another live
+ * Is this error a unique-serial collision on `Asset.serial` (#1081)? A P2002 whose adapter-pg cause names
+ * the `assets_serial_active_key` partial-unique — i.e. a discovered serial already belongs to another live
  * asset. `confirmNode` uses it to fall back to leaving the serial in specs instead of failing the
  * confirm. Anything else is not a serial collision.
  */
@@ -4942,9 +5119,7 @@ function isSerialUniqueCollision(err: unknown): boolean {
   ) {
     return false;
   }
-  const target = err.meta?.target;
-  const name = Array.isArray(target) ? target.join(',') : String(target);
-  return name.toLowerCase().includes('serial');
+  return uniqueViolationTargets(err).includes('assets_serial_active_key');
 }
 
 /**
@@ -5137,6 +5312,8 @@ const REPORT_DIAGNOSTIC_KEYS = [
 const NODE_ONLY_SPECS_KEYS = [
   ...REPORT_DIAGNOSTIC_KEYS,
   'softwareHash',
+  // Stamped by migration 20261015130000 on a node that lost a shared asset link: node provenance.
+  '_infraAssetUnlinked',
 ] as const;
 
 /**

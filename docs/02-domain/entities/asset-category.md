@@ -3,7 +3,7 @@ title: AssetCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-30
+updated: 2026-10-16
 ---
 
 # AssetCategory
@@ -29,6 +29,18 @@ Drives grouping and filtering, and — via an optional **advisory specs dictiona
   they can be edited or removed like any other.
 - `name` is unique among **live** rows (a live duplicate create returns `409`); a soft-deleted name
   is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
+- **Delete with one resolution (SEC-041).** While live [[asset-model]]s are filed under the category,
+  the delete needs **one** resolution for all of them: `detach` (they keep no category) or `move` (they
+  all go to another live asset category, not the one being deleted — `400` otherwise). Their live
+  assets follow their model, so the preview and the `409` count them too. Without a resolution the
+  delete is a `409` `DELETE_RESOLUTION_REQUIRED` with `{ assetModels, assets }`. The re-point and the
+  soft delete share one transaction under a `FOR UPDATE` lock on both categories, with the live models
+  locked `FOR NO KEY UPDATE` in id order; models have no history
+  table, so nothing else is written. Archived models keep their reference, and restoring the category
+  re-links nothing. The `SetNull` FK only matters for a hard delete, which the API never issues.
+- **Categories archived before the delete resolution** still have their models pointing at them; a
+  model write that keeps that category is accepted, one that names it newly is a `400`
+  ([[asset-model]]).
 - **Specs dictionary (advisory — [[0078-asset-category-specs-dictionary]], #851).** A category MAY
   declare a `specsSchema`: a small **declarative** field list
   (`{ key, label, type: 'string'|'number'|'boolean'|'enum', required?, enumValues? }[]`) that governs
@@ -64,12 +76,16 @@ Prisma model `AssetCategory` → table `asset_categories`. Validation schemas
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete; reads filter `deletedAt: null`. |
+| `usageCount` | `int?` | **read-only, computed — not a column** (#1540). Only on `GET /asset-categories`: the number of **live** assets whose **live** model is filed under this category (`asset → model → category`; an asset of a soft-deleted model is not counted here — its archived model's row carries it). `0` when unused. Absent from `GET /:id` and the write responses. |
 
 ## Endpoints
 
 `apps/api/src/asset-categories/` (`AssetCategoriesModule`): `GET /asset-categories` (excludes
-soft-deleted), `GET /asset-categories/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete),
-`POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
+soft-deleted; each row carries the computed `usageCount`, so Settings → Taxonomies shows what is in use
+before an archive — one read, batched relation counts, never per row), `GET /asset-categories/:id`, `POST`, `PATCH /:id`,
+`GET /:id/delete-impact` (`category:delete` — the counts plus the first 50 live models and live assets,
+each list only when the caller may read that kind, `AssetCategoryDeleteImpactSchema`), `DELETE /:id`
+(soft delete; `?strategy=detach` or `?strategy=move&targetId=`, see above), `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
 Documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[asset-model]] · [[asset]] · [[conventions]] · [[0018-api-documentation-swagger]]

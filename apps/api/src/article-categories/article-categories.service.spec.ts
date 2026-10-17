@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { ArticleCategoriesService } from './article-categories.service';
@@ -45,17 +46,27 @@ type ArticleAliasMock = {
   deleteMany: jest.Mock;
 };
 
+type ArticleVersionMock = {
+  groupBy: jest.Mock;
+  createMany: jest.Mock;
+};
+
 describe('ArticleCategoriesService', () => {
   let service: ArticleCategoriesService;
   let articleCategory: CategoryMock;
   let article: ArticleMock;
   let articleAlias: ArticleAliasMock;
+  let articleVersion: ArticleVersionMock;
   let prisma: {
     articleCategory: CategoryMock;
     article: ArticleMock;
     articleAlias: ArticleAliasMock;
+    articleVersion: ArticleVersionMock;
     $transaction: jest.Mock;
   };
+  // The folder-tree advisory lock ($executeRaw) and the folder row lock ($queryRaw), on the tx.
+  let executeRaw: jest.Mock;
+  let queryRaw: jest.Mock;
   // PermissionResolverService (ADR-0046) — mocked. Drives the #554 accessRules read gate: hasAll()
   // returns true only for a `settings:manage` caller. Defaults to FALSE (no rules) so the pre-#554
   // read tests assert the public shape; the accessRules tests override it per-case.
@@ -89,17 +100,27 @@ describe('ArticleCategoriesService', () => {
     articleAlias = {
       deleteMany: jest.fn(),
     };
+    articleVersion = {
+      groupBy: jest.fn().mockResolvedValue([]),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    };
 
+    executeRaw = jest.fn().mockResolvedValue(0);
+    queryRaw = jest.fn().mockResolvedValue([]);
     // $transaction: by default, immediately invoke the callback with a tx that mirrors the mocks.
     const txProxy = {
       articleAlias,
       article,
       articleCategory,
+      articleVersion,
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
     };
     prisma = {
       articleCategory,
       article,
       articleAlias,
+      articleVersion,
       $transaction: jest.fn(
         (callback: (tx: typeof txProxy) => Promise<unknown>) =>
           callback(txProxy),
@@ -149,11 +170,27 @@ describe('ArticleCategoriesService', () => {
     await service.create(dto);
 
     expect(articleCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+      where: { id: 'p1', deletedAt: null },
       select: { id: true },
     });
     expect(articleCategory.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: dto }),
+    );
+  });
+
+  it("checks a nested create's parent and inserts it under the folder-tree lock, in one transaction (AUD-023)", async () => {
+    articleCategory.findFirst.mockResolvedValue({ id: 'p1' });
+    articleCategory.create.mockResolvedValue({ id: 'c2' });
+
+    await service.create({ name: 'Linux', parentId: 'p1' });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const lock = executeRaw.mock.invocationCallOrder[0];
+    expect(lock).toBeLessThan(
+      articleCategory.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(lock).toBeLessThan(
+      articleCategory.create.mock.invocationCallOrder[0],
     );
   });
 
@@ -223,11 +260,18 @@ describe('ArticleCategoriesService', () => {
     // Prisma's nested `_count.articles` is flattened to `articleCount`; the hidden folder's count is
     // dropped to null so it never reveals how many articles sit in a folder the list itself hides.
     expect(result).toEqual([
-      { id: 'c1', name: 'Public', articleCount: 3, hasAccessRules: false },
+      {
+        id: 'c1',
+        name: 'Public',
+        articleCount: 3,
+        totalArticleCount: 3,
+        hasAccessRules: false,
+      },
       {
         id: 'c2',
         name: 'Restricted',
         articleCount: null,
+        totalArticleCount: null,
         hasAccessRules: false,
       },
     ]);
@@ -244,6 +288,77 @@ describe('ArticleCategoriesService', () => {
     });
   });
 
+  describe('the rolled-up totalArticleCount (#1651)', () => {
+    // Engineering (12) ─┬─ Linux (3) ── Kernels (2)
+    //                   └─ Secrets (3, restricted)
+    const TREE_ROWS = [
+      { id: 'eng', parentId: null, _count: { articles: 12 } },
+      { id: 'linux', parentId: 'eng', _count: { articles: 3 } },
+      { id: 'kernels', parentId: 'linux', _count: { articles: 2 } },
+      { id: 'secrets', parentId: 'eng', _count: { articles: 3 } },
+    ];
+    const totalsOf = (
+      rows: Array<{ id: string; totalArticleCount: unknown }>,
+    ) => Object.fromEntries(rows.map((r) => [r.id, r.totalArticleCount]));
+
+    it('totals a folder with every descendant, keeping articleCount as the own count', async () => {
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+
+      const result = await service.findAll(ADMIN_PRINCIPAL);
+
+      expect(totalsOf(result)).toEqual({
+        eng: 20,
+        linux: 5,
+        kernels: 2,
+        secrets: 3,
+      });
+      expect(result.find((r) => r.id === 'eng')?.articleCount).toBe(12);
+    });
+
+    it('leaves a restricted subfolder out of its parent for a viewer who cannot read it, and in for an admin', async () => {
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(
+        new Set(['eng', 'linux', 'kernels']),
+      );
+
+      const viewer = await service.findAll(VIEWER_PRINCIPAL);
+      // The hidden folder's 3 never reach Engineering: 12 + 3 + 2, not 20.
+      expect(totalsOf(viewer)).toEqual({
+        eng: 17,
+        linux: 5,
+        kernels: 2,
+        secrets: null,
+      });
+
+      folderAccess.visibleFolderIds.mockResolvedValueOnce('ALL');
+      const admin = await service.findAll(ADMIN_PRINCIPAL);
+      expect(totalsOf(admin).eng).toBe(20);
+    });
+
+    it("rolls up the same draft-filtered count as articleCount (published + the caller's own drafts)", async () => {
+      const MEMBER = {
+        kind: 'human',
+        user: { id: 'u1', role: 'MEMBER' },
+      } as never;
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+
+      await service.findAll(MEMBER);
+
+      // The totals are summed from this one filtered `_count`: another author's draft is never in the
+      // per-folder number, so it is never in the total either.
+      const call = (
+        articleCategory.findMany.mock.calls as Array<
+          [{ select: { _count: { select: { articles: { where: unknown } } } } }]
+        >
+      )[0][0];
+      expect(call.select._count.select.articles.where).toEqual({
+        deletedAt: null,
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: 'u1' }],
+      });
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('the derived hasAccessRules flag (#1299, ADR-0060 §3 carve-out)', () => {
     it('findAll marks a restricted folder true and a public one false, WITHOUT leaking accessRules to a non-`settings:manage` caller', async () => {
       // A VIEWER: no `settings:manage` (the default mock), so the rules themselves stay gated (#554).
@@ -257,8 +372,20 @@ describe('ArticleCategoriesService', () => {
       const result = await service.findAll(VIEWER_PRINCIPAL);
 
       expect(result).toEqual([
-        { id: 'c1', name: 'Public', articleCount: 1, hasAccessRules: false },
-        { id: 'c2', name: 'Runbooks', articleCount: 2, hasAccessRules: true },
+        {
+          id: 'c1',
+          name: 'Public',
+          articleCount: 1,
+          totalArticleCount: 1,
+          hasAccessRules: false,
+        },
+        {
+          id: 'c2',
+          name: 'Runbooks',
+          articleCount: 2,
+          totalArticleCount: 2,
+          hasAccessRules: true,
+        },
       ]);
       // The whole point of the carve-out: the VIEWER learns THAT c2 is restricted and nothing else —
       // no rule kinds, no user list, no role, no counts. `accessRules` is not even selected.
@@ -406,10 +533,10 @@ describe('ArticleCategoriesService', () => {
     await service.remove('c1');
 
     expect(article.count).toHaveBeenCalledWith({
-      where: { categoryId: 'c1' },
+      where: { categoryId: 'c1', deletedAt: null },
     });
     expect(articleCategory.count).toHaveBeenCalledWith({
-      where: { parentId: 'c1' },
+      where: { parentId: 'c1', deletedAt: null },
     });
     const calls = articleCategory.update.mock.calls as Array<
       [{ where: { id: string }; data: { deletedAt: Date } }]
@@ -439,6 +566,22 @@ describe('ArticleCategoriesService', () => {
     expect(articleCategory.update).not.toHaveBeenCalled();
   });
 
+  it('locks the tree and the folder row before the emptiness checks, all in one transaction (AUD-023)', async () => {
+    articleCategory.findFirst.mockResolvedValue({ id: 'c1' });
+    article.count.mockResolvedValue(0);
+    articleCategory.count.mockResolvedValue(0);
+    articleCategory.update.mockResolvedValue({ id: 'c1' });
+
+    await service.remove('c1');
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const firstCheck = article.count.mock.invocationCallOrder[0];
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(firstCheck);
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(firstCheck);
+    // The row lock names exactly this folder.
+    expect(queryRaw.mock.calls[0]).toContainEqual(['c1']);
+  });
+
   it('does not soft-delete a missing folder', async () => {
     articleCategory.findFirst.mockResolvedValue(null);
 
@@ -463,10 +606,13 @@ describe('ArticleCategoriesService', () => {
   });
 
   it('moves a folder to the root (parentId: null) without a parent/cycle check', async () => {
-    articleCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+    permissions.hasAll.mockResolvedValue(true);
+    articleCategory.findFirst.mockResolvedValue({ id: 'c1', parentId: 'p1' });
+    articleCategory.findMany.mockResolvedValue([{ id: 'c1', parentId: 'p1' }]);
+    article.findMany.mockResolvedValue([]);
     articleCategory.update.mockResolvedValue({ id: 'c1', parentId: null });
 
-    await service.update('c1', { parentId: null });
+    await service.update('c1', { parentId: null }, ADMIN_PRINCIPAL);
 
     // findFirst is only the existence (findOne) call; no parent-usable / cycle walk for a root move.
     expect(articleCategory.findFirst).toHaveBeenCalledTimes(1);
@@ -479,66 +625,315 @@ describe('ArticleCategoriesService', () => {
   });
 
   describe('folder cycle guard (ADR-0059 §1)', () => {
+    beforeEach(() => {
+      permissions.hasAll.mockResolvedValue(true);
+      article.findMany.mockResolvedValue([]);
+    });
+
     /**
-     * Drive the move: the first findFirst is the existence check (findOne), the second is the
-     * parent-usable check, and the rest are the DFS walk UP the chain. `chain` maps a folder id to
-     * its parentId so the walk can be replayed deterministically.
+     * Drive a move: every live-folder lookup (the subject, then the parent) succeeds, and the tree walk
+     * reads `edges` — every folder's parent, soft-deleted folders included.
      */
-    const wireWalk = (
-      subject: { id: string; deletedAt: null },
-      parentUsable: { id: string },
-      chain: Record<string, string | null>,
-    ) => {
-      articleCategory.findFirst
-        .mockResolvedValueOnce(subject) // findOne existence
-        .mockResolvedValueOnce(parentUsable) // assertParentUsable
-        .mockImplementation((args: { where: { id: string } }) =>
-          Promise.resolve({ parentId: chain[args.where.id] ?? null }),
-        );
+    const wireTree = (edges: Record<string, string | null>) => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          Promise.resolve({ id: args.where.id }),
+      );
+      articleCategory.findMany.mockResolvedValue(
+        Object.entries(edges).map(([id, parentId]) => ({ id, parentId })),
+      );
     };
 
     it('allows reparenting under an unrelated folder (no cycle)', async () => {
       // A is the subject; move under C whose chain is C -> B -> (root). Never reaches A.
-      wireWalk(
-        { id: 'A', deletedAt: null },
-        { id: 'C' },
-        {
-          C: 'B',
-          B: null,
-        },
-      );
+      wireTree({ A: null, B: null, C: 'B' });
       articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'C' });
 
-      await service.update('A', { parentId: 'C' });
+      await service.update('A', { parentId: 'C' }, ADMIN_PRINCIPAL);
       expect(articleCategory.update).toHaveBeenCalled();
     });
 
     it('rejects (400) a move that makes the folder its own ancestor', async () => {
       // Subject A; proposed parent C whose chain is C -> B -> A → closing a cycle.
-      wireWalk(
-        { id: 'A', deletedAt: null },
-        { id: 'C' },
-        {
-          C: 'B',
-          B: 'A',
-        },
-      );
+      wireTree({ A: null, B: 'A', C: 'B' });
 
       await expect(
-        service.update('A', { parentId: 'C' }),
+        service.update('A', { parentId: 'C' }, ADMIN_PRINCIPAL),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(articleCategory.update).not.toHaveBeenCalled();
     });
 
     it('rejects (400) a folder set as its own parent', async () => {
-      articleCategory.findFirst
-        .mockResolvedValueOnce({ id: 'A', deletedAt: null }) // findOne
-        .mockResolvedValueOnce({ id: 'A' }); // assertParentUsable
+      wireTree({ A: null });
 
       await expect(
-        service.update('A', { parentId: 'A' }),
+        service.update('A', { parentId: 'A' }, ADMIN_PRINCIPAL),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('sees through a soft-deleted folder in the chain (AUD-022)', async () => {
+      // C -> D -> A where D is soft-deleted: restoring D after the move would close the loop.
+      wireTree({ A: null, D: 'A', C: 'D' });
+
+      await expect(
+        service.update('A', { parentId: 'C' }, ADMIN_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(articleCategory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ includeSoftDeleted: true }),
+      );
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a pre-existing loop elsewhere in the tree', async () => {
+      wireTree({ A: null, X: 'Y', Y: 'X', C: 'X' });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'C' });
+
+      await service.update('A', { parentId: 'C' }, ADMIN_PRINCIPAL);
+      expect(articleCategory.update).toHaveBeenCalled();
+    });
+
+    it('checks and writes a move in one transaction, under the folder-tree lock (AUD-010)', async () => {
+      wireTree({ A: null, B: null });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'B' });
+
+      await service.update('A', { parentId: 'B' }, ADMIN_PRINCIPAL);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(executeRaw).toHaveBeenCalledTimes(1);
+      expect(executeRaw.mock.calls[0]).toContain('lazyit.folder_tree');
+      const lock = executeRaw.mock.invocationCallOrder[0];
+      expect(lock).toBeLessThan(
+        articleCategory.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(lock).toBeLessThan(
+        articleCategory.findMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('a move to the root also takes the lock', async () => {
+      wireTree({ A: 'B', B: null });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: null });
+
+      await service.update('A', { parentId: null }, ADMIN_PRINCIPAL);
+
+      expect(executeRaw).toHaveBeenCalledTimes(1);
+      // Only the audit's subtree walk reads the tree; a root move has no cycle walk.
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('a folder move is a settings:manage write (ADR-0060 §10, SEC-089)', () => {
+    // A MEMBER: holds category:write by default, but not settings:manage (permissions.hasAll → false).
+    const MEMBER = {
+      kind: 'human',
+      user: { id: 'member-1', role: 'MEMBER' },
+    } as never;
+    const MANAGER = {
+      kind: 'human',
+      user: { id: 'admin-1', role: 'ADMIN' },
+    } as never;
+
+    // "HR" (restricted) holds "Salaries", which holds "Payroll"; "Public" is a root folder.
+    const wireTree = () => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          Promise.resolve({
+            id: args.where.id,
+            parentId:
+              { Salaries: 'HR', Payroll: 'Salaries' }[args.where.id] ?? null,
+          }),
+      );
+      articleCategory.findMany.mockResolvedValue([
+        { id: 'HR', parentId: null },
+        { id: 'Salaries', parentId: 'HR' },
+        { id: 'Payroll', parentId: 'Salaries' },
+        { id: 'Public', parentId: null },
+      ]);
+      articleCategory.update.mockImplementation(
+        (args: { where: { id: string }; data: { parentId?: string } }) =>
+          Promise.resolve({ id: args.where.id, ...args.data }),
+      );
+    };
+
+    beforeEach(wireTree);
+
+    it('refuses (403) a category:write holder moving a folder out from under its parent to the root', async () => {
+      await expect(
+        service.update('Salaries', { parentId: null }, MEMBER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'settings:manage',
+      ]);
+      expect(articleCategory.update).not.toHaveBeenCalled();
+      expect(articleVersion.createMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses (403) a category:write holder moving a folder under another folder', async () => {
+      await expect(
+        service.update('Salaries', { parentId: 'Public' }, MEMBER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses (403) a caller with no principal at all', async () => {
+      await expect(
+        service.update('Salaries', { parentId: null }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a settings:manage holder move it and records the move on every live article in the subtree', async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      article.findMany.mockResolvedValue([
+        {
+          id: 'a1',
+          title: 'Bands',
+          content: 'body 1',
+          excerpt: null,
+          status: 'PUBLISHED',
+        },
+        {
+          id: 'a2',
+          title: 'Run',
+          content: 'body 2',
+          excerpt: 'x',
+          status: 'DRAFT',
+        },
+      ]);
+      articleVersion.groupBy.mockResolvedValue([
+        { articleId: 'a1', _max: { version: 4 } },
+      ]);
+
+      await expect(
+        service.update('Salaries', { parentId: null }, MANAGER),
+      ).resolves.toEqual({ id: 'Salaries', parentId: null });
+
+      // The moved folder and its descendant, never the old parent or an unrelated folder.
+      expect(article.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            categoryId: { in: expect.arrayContaining(['Salaries', 'Payroll']) },
+            deletedAt: null,
+          },
+        }),
+      );
+      const subtree = (
+        article.findMany.mock.calls as Array<
+          [{ where: { categoryId: { in: string[] } } }]
+        >
+      )[0][0].where.categoryId.in;
+      expect(subtree).not.toContain('HR');
+      expect(subtree).not.toContain('Public');
+      expect(articleVersion.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            articleId: 'a1',
+            version: 5,
+            title: 'Bands',
+            content: 'body 1',
+            excerpt: null,
+            status: 'PUBLISHED',
+            editedById: 'admin-1',
+          },
+          {
+            articleId: 'a2',
+            version: 1,
+            title: 'Run',
+            content: 'body 2',
+            excerpt: 'x',
+            status: 'DRAFT',
+            editedById: 'admin-1',
+          },
+        ],
+      });
+      // The article rows are locked before their versions are read, so a concurrent edit cannot collide.
+      expect(
+        (queryRaw.mock.calls[0] as [readonly string[]])[0].join('?'),
+      ).toContain('FOR NO KEY UPDATE');
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        articleVersion.groupBy.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('attributes a service account mover to the service-account column', async () => {
+      const SA = {
+        kind: 'service',
+        serviceAccount: { id: 'sa-1' },
+        permissions: new Set(['settings:manage']),
+      } as never;
+      article.findMany.mockResolvedValue([
+        {
+          id: 'a1',
+          title: 't',
+          content: 'c',
+          excerpt: null,
+          status: 'PUBLISHED',
+        },
+      ]);
+
+      await service.update('Salaries', { parentId: 'Public' }, SA);
+
+      expect(articleVersion.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ serviceAccountId: 'sa-1' })],
+      });
+      const row = (
+        articleVersion.createMany.mock.calls as Array<
+          [{ data: Array<Record<string, unknown>> }]
+        >
+      )[0][0].data[0];
+      expect(row).not.toHaveProperty('editedById');
+    });
+
+    it('writes no version when the moved subtree holds no live article', async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      article.findMany.mockResolvedValue([]);
+
+      await service.update('Payroll', { parentId: 'Public' }, MANAGER);
+
+      expect(articleCategory.update).toHaveBeenCalled();
+      expect(articleVersion.createMany).not.toHaveBeenCalled();
+    });
+
+    it('a parentId equal to the current one is not a move: no gate, no audit', async () => {
+      await service.update('Salaries', { name: 'Pay', parentId: 'HR' }, MEMBER);
+
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { name: 'Pay', parentId: 'HR' } }),
+      );
+      expect(articleVersion.createMany).not.toHaveBeenCalled();
+    });
+
+    it('a rename without parentId stays a plain category:write edit', async () => {
+      await service.update('Salaries', { name: 'Pay' }, MEMBER);
+
+      expect(permissions.hasAll).not.toHaveBeenCalled();
+      expect(articleCategory.update).toHaveBeenCalled();
+    });
+
+    it('creating under a parent the caller cannot read is the same 400 as a missing parent', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['Public']));
+
+      const hidden = service.create({ name: 'Leak', parentId: 'HR' }, MEMBER);
+      await expect(hidden).rejects.toBeInstanceOf(BadRequestException);
+      await expect(hidden).rejects.toThrow(
+        'parentId HR does not reference a live folder',
+      );
+      expect(folderAccess.visibleFolderIds).toHaveBeenCalledWith(MEMBER);
+      expect(articleCategory.create).not.toHaveBeenCalled();
+    });
+
+    it('creating under a parent the caller can read succeeds', async () => {
+      folderAccess.visibleFolderIds.mockResolvedValue(new Set(['Public']));
+      articleCategory.create.mockResolvedValue({ id: 'n1' });
+
+      await service.create({ name: 'Notes', parentId: 'Public' }, MEMBER);
+
+      expect(articleCategory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { name: 'Notes', parentId: 'Public' },
+        }),
+      );
     });
   });
 
@@ -597,31 +992,20 @@ describe('ArticleCategoriesService', () => {
 
   describe('removeCascade', () => {
     /**
-     * Wire up the BFS tree walk mock: `findFirst` (findOne existence check) returns the root
-     * folder, then `findMany` returns the children at each level as keyed in `childrenMap`.
-     * After the tree walk, the $transaction callback fires the tx mocks directly.
-     *
-     * `childrenMap` maps a folder id to the ids of its DIRECT children. Omit a key (or map it to [])
-     * to indicate a leaf.
+     * Wire up the tree: `findFirst` (the live check) returns the root folder, and the one `findMany`
+     * returns every folder's edge, built from `childrenMap` (a folder id → its DIRECT children).
      */
     const wireTree = (
       rootId: string,
       childrenMap: Record<string, string[]> = {},
     ) => {
-      // findOne (existence check) — returns a live folder
-      articleCategory.findFirst.mockResolvedValue({
-        id: rootId,
-        deletedAt: null,
-      });
-
-      // BFS findMany calls: each call receives { where: { parentId: X }, select: { id: true }, ... }
-      articleCategory.findMany.mockImplementation(
-        (args: { where?: { parentId?: string } }) => {
-          const pid = args?.where?.parentId;
-          const ids = pid && childrenMap[pid] ? childrenMap[pid] : [];
-          return Promise.resolve(ids.map((id) => ({ id })));
-        },
-      );
+      articleCategory.findFirst.mockResolvedValue({ id: rootId });
+      articleCategory.findMany.mockResolvedValue([
+        { id: rootId, parentId: null },
+        ...Object.entries(childrenMap).flatMap(([parentId, ids]) =>
+          ids.map((id) => ({ id, parentId })),
+        ),
+      ]);
     };
 
     it('cascade soft-deletes a nested subtree (root > child > grandchild) + all their articles; counts are correct', async () => {
@@ -705,13 +1089,54 @@ describe('ArticleCategoriesService', () => {
     });
 
     it('404s on a missing or already-soft-deleted folder', async () => {
-      articleCategory.findFirst.mockResolvedValue(null); // findOne returns nothing
+      articleCategory.findFirst.mockResolvedValue(null); // the live check finds nothing
 
       await expect(service.removeCascade('gone')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      // Transaction must NOT be entered if the root folder is gone.
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(articleAlias.deleteMany).not.toHaveBeenCalled();
+      expect(article.updateMany).not.toHaveBeenCalled();
+      expect(articleCategory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a parentId cycle in the data and deletes each folder once (AUD-010)', async () => {
+      // root -> b -> root: the state two racing opposing moves used to leave behind.
+      articleCategory.findFirst.mockResolvedValue({ id: 'root' });
+      articleCategory.findMany.mockResolvedValue([
+        { id: 'root', parentId: 'b' },
+        { id: 'b', parentId: 'root' },
+      ]);
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await expect(service.removeCascade('root')).resolves.toEqual({
+        deletedFolders: 2,
+        deletedArticles: 0,
+      });
+      expect(articleCategory.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['root', 'b'] } }),
+        }),
+      );
+    });
+
+    it('walks and locks the subtree inside the transaction, before any write (AUD-023)', async () => {
+      wireTree('root', { root: ['child'] });
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.removeCascade('root');
+
+      const firstWrite = articleAlias.deleteMany.mock.invocationCallOrder[0];
+      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        articleCategory.findMany.mock.invocationCallOrder[0],
+      );
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(firstWrite);
+      expect(queryRaw.mock.calls[0]).toContainEqual(['root', 'child']);
     });
 
     it('a descendant article authored by ANOTHER user is soft-deleted by the cascade (ADMIN override)', async () => {
@@ -897,6 +1322,60 @@ describe('ArticleCategoriesService', () => {
       const restored = await service.restore('c1');
       expect(restored).toMatchObject({ id: 'c1' });
       expect(restored).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of a sub-folder under a LIVE parent succeeds', async () => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          args.where.id === 'c1'
+            ? Promise.resolve({
+                ...STORED_ROW,
+                parentId: 'p1',
+                deletedAt: new Date('2026-01-03T00:00:00Z'),
+              })
+            : Promise.resolve({ id: 'p1' }),
+      );
+
+      await service.restore('c1');
+
+      expect(articleCategory.findFirst).toHaveBeenCalledWith({
+        where: { id: 'p1', deletedAt: null },
+        select: { id: true },
+      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { deletedAt: null } }),
+      );
+    });
+
+    it('refuses (409) to restore a sub-folder whose parent is still deleted (AUD-022)', async () => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          args.where.id === 'c1'
+            ? Promise.resolve({
+                ...STORED_ROW,
+                parentId: 'p1',
+                deletedAt: new Date('2026-01-03T00:00:00Z'),
+              })
+            : Promise.resolve(null),
+      );
+
+      await expect(service.restore('c1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('restore checks the parent and writes under the folder-tree lock', async () => {
+      articleCategory.findFirst.mockImplementation(
+        rowFor({ ...STORED_ROW, deletedAt: new Date('2026-01-03T00:00:00Z') }),
+      );
+
+      await service.restore('c1');
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        articleCategory.findFirst.mock.invocationCallOrder[0],
+      );
     });
 
     it('restore of an already-live folder returns it without accessRules', async () => {

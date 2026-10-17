@@ -20,6 +20,7 @@ import { AgentPolicyService } from './agent-policy.service';
 import { AgentFleetService } from './agent-fleet.service';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
 import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
+import { ExportService } from '../common/export';
 
 // Permission gating (ADR-0070 §8): assert each route carries the right @RequirePermission metadata —
 // reads gate on `infra:read`, mutations on `infra:manage`, and asset-backed node create ALSO requires
@@ -28,13 +29,13 @@ import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 
 /** The permissions declared by `@RequirePermission(...)` on a controller handler (or [] if none). */
 function permsOf(method: keyof InfraController): Permission[] {
-  const handler = InfraController.prototype[method] as unknown as object;
+  const handler = Reflect.get(InfraController.prototype, method) as object;
   return (Reflect.getMetadata(PERMISSION_KEY, handler) as Permission[]) ?? [];
 }
 
 /** The guard classes declared by `@UseGuards(...)` on a controller handler (or [] if none). */
 function guardsOf(method: keyof InfraController): unknown[] {
-  const handler = InfraController.prototype[method] as unknown as object;
+  const handler = Reflect.get(InfraController.prototype, method) as object;
   return (Reflect.getMetadata('__guards__', handler) as unknown[]) ?? [];
 }
 
@@ -69,6 +70,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     /** Named call-through, so adding a filter param never silently re-points these positionals. */
@@ -94,6 +96,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ state: 'PENDING' }),
         expect.objectContaining({ limit: 200, offset: 0 }),
+        undefined,
       );
     });
 
@@ -103,6 +106,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ limit: 50, offset: 0 }),
+        undefined,
       );
     });
 
@@ -138,6 +142,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
         expect.objectContaining({ limit: 1 }),
+        undefined,
       );
     });
 
@@ -149,6 +154,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
         expect(listNodePage).toHaveBeenCalledWith(
           expect.objectContaining({ role }),
           expect.anything(),
+          undefined,
         );
       },
     );
@@ -196,6 +202,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     expect(controller.listGraphEdges()).toBe('edges');
@@ -206,6 +213,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     // `limit` reaches a `take` and `cursor` a keyset `WHERE id <`. A silently coerced NaN would page
     // unpredictably, so both are REFUSED rather than defaulted — which the entity note promises.
     const controller = new InfraController(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -231,6 +239,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       const infra = { listNodeFactChanges: jest.fn() };
       const ok = new InfraController(
         infra as never,
+        {} as never,
         {} as never,
         {} as never,
         {} as never,
@@ -300,6 +309,7 @@ describe('InfraController — legacy and page route contracts', () => {
         { provide: InfraAutoConfirmService, useValue: {} },
         { provide: AgentPolicyService, useValue: {} },
         { provide: AgentFleetService, useValue: {} },
+        { provide: ExportService, useValue: {} },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -333,11 +343,14 @@ describe('InfraController — legacy and page route contracts', () => {
       '</infra/nodes/page>; rel="successor-version"',
     );
     expect(res.headers.sunset).toBeUndefined();
-    expect(listNodes).toHaveBeenCalledWith({
-      kind: 'VM',
-      status: 'ONLINE',
-      state: 'CONFIRMED',
-    });
+    expect(listNodes).toHaveBeenCalledWith(
+      {
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      },
+      undefined,
+    );
   });
 
   it.each(['source=AGENT', 'limit=1', 'q=web'])(
@@ -366,6 +379,7 @@ describe('InfraController — legacy and page route contracts', () => {
     expect(listNodePage).toHaveBeenCalledWith(
       expect.objectContaining({ source: 'AGENT', q: 'web' }),
       expect.objectContaining({ limit: 25, sort: 'label', dir: 'asc' }),
+      undefined,
     );
     expect(getNodeDetail).not.toHaveBeenCalled();
   });
@@ -452,6 +466,7 @@ describe('InfraController — forward-compatible report body (#1138)', () => {
     const controller = new InfraController(
       infra as never,
       autoConfirm as never,
+      {} as never,
       {} as never,
       {} as never,
     );

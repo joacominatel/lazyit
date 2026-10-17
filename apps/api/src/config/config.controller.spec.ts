@@ -55,7 +55,6 @@ describe('ConfigController', () => {
   const OUTCOME: SetupOutcome = {
     adminId: '11111111-1111-1111-1111-111111111111',
     email: 'admin@example.com',
-    mirrored: true,
     setupCompletedAt: new Date('2026-06-01T00:00:00.000Z'),
   };
 
@@ -64,10 +63,11 @@ describe('ConfigController', () => {
       getStatus: jest.fn().mockResolvedValue({
         isConfigured: false,
         adminCount: 0,
-        integrationMode: 'zitadel',
+        integrationMode: 'generic-oidc',
         devMode: true,
         csrfToken: 'tok',
-        requiresAdminPassword: true,
+        requiresAdminPassword: false,
+        canProvisionAccounts: false,
       }),
       issueCsrfToken: jest.fn().mockReturnValue('fresh-token'),
       setup: jest.fn().mockResolvedValue(OUTCOME),
@@ -86,7 +86,7 @@ describe('ConfigController', () => {
   it('GET /config/status returns the status payload', async () => {
     const status = await controller.status();
     expect(status.isConfigured).toBe(false);
-    expect(status.integrationMode).toBe('zitadel');
+    expect(status.integrationMode).toBe('generic-oidc');
   });
 
   it('GET /config/csrf issues a fresh token', () => {
@@ -101,7 +101,7 @@ describe('ConfigController', () => {
     expect(config.setup).not.toHaveBeenCalled();
   });
 
-  it('POST /config/setup with a valid CSRF token creates the admin and shapes the result', async () => {
+  it('POST /config/setup with a valid CSRF token creates the admin and shapes the result (mirrored always false)', async () => {
     csrf.verify.mockReturnValue(true);
     const result = await controller.setup(
       SETUP_DTO,
@@ -114,7 +114,7 @@ describe('ConfigController', () => {
       success: true,
       adminId: OUTCOME.adminId,
       email: OUTCOME.email,
-      mirrored: true,
+      mirrored: false,
       setupCompletedAt: '2026-06-01T00:00:00.000Z',
     });
   });
@@ -201,7 +201,6 @@ describe('POST /config/setup — rate-limit guard 429 propagation (e2e pipeline)
   const OUTCOME: SetupOutcome = {
     adminId: '11111111-1111-1111-1111-111111111111',
     email: 'admin@example.com',
-    mirrored: true,
     setupCompletedAt: new Date('2026-06-01T00:00:00.000Z'),
   };
 
@@ -504,5 +503,88 @@ describe('ConfigController — service-principal blocked on permissions routes (
       .set('X-Test-Kind', 'human')
       .send({ MEMBER: ['asset:read'], VIEWER: ['asset:read'] });
     expect(res.status).toBe(200);
+  });
+});
+
+// SEC-088: a MEMBER whose role was delegated settings:manage still reads the matrix but cannot rewrite it.
+describe('ConfigController — delegated settings:manage cannot edit the matrix (SEC-088)', () => {
+  let app: INestApplication;
+
+  const delegatedSet = new Set<string>(['settings:manage', 'asset:read']);
+  const resolverStub = {
+    resolve: () => Promise.resolve(delegatedSet),
+    hasAll: (role: string, required: string[]) =>
+      Promise.resolve(
+        role === 'ADMIN' || required.every((p) => delegatedSet.has(p)),
+      ),
+    invalidate: jest.fn(),
+  };
+  const permissionsStub = {
+    getMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    updateMatrix: jest
+      .fn()
+      .mockResolvedValue({ ADMIN: [], MEMBER: [], VIEWER: [] }),
+    resolveFor: jest.fn(),
+  };
+
+  beforeAll(async () => {
+    const fakeAuthGuard = {
+      canActivate: (ctx: {
+        switchToHttp: () => { getRequest: () => Record<string, unknown> };
+      }) => {
+        const req = ctx.switchToHttp().getRequest();
+        const role = (req.headers as Record<string, string>)['x-test-role'];
+        if (role) req.user = { id: 'u-' + role, role };
+        return true;
+      },
+    };
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [ConfigController],
+      providers: [
+        { provide: ConfigService, useValue: {} },
+        { provide: SetupCsrfService, useValue: {} },
+        { provide: PermissionsConfigService, useValue: permissionsStub },
+        { provide: PermissionResolverService, useValue: resolverStub },
+        { provide: APP_GUARD, useValue: fakeAuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await app.listen(0);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => permissionsStub.updateMatrix.mockClear());
+
+  it('GET /config/permissions: a delegated MEMBER still reads the matrix', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/config/permissions')
+      .set('X-Test-Role', 'MEMBER');
+    expect(res.status).toBe(200);
+  });
+
+  it('PUT /config/permissions: a delegated MEMBER → 403 ADMIN_REQUIRED, nothing written', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/config/permissions')
+      .set('X-Test-Role', 'MEMBER')
+      .send({ MEMBER: ['asset:read', 'user:manage'], VIEWER: ['asset:read'] });
+    expect(res.status).toBe(403);
+    expect((res.body as { code?: string }).code).toBe('ADMIN_REQUIRED');
+    expect(permissionsStub.updateMatrix).not.toHaveBeenCalled();
+  });
+
+  it('PUT /config/permissions: an ADMIN still saves', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/config/permissions')
+      .set('X-Test-Role', 'ADMIN')
+      .send({ MEMBER: ['asset:read'], VIEWER: ['asset:read'] });
+    expect(res.status).toBe(200);
+    expect(permissionsStub.updateMatrix).toHaveBeenCalledTimes(1);
   });
 });

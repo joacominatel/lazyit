@@ -60,3 +60,5 @@ lista completa de disparadores, consulta la
   copia por correo.
 - Los tipos de notificación nuevos que se agreguen en una versión futura empiezan **activados** (con
   correo) para que nunca te pierdas una señal nueva por sorpresa; desactiva aquí el que prefieras.
+- Cada correo de notificación termina con un pie breve que remite a esta página, para que siempre sepas
+  dónde desactivar un tipo.

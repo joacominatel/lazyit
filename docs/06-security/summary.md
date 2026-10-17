@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-16
 ---
 
 # Security summary
@@ -151,6 +151,100 @@ Snapshot of the security review. Updated each sweep. Method:
    **✅ Closed the same day**: every write selects through `CATEGORY_PUBLIC_SELECT`. A runtime response
    serializer, which would close the class across the API, is the approved follow-up.
 
+17. **2026-10-09 — Bundled Zitadel removed (epic #1543, posture change).** Not a sweep:
+   [[0102-remove-bundled-zitadel|ADR-0102]] removed the bundled IdP, the role and profile write-back, the
+   deactivate mirror inside offboarding and the create-compensation hard delete. Generic OIDC (BYOI)
+   stays opt-in. [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] is **✅ closed as no longer
+   applicable**: the revert path it described is gone (PR #1552). SEC-012 was re-verified and stays open
+   at Low, its context updated to BYOI only. In [[INVARIANTS]], INV-4 and INV-6 were rewritten, INV-5 was
+   retired, and INV-1, -3, -8, INV-DIR-1 and -2 were corrected.
+
+18. **2026-10-09 — RBAC delegation ceiling (from the custom-roles analysis, #1560).** One finding, filed
+   from the analysis of custom roles and verified against `feat/issue-1543-remove-bundled-zitadel` at
+   `36f355450` (the same code is on `dev`):
+   [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] (**Medium**): a MEMBER or
+   VIEWER role that an ADMIN granted `user:manage` can create, promote, reset or restore an ADMIN, because
+   no subset rule bounds what a user administrator may assign. A role granted `settings:manage` can add
+   `user:manage` to itself through `PUT /config/permissions`. The shipped defaults grant neither verb to a
+   non-ADMIN role, so it needs a deliberate delegation. ADR-0046 accepts that delegation, but treats it as
+   bounded, which it is not. ADR-0048 already classes both verbs ADMIN-equivalent for service accounts.
+   Custom roles (#1560) would make the delegation common.
+
+19. **2026-10-10 — Full backend audit, verified (after epic #1543).** 44 finder agents (39 domain units
+   and 5 cross-cutting sweeps) over `apps/api` and `packages/shared`, then adversarial verification:
+   187 raw reports, 126 upheld, 105 entries after deduplication (1 High, 10 Medium, 94 Low; no
+   Critical) → [[sweep-2026-10-10-backend-audit]]. The High entry and the Medium security entries were
+   re-verified on `dev` at `a4ca679ea` and filed:
+   [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] (**High**): a `category:write` holder,
+   MEMBER by default, can move a KB folder out from under a restricted ancestor (or create one under
+   it), which changes who reads the whole subtree with no ACL check and no audit row.
+   [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] (**Medium**): user names reach
+   the AI model unwrapped, and any user can edit their own, so an injection in a name shows no
+   untrusted-source banner and leaves auto-approve on.
+   [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] (**Medium**): any `article:write`
+   holder can poll another user's import job by its sequential id and read its file names, slugs and
+   article ids, folder-hidden ones included.
+   [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] (**Medium**): the anonymous OAuth
+   endpoints' per-IP limiter scans its whole map on every hit, so an IP-rotating flood stalls the API.
+   AUD-002 is SEC-088 and AUD-012 is SEC-012, both already open. AUD-099 found
+   [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] fixed by #1476 but still open;
+   it is **✅ closed**. The Medium data-integrity and bug entries and every Low entry stay in the sweep
+   note as the remediation backlog, grouped into batches there.
+
+20. **2026-10-15 — 2026-10-10 audit remediation closed out.** PRs #1566–#1592 fixed the backlog in
+   batches (status per entry: [[sweep-2026-10-10-backend-audit]] § Remediation status). Six findings
+   **✅ closed**: [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] (#1566, constant work per
+   hit and a 10,000-key cap), [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]]
+   (#1567 and #1592, person names wrapped as untrusted), [[SEC-070-health-ready-db-error-leak\|SEC-070]]
+   (#1568, a fixed `unreachable` in the public body), [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]]
+   (#1571, live-parent filters on the summary), [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]]
+   (#1573, owner-only polling and random job ids) and
+   [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] (#1584, archived categories refused on
+   write). SEC-021 (closed) gained an addendum: #1571 and #1575 serialise every last-admin check under
+   one advisory lock, the sync path included. SEC-089, SEC-088, SEC-041 and SEC-012 stay open on
+   pending CEO decisions (AUD-001, AUD-002, AUD-024, AUD-012), each with a dated triage note.
+
+21. **2026-10-16 — 2026-10-10 audit decision round closed.** The CEO decided every pending entry, and PRs
+   #1598–#1609 shipped them (status per entry: [[sweep-2026-10-10-backend-audit]] § Remediation status).
+   - [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] is **✅ closed** (#1600, the web side in
+     #1608). Moving a KB folder needs `settings:manage`, and each move is recorded on the subtree's
+     articles. A create under an unreadable parent is refused.
+   - [[SEC-012-oidc-audience-not-validated\|SEC-012]] is **✅ closed as an accepted risk** (#1598).
+     `OIDC_CLIENT_ID` stays optional, and boot now logs a warning when it is unset in OIDC mode.
+   - [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] stays **open**, mostly fixed:
+     - the role ceiling on `user:manage` (#1601);
+     - the matrix and directory writes are ADMIN-only, a clone copies only what the caller could grant,
+       and a promotion revokes pending temporary passwords and reset links (#1606);
+     - the UI copy (#1609).
+
+     Two `settings:manage` paths wait on a CEO decision: `PUT /smtp`, and service-account token verbs
+     above the caller's role.
+   - [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] stays **open**. Its location
+     part is fixed by delete-with-one-resolution (#1603). The asset-category and asset-model parts remain.
+   - [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] (closed) gained a dated
+     correction: #1599 wraps the caller's own name in `session_context` too.
+   - Not a finding: #1602 and #1607 fixed unique-violation handling that never matched under
+     `@prisma/adapter-pg`, because `meta.target` is never set.
+
+22. **2026-10-16 — SEC-088 closed.** The CEO decided the last two `settings:manage` paths, and #1611
+   shipped them. [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] is
+   **✅ closed**:
+   - saving the SMTP settings is ADMIN-only (`ADMIN_REQUIRED`);
+   - service-account tokens are capped at the caller's own verbs (`PERMISSION_CEILING_EXCEEDED`).
+
+   The last-admin 409 also gained the code `LAST_ADMIN_REQUIRED`.
+
+23. **2026-10-16 — SEC-041 closed.** The CEO confirmed the delete-with-one-resolution pattern for
+   asset categories and asset models ("3. ok"), and #1620 shipped it.
+   [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] is **✅ closed**:
+   - deleting an asset category with live models needs `detach` or `move`, otherwise 409
+     `DELETE_RESOLUTION_REQUIRED`;
+   - deleting a model with live assets or open purchase lines needs the same, with a `MODEL_CHANGED`
+     history row per asset;
+   - a model write that names an archived category is a 400.
+
+   The web dialog for both shipped in #1621 (2026-10-16).
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -163,9 +257,9 @@ consent page, `/account/ai`).
 | Critical | 0 |
 | High | 0 |
 | Medium | 0 |
-| Low | 11 |
+| Low | 4 |
 | Info | 0 |
-| **Total open** | **11** |
+| **Total open** | **4** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -176,18 +270,52 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | --- | --- | --- | --- |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
-| [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
-| [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] | 🟡 Low | users | `isActive` not reverted on a Zitadel write-back 503 (bounded INV-5 divergence) |
-| [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
-| [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
-| [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] | 🟡 Low | applications | App/consumable create/update attach to a soft-deleted `categoryId` (no `assertCategoryUsable`) |
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
-| [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
-| [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
 
 ## Top findings
 
+0. **SEC-041 ✅ Closed.** Moved to `closed/` (2026-10-16). Deleting a location, an asset category, an
+   asset model, or an application or consumable category that is still in use takes one resolution for
+   everything affected (`detach` or `move`), applied in the delete's transaction, otherwise 409
+   `DELETE_RESOLUTION_REQUIRED` (#1603, #1608, #1620). Model writes refuse an archived category. No data
+   change: rows archived before the fix keep their references, and nothing is backfilled.
+0. **SEC-088 ✅ Closed.** Moved to `closed/` (2026-10-16, audit decision round). Delegating `user:manage`
+   or `settings:manage` to MEMBER or VIEWER no longer reaches ADMIN:
+   - a role ceiling on every user write (#1601);
+   - the matrix and directory writes are ADMIN-only, and a clone copies only what the caller could grant
+     (#1606);
+   - the UI copy (#1609);
+   - the SMTP save is ADMIN-only, and service-account verbs are capped at the caller's own (#1611).
+
+   No data change: existing service accounts keep their verbs until a non-ADMIN next re-arms them.
+0. **SEC-089 ✅ Closed.** Moved to `closed/` (2026-10-16, audit decision round). A folder move with a changed
+   `parentId` needs `settings:manage`. Without it the request gets a 403 and nothing changes. Each move
+   writes one version on every live article in the subtree, attributed to the mover. A create under a
+   parent the caller cannot read is the same 400 as a missing parent. The rule is
+   [[0060-kb-folder-access-control]] §10 (#1600); the web offers "Move to…" only to `settings:manage`
+   holders (#1608). No data change: folders keep their position and audience.
+0. **SEC-012 ✅ Closed (accepted risk).** Moved to `closed/` (2026-10-16, audit decision round).
+   `OIDC_CLIENT_ID` stays optional, so no live install stops booting. Boot now logs one warning that
+   audience validation is disabled when it is unset in OIDC mode (#1598). The residual risk is accepted
+   at Low.
+0. **SEC-090 / SEC-091 / SEC-092 ✅ Closed.** Moved to `closed/` (2026-10-15, audit remediation): person
+   names reach the AI wrapped as untrusted (#1567, #1592; the caller's own name in `session_context` is
+   left plain pending a CEO call), only the importer can poll an article import job and job ids are
+   random (#1573), and the shared rate limiter does constant work per hit with a key cap (#1566). No
+   data change; AI conversations started before the update become read-only because the tool
+   descriptions changed. *(Corrected 2026-10-16: #1599 wraps the caller's own name in `session_context`
+   too, by CEO decision; see SEC-090's correction.)*
+0. **SEC-070 / SEC-071 / SEC-052 ✅ Closed.** Moved to `closed/` (2026-10-15, audit remediation): the
+   readiness body says `unreachable` and the cause stays in the log (#1568), the dashboard counts only
+   live applications, assets and consumables (#1571), and applications and consumables refuse an
+   archived category on write while a legacy one stays editable (#1584). No data change.
+0. **SEC-030 ✅ Closed.** Moved to `closed/` (2026-10-14, recorded by the 2026-10-10 audit): asset
+   create, receive and move refuse an archived location or model since #1476, and an unchanged legacy
+   reference stays editable. No data change.
+0. **SEC-022 ✅ Closed (no longer applicable).** Moved to `closed/` (2026-10-09, epic #1543): the Zitadel
+   write-back and its field-scoped revert were removed (PR #1552), so `update` is one local write and a
+   co-PATCHed `isActive` can no longer survive a "your change was not saved" 503. No data change.
 0. **SEC-087 ✅ Closed.** Born closed (fixed 2026-10-05, #1301): KB folder create, update, delete,
    restore and access-rules responses use the public folder select, so `accessRules` reaches only a
    `settings:manage` reader, through the GET. No data change.
@@ -240,14 +368,18 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
    last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
    of offboarding them).
-6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+6. **Systemic soft-delete / nested-relation class (SEC-040/060 open; SEC-030, SEC-041, SEC-050, SEC-052
+   and SEC-071 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
    all soft-deletable models) closes most of them. SEC-050 is now closed: its category half by #325
    (`ConsumableCategory` registered) and its consumable half by guarding the explicit
    `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
-   archived-view slice).
+   archived-view slice). SEC-041's location part is fixed (2026-10-16, #1603). A location delete with
+   live dependents takes one resolution, detach or move, in the same transaction; otherwise it gets a
+   409 `DELETE_RESOLUTION_REQUIRED`. Application and consumable categories follow the same rule, and
+   since #1620 asset categories and asset models do too, which closes SEC-041.
 7. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.

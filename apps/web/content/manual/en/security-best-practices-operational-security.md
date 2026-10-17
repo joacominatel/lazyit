@@ -18,21 +18,19 @@ A working restore needs **more than that**:
 
 - **The application database** — your assets, users, access, Knowledge Base, and the *encrypted*
   Secret Manager data.
-- **Your identity provider's data** — if you run the bundled sign-in service, its accounts and keys
-  live separately. Restore the app database without it and everyone is locked out.
-- **Your environment / secrets file** — the deployment secrets (database password, encryption keys
-  for the sign-in service and for workflow connector credentials, the app secret). Some of these keys
-  **cannot be regenerated**: restore a database without the matching key and that data is
-  unreadable. (Losing `AI_SECRET_KEY`, which encrypts the AI provider's key, only means typing that
-  provider key again.)
+- **Your environment / secrets file** — the deployment secrets (database password, the session signing
+  secrets, the encryption key for workflow connector credentials, the app secret). Some of these keys
+  **cannot be regenerated**: restore a database without the matching key and that data is unreadable.
+  (Losing `AI_SECRET_KEY`, which encrypts the AI provider's key, only means typing that provider key
+  again.)
 
 Treat the secrets file as **irreplaceable**: keep an encrypted copy **off the host**, and never let
 the running server be its only copy. Test a restore before you rely on lazyit for real — an untested
 backup is a guess.
 
 > The deployment-and-operations section of this Manual covers the mechanics of backing up and
-> restoring. The point here is the **scope**: database **plus** identity-provider data **plus** the
-> secrets file, kept together and kept off-host.
+> restoring. The point here is the **scope**: database **plus** the secrets file, kept together and
+> kept off-host.
 
 ## Secret Manager recovery is the operator's responsibility — and it's different
 
@@ -105,4 +103,6 @@ encrypted, off-host backup and on a tightly controlled host.
   (retention, training, region). Review **Connected apps** now and then, keep personal MCP tokens short,
   and grant service accounts the narrowest **AI access**. See
   [AI assistant — overview](/help/ai-assistant-overview).
-- **Keep your identity provider patched and protected** — it's the front door, and lazyit trusts it.
+- **If you use your own identity provider, keep it patched and protected** — it's the front door, and
+  lazyit trusts it. Offboarding in lazyit does not disable the account there, so disable it in the
+  provider as part of the same leaver process.

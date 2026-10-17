@@ -5,10 +5,12 @@ import {
   deleteArticle,
   importArticle,
   publishArticle,
+  restoreArticle,
   unpublishArticle,
   updateArticle,
 } from "../endpoints/articles";
 import { restoreArticleVersion } from "../endpoints/article-versions";
+import { articleCategoryKeys } from "./use-article-categories";
 import { articleKeys } from "./use-articles";
 import { articleVersionKeys } from "./use-article-versions";
 import { invalidateDashboard } from "./use-dashboard";
@@ -54,6 +56,19 @@ export function useDeleteArticle() {
   return useMutation({
     mutationFn: (id: string) => deleteArticle(id),
     onSuccess: invalidate,
+  });
+}
+
+// Folder counts change too, so the folder list refetches.
+export function useRestoreArticle() {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateArticles();
+  return useMutation({
+    mutationFn: (id: string) => restoreArticle(id),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: articleCategoryKeys.all });
+    },
   });
 }
 

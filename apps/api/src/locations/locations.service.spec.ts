@@ -1,12 +1,27 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
+import { ActorService } from '../common/actor.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
+  Prisma: {
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+    join: (values: unknown[]) => values,
+    empty: { strings: [''], values: [] },
+  },
 }));
 // LocationsService transitively imports the ESM `meilisearch` package (via SearchService); jest
 // can't transform it. SearchService is replaced by a mock below; this stub stops the real load.
@@ -17,6 +32,7 @@ type PrismaLocationMock = {
   findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  updateMany: jest.Mock;
   count: jest.Mock;
 };
 
@@ -26,27 +42,89 @@ describe('LocationsService', () => {
   let service: LocationsService;
   let location: PrismaLocationMock;
   let search: SearchMock;
+  // The location-tree advisory lock, taken on the transaction client.
+  let executeRaw: jest.Mock;
+  let queryRaw: jest.Mock;
+  let asset: { count: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
+  let purchaseOrder: { updateMany: jest.Mock };
+  let purchaseOrderEvent: { createMany: jest.Mock };
+  let history: { record: jest.Mock; recordMany: jest.Mock };
+  let readable: Set<string>;
+  let prismaTransaction: () => jest.Mock;
+  // Every write records whether it ran inside the $transaction callback.
+  let inTransaction: boolean;
+  let writesOutsideTx: string[];
 
   beforeEach(async () => {
+    inTransaction = false;
+    writesOutsideTx = [];
+    const write = (name: string, impl?: (...args: never[]) => unknown) =>
+      jest.fn((...args: never[]) => {
+        if (!inTransaction) writesOutsideTx.push(name);
+        return impl ? impl(...args) : Promise.resolve(undefined);
+      });
     location = {
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: write('location.updateMany'),
       count: jest.fn(),
     };
+    asset = {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: write('asset.updateMany'),
+    };
+    purchaseOrder = { updateMany: write('purchaseOrder.updateMany') };
+    purchaseOrderEvent = {
+      createMany: write('purchaseOrderEvent.createMany'),
+    };
+    history = {
+      record: write('history.record'),
+      recordMany: write('history.recordMany'),
+    };
+    readable = new Set(['asset:read', 'location:read', 'purchaseOrder:read']);
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
-    const prisma = {
+    executeRaw = jest.fn().mockResolvedValue(0);
+    queryRaw = jest.fn().mockResolvedValue([]);
+    const prisma: Record<string, unknown> = {
       location,
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      asset,
+      purchaseOrder,
+      purchaseOrderEvent,
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
     };
+    prismaTransaction = () => prisma.$transaction as jest.Mock;
+    prisma.$transaction = jest.fn(
+      async (arg: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) => {
+        if (typeof arg !== 'function') return Promise.all(arg);
+        inTransaction = true;
+        try {
+          return await arg(prisma);
+        } finally {
+          inTransaction = false;
+        }
+      },
+    );
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         LocationsService,
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
+        ActorService,
+        { provide: AssetHistoryService, useValue: history },
+        {
+          provide: PermissionResolverService,
+          useValue: {
+            principalHas: jest.fn((_p: unknown, perm: string) =>
+              Promise.resolve(readable.has(perm)),
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -186,7 +264,7 @@ describe('LocationsService', () => {
     expect(location.findMany).toHaveBeenCalledWith({
       // The default `active` slice scopes the list to live rows (ADR-0041).
       where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
     });
@@ -254,11 +332,9 @@ describe('LocationsService', () => {
       { limit: 50, offset: 0, sort: 'name', dir: 'asc', deleted: 'active' },
     );
     const call = (
-      location.findMany.mock.calls as Array<
-        [{ orderBy: Record<string, unknown> }]
-      >
+      location.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(call.orderBy).toEqual({ name: 'asc' });
+    expect(call.orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
 
     await expect(
       service.findPage(
@@ -281,7 +357,7 @@ describe('LocationsService', () => {
     // read filter doesn't re-hide them.
     expect(location.findMany).toHaveBeenCalledWith({
       where: { deletedAt: { not: null } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       includeSoftDeleted: true,
@@ -338,12 +414,28 @@ describe('LocationsService', () => {
     name?: string;
     type?: string;
     parentId: string | null;
+    /** Archived: hidden from reads unless the call carries the includeSoftDeleted escape hatch. */
+    deleted?: boolean;
   };
   const seedTree = (nodes: Node[]) => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
     location.findFirst.mockImplementation(
-      ({ where }: { where: { id: string } }) =>
-        Promise.resolve(byId.get(where.id) ?? null),
+      ({
+        where,
+        includeSoftDeleted,
+      }: {
+        where: { id: string };
+        includeSoftDeleted?: boolean;
+      }) => {
+        const node = byId.get(where.id);
+        if (!node || (node.deleted && !includeSoftDeleted)) {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve({
+          ...node,
+          deletedAt: node.deleted ? new Date() : null,
+        });
+      },
     );
   };
 
@@ -413,6 +505,164 @@ describe('LocationsService', () => {
     expect(location.update).not.toHaveBeenCalled();
   });
 
+  // AUD-080: a live node under an archived ancestor is a valid parent; only the parent must be live.
+  it('update accepts a live parent whose ancestor is archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq' },
+      { id: 'rack', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'rack', parentId: 'room5' });
+
+    await service.update('rack', { parentId: 'room5' });
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'rack' },
+      data: { parentId: 'room5' },
+    });
+  });
+
+  it('create accepts a live parent whose ancestor is archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq' },
+    ]);
+    location.create.mockResolvedValue({ id: 'rack', parentId: 'room5' });
+
+    await service.create({ name: 'Rack', type: 'RACK', parentId: 'room5' });
+
+    expect(location.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('update still refuses a cycle that runs through an archived ancestor (400)', async () => {
+    // building → floor (archived) → room. Moving building under room would close a loop once the floor
+    // is restored, so the walk must see through the archived floor.
+    seedTree([
+      { id: 'building', parentId: null },
+      { id: 'floor', parentId: 'building', deleted: true },
+      { id: 'room', parentId: 'floor' },
+    ]);
+
+    await expect(
+      service.update('building', { parentId: 'room' }),
+    ).rejects.toThrow(
+      'A location cannot be moved under one of its own descendants.',
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('restore refuses (409) a location whose parent is still archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq', deleted: true },
+    ]);
+
+    await expect(service.restore('room5')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('restore brings back a location whose parent is live', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'room5', parentId: 'hq', deleted: true },
+    ]);
+    location.update.mockResolvedValue({ id: 'room5', parentId: 'hq' });
+
+    await service.restore('room5');
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'room5' },
+      data: { deletedAt: null },
+    });
+  });
+
+  // --- tree lock: every tree-shape write checks and writes under one advisory lock ---
+
+  const expectLockedBefore = (firstRead: jest.Mock) => {
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw.mock.calls[0]).toContain('lazyit.location_tree');
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      firstRead.mock.invocationCallOrder[0],
+    );
+  };
+
+  it('a move takes the tree lock before its cycle check, so two opposing moves serialize', async () => {
+    seedTree([
+      { id: 'A', parentId: null },
+      { id: 'B', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'A', parentId: 'B' });
+
+    await service.update('A', { parentId: 'B' });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('promoting to root takes the tree lock too', async () => {
+    seedTree([{ id: 'A', parentId: 'B' }]);
+    location.update.mockResolvedValue({ id: 'A', parentId: null });
+
+    await service.update('A', { parentId: null });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('a nested create checks its parent under the tree lock', async () => {
+    seedTree([{ id: 'root', parentId: null }]);
+    location.create.mockResolvedValue({ id: 'child', parentId: 'root' });
+
+    await service.create({ name: 'Rack', type: 'RACK', parentId: 'root' });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('a field-only update and a root create do not take the tree lock', async () => {
+    seedTree([{ id: 'A', parentId: null }]);
+    location.update.mockResolvedValue({ id: 'A', name: 'renamed' });
+    location.create.mockResolvedValue({ id: 'B', parentId: null });
+
+    await service.update('A', { name: 'renamed' });
+    await service.create({ name: 'Site', type: 'OFFICE' });
+
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('delete and restore run under the tree lock', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'room', parentId: 'hq', deleted: true },
+    ]);
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq');
+    expectLockedBefore(location.findFirst);
+
+    executeRaw.mockClear();
+    location.findFirst.mockClear();
+    location.update.mockResolvedValue({ id: 'room', deletedAt: null });
+    await service.restore('room');
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('the cycle walk ends on a corrupt loop above the parent instead of spinning', async () => {
+    // loopA ↔ loopB is already corrupt; moving X under loopA does not put X in that loop.
+    seedTree([
+      { id: 'loopA', parentId: 'loopB' },
+      { id: 'loopB', parentId: 'loopA' },
+      { id: 'X', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'X', parentId: 'loopA' });
+
+    await service.update('X', { parentId: 'loopA' });
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'X' },
+      data: { parentId: 'loopA' },
+    });
+  });
+
   it('findOneWithAncestors resolves the path ordered root→self inclusive', async () => {
     seedTree([
       { id: 'site', name: 'HQ', type: 'OFFICE', parentId: null },
@@ -436,5 +686,359 @@ describe('LocationsService', () => {
     const detail = await service.findOneWithAncestors('site');
 
     expect(detail.path).toEqual([{ id: 'site', name: 'HQ', type: 'OFFICE' }]);
+  });
+
+  // --- delete with one resolution (AUD-024 / SEC-041) ------------------------
+
+  const ADMIN = {
+    kind: 'human' as const,
+    user: { id: 'admin-1', role: 'ADMIN' },
+  } as never;
+
+  // What still points at `hq`: two live assets and an open purchase (SQL, so served by $queryRaw).
+  const seedDependents = (opts: {
+    assets?: string[];
+    purchases?: string[];
+    children?: string[];
+  }) => {
+    queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+      const sql = strings.join('?');
+      if (sql.includes('FROM "assets"')) {
+        return Promise.resolve((opts.assets ?? []).map((id) => ({ id })));
+      }
+      if (sql.includes('FROM "purchase_orders"')) {
+        return Promise.resolve(
+          (opts.purchases ?? []).map((id, i) => ({
+            id,
+            reference: `PO-${id}`,
+            createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+          })),
+        );
+      }
+      return Promise.resolve([]);
+    });
+    location.findMany.mockImplementation(
+      ({ where }: { where: { parentId?: string } }) =>
+        Promise.resolve(
+          where.parentId === 'hq'
+            ? (opts.children ?? []).map((id) => ({ id }))
+            : [],
+        ),
+    );
+  };
+
+  const softDeleted = () =>
+    (location.update.mock.calls as Array<[{ data: Row }]>).some(
+      ([args]) => args.data.deletedAt instanceof Date,
+    );
+  type Row = Record<string, unknown>;
+
+  it('refuses (409) to delete a location still in use when no strategy is given, with the counts', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({
+      assets: ['a1', 'a2'],
+      children: ['room'],
+      purchases: ['po1'],
+    });
+
+    const err = await service.remove('hq').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      statusCode: 409,
+      code: 'DELETE_RESOLUTION_REQUIRED',
+      dependents: { assets: 2, childLocations: 1, purchaseOrders: 1 },
+    });
+    expect(softDeleted()).toBe(false);
+    expect(asset.updateMany).not.toHaveBeenCalled();
+    expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  it('an unused location deletes without a strategy', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({});
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq');
+
+    expect(softDeleted()).toBe(true);
+    expect(asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("detach clears the assets' location (with history), makes children top-level and clears open purchases", async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({
+      assets: ['a1', 'a2'],
+      children: ['room'],
+      purchases: ['po1'],
+    });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+
+    expect(asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['a1', 'a2'] } },
+      data: { locationId: null },
+    });
+    // One batched insert for every moved asset, never one round-trip per asset.
+    expect(history.record).not.toHaveBeenCalled();
+    expect(history.recordMany).toHaveBeenCalledTimes(1);
+    expect(history.recordMany).toHaveBeenCalledWith(expect.anything(), [
+      {
+        assetId: 'a1',
+        eventType: 'LOCATION_CHANGED',
+        payload: { from: 'hq', to: null },
+        actor: { userId: 'admin-1' },
+      },
+      {
+        assetId: 'a2',
+        eventType: 'LOCATION_CHANGED',
+        payload: { from: 'hq', to: null },
+        actor: { userId: 'admin-1' },
+      },
+    ]);
+    expect(location.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['room'] } },
+      data: { parentId: null },
+    });
+    expect(purchaseOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['po1'] } },
+      data: { deliveryLocationId: null },
+    });
+    expect(purchaseOrderEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          purchaseOrderId: 'po1',
+          eventType: 'UPDATED',
+          payload: {
+            fields: ['deliveryLocationId'],
+            changes: { deliveryLocationId: { from: 'hq', to: null } },
+          },
+          performedById: 'admin-1',
+        }),
+      ],
+    });
+    expect(softDeleted()).toBe(true);
+    expect(writesOutsideTx).toEqual([]);
+  });
+
+  it('move re-points the assets and open purchases and re-parents the children under the target', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'warehouse', parentId: null },
+    ]);
+    seedDependents({ assets: ['a1'], children: ['room'], purchases: ['po1'] });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove(
+      'hq',
+      { strategy: 'move', targetId: 'warehouse' },
+      ADMIN,
+    );
+
+    expect(asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['a1'] } },
+      data: { locationId: 'warehouse' },
+    });
+    expect(history.recordMany).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({ payload: { from: 'hq', to: 'warehouse' } }),
+    ]);
+    expect(location.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['room'] } },
+      data: { parentId: 'warehouse' },
+    });
+    expect(purchaseOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['po1'] } },
+      data: { deliveryLocationId: 'warehouse' },
+    });
+    expect(softDeleted()).toBe(true);
+    expect(writesOutsideTx).toEqual([]);
+  });
+
+  it.each([
+    ['itself', 'hq'],
+    ['one of its descendants', 'rack'],
+    ['an archived location', 'old'],
+    ['a missing location', 'ghost'],
+  ])(
+    'refuses (400) to move everything to %s, and writes nothing',
+    async (_what, targetId) => {
+      seedTree([
+        { id: 'hq', parentId: null },
+        { id: 'room', parentId: 'hq' },
+        { id: 'rack', parentId: 'room' },
+        { id: 'old', parentId: null, deleted: true },
+      ]);
+      seedDependents({ assets: ['a1'], children: ['room'] });
+
+      await expect(
+        service.remove('hq', { strategy: 'move', targetId }, ADMIN),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(asset.updateMany).not.toHaveBeenCalled();
+      expect(location.updateMany).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+      expect(softDeleted()).toBe(false);
+    },
+  );
+
+  it('a failure mid-way rejects the whole delete: every write ran inside the one transaction and nothing is soft-deleted or unindexed', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'warehouse', parentId: null },
+    ]);
+    seedDependents({ assets: ['a1', 'a2'], children: ['room'] });
+    history.recordMany.mockRejectedValueOnce(new Error('connection lost'));
+
+    await expect(
+      service.remove('hq', { strategy: 'move', targetId: 'warehouse' }, ADMIN),
+    ).rejects.toThrow('connection lost');
+
+    expect(writesOutsideTx).toEqual([]);
+    expect(location.updateMany).not.toHaveBeenCalled();
+    expect(softDeleted()).toBe(false);
+    expect(search.remove).not.toHaveBeenCalled();
+  });
+
+  it('a move and a delete serialize on the tree lock taken before anything is read', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'warehouse', parentId: null },
+    ]);
+    seedDependents({ assets: ['a1'] });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'move', targetId: 'warehouse' });
+
+    expectLockedBefore(queryRaw);
+  });
+
+  it('the delete-impact preview counts everything and lists only what the caller may read', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ purchases: ['po1', 'po2'] });
+    asset.count.mockResolvedValue(3);
+    asset.findMany.mockResolvedValue([
+      { id: 'a1', name: 'Laptop', assetTag: 'LT-1' },
+    ]);
+    location.count.mockResolvedValue(1);
+    location.findMany.mockResolvedValue([
+      { id: 'room', name: 'Room', type: 'OTHER' },
+    ]);
+    readable.delete('purchaseOrder:read');
+
+    const impact = await service.deleteImpact('hq', ADMIN);
+
+    expect(impact).toEqual({
+      assets: {
+        total: 3,
+        items: [{ id: 'a1', name: 'Laptop', assetTag: 'LT-1' }],
+      },
+      childLocations: {
+        total: 1,
+        items: [{ id: 'room', name: 'Room', type: 'OTHER' }],
+      },
+      purchaseOrders: { total: 2, items: null },
+    });
+    expect(asset.count).toHaveBeenCalledWith({
+      where: { locationId: 'hq', deletedAt: null },
+    });
+    expect(asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 50 }),
+    );
+  });
+
+  it('the delete-impact preview 404s for an archived location', async () => {
+    seedTree([{ id: 'old', parentId: null, deleted: true }]);
+
+    await expect(service.deleteImpact('old', ADMIN)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('gives the delete transaction more than the 5 s default, so a large location can still be deleted', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ assets: Array.from({ length: 3000 }, (_, i) => `a${i}`) });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+
+    expect(asset.updateMany).toHaveBeenCalledTimes(1);
+    expect(history.recordMany).toHaveBeenCalledTimes(1);
+    expect(
+      (history.recordMany.mock.calls[0] as [unknown, unknown[]])[1],
+    ).toHaveLength(3000);
+    const txCalls = (prismaTransaction().mock.calls as unknown[][]).filter(
+      (c) => typeof c[0] === 'function',
+    );
+    expect(txCalls[0][1]).toEqual({ timeout: 30_000 });
+  });
+
+  it('locks the open purchases it re-points (FOR UPDATE OF po) and only those in an open status', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ purchases: ['po1'] });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+    await service.deleteImpact('hq', ADMIN);
+
+    const purchaseQueries = (
+      queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]
+    ).filter(([strings]) =>
+      strings.join('?').includes('FROM "purchase_orders"'),
+    );
+    const lockOf = (values: unknown[]) =>
+      values.some(
+        (v) =>
+          typeof v === 'object' &&
+          v !== null &&
+          'strings' in v &&
+          (v as { strings: string[] }).strings
+            .join('')
+            .includes('FOR UPDATE OF po'),
+      );
+    expect(purchaseQueries).toHaveLength(2);
+    // The delete locks them; the read-only preview does not.
+    expect(lockOf(purchaseQueries[0].slice(1))).toBe(true);
+    expect(lockOf(purchaseQueries[1].slice(1))).toBe(false);
+    expect(purchaseQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
+  });
+
+  it('locks the open purchases in id order, as the model delete and supplier merge do, and still lists them oldest first', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({});
+    queryRaw.mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(
+        strings.join('?').includes('FROM "purchase_orders"')
+          ? [
+              {
+                id: 'po-a',
+                reference: 'PO-A',
+                createdAt: new Date('2026-10-02'),
+              },
+              {
+                id: 'po-b',
+                reference: 'PO-B',
+                createdAt: new Date('2026-10-01'),
+              },
+            ]
+          : [],
+      ),
+    );
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+    const impact = await service.deleteImpact('hq', ADMIN);
+
+    const [lock] = (
+      queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]
+    )
+      .map(([strings]) => strings.join('?'))
+      .filter((sql) => sql.includes('FROM "purchase_orders"'));
+    expect(lock).toMatch(/ORDER BY po\."id" ASC/);
+    expect(lock).not.toMatch(/ORDER BY po\."createdAt"/);
+    expect(impact.purchaseOrders.items).toEqual([
+      { id: 'po-b', reference: 'PO-B' },
+      { id: 'po-a', reference: 'PO-A' },
+    ]);
   });
 });

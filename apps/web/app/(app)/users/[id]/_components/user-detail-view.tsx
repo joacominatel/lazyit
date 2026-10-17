@@ -14,7 +14,9 @@ import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
+import { directoryAttr } from "@/components/quick-view-fields";
 import { Breadcrumb } from "@/components/breadcrumb";
 import {
   AttentionItem,
@@ -40,7 +42,11 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-deliveries-panel";
 import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { useFormatters } from "@/lib/hooks/use-formatters";
-import { useCan } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
+import {
+  ACCESS_GRANT_EXPORT_PATH,
+  accessGrantFilterParams,
+} from "@/lib/api/endpoints/access-grants";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAssets } from "@/lib/api/hooks/use-assets";
@@ -57,6 +63,7 @@ import { ArticleStatusBadge } from "../../../kb/_components/article-status-badge
 import { CloneUserWizard } from "../../_components/clone-user-wizard";
 import { ManagerDisplay } from "../../_components/manager-display";
 import { OffboardingSheet } from "../../_components/offboarding-sheet";
+import { canManageUser } from "../../_components/role-ceiling";
 import { ProvisionAccountButton } from "../../_components/provision-account-button";
 import { UserDirectoryBadge } from "../../_components/user-directory-badge";
 import { UserFormDialog } from "../../_components/user-form-dialog";
@@ -92,6 +99,9 @@ export function UserDetailView({ id }: { id: string }) {
   const canReadConsumables = useCan("consumable:read");
 
   const { data: user, isLoading, isError, error, refetch } = useUser(id);
+  const { role: myRole } = usePermissions();
+  // SEC-088: acting on a user ranked above the caller is refused, so those actions are not offered.
+  const canManageTarget = canManage && user !== undefined && canManageUser(myRole, user);
   // Active + released assignments and active + revoked grants for the full per-person picture.
   const { data: assignments } = useUserAssignments(id, false);
   const { data: grants } = useUserGrants(canReadGrants ? id : undefined, false);
@@ -321,11 +331,15 @@ export function UserDetailView({ id }: { id: string }) {
             actions={
               canManage ? (
                 <>
-                  <UserPasswordResetButton user={user} />
-                  <Button size="sm" onClick={() => setEditOpen(true)}>
-                    <PencilSquareIcon />
-                    {t("detail.edit")}
-                  </Button>
+                  {canManageTarget ? (
+                    <>
+                      <UserPasswordResetButton user={user} />
+                      <Button size="sm" onClick={() => setEditOpen(true)}>
+                        <PencilSquareIcon />
+                        {t("detail.edit")}
+                      </Button>
+                    </>
+                  ) : null}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -341,14 +355,18 @@ export function UserDetailView({ id }: { id: string }) {
                         <DocumentDuplicateIcon />
                         {t("clone.action")}
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => setOffboardOpen(true)}
-                      >
-                        <ArrowRightStartOnRectangleIcon />
-                        {t("detail.offboard")}
-                      </DropdownMenuItem>
+                      {canManageTarget ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setOffboardOpen(true)}
+                          >
+                            <ArrowRightStartOnRectangleIcon />
+                            {t("detail.offboard")}
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </>
@@ -401,7 +419,21 @@ export function UserDetailView({ id }: { id: string }) {
 
             {canReadGrants ? (
               <TabsContent value="access" className="pt-2">
-                <UserAccessTab active={activeGrants} appNameById={appNameById} now={now} />
+                <UserAccessTab
+                  active={activeGrants}
+                  appNameById={appNameById}
+                  now={now}
+                  actions={
+                    <ExportButton
+                      path={ACCESS_GRANT_EXPORT_PATH}
+                      params={accessGrantFilterParams({ userId: user.id, activeOnly: false })}
+                      total={grants?.length}
+                      filename="access-grants"
+                      permission="accessGrant:read"
+                      size="sm"
+                    />
+                  }
+                />
               </TabsContent>
             ) : null}
 
@@ -462,9 +494,8 @@ export function UserDetailView({ id }: { id: string }) {
         }
         aside={
           <>
-            {/* Directory person (ADR-0069 REDESIGN §0 #3): no login yet. Offer the ADMIN-only manual OIDC
-                promotion — the explicit counterpart to the auto-claim on first verified-email login. */}
-            {user.directoryOnly && canManage && (
+            {/* Directory person (ADR-0069 REDESIGN §0 #3): no login yet. */}
+            {user.directoryOnly && canManageTarget && (
               <DetailPanel title={t("directory.provision.title")}>
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
@@ -481,6 +512,12 @@ export function UserDetailView({ id }: { id: string }) {
                 </ProfileRow>
                 <ProfileRow label={t("detail.fields.manager")}>
                   <ManagerDisplay manager={user.manager} />
+                </ProfileRow>
+                <ProfileRow label={t("detail.fields.department")}>
+                  {directoryAttr(user.directoryAttrs, "department") ?? <Empty />}
+                </ProfileRow>
+                <ProfileRow label={t("detail.fields.jobTitle")}>
+                  {directoryAttr(user.directoryAttrs, "jobTitle") ?? <Empty />}
                 </ProfileRow>
                 <ProfileRow label={t("detail.fields.legajo")} mono>
                   {user.legajo ?? <Empty />}
@@ -518,6 +555,7 @@ export function UserDetailView({ id }: { id: string }) {
             id: user.id,
             firstName: user.firstName,
             lastName: user.lastName,
+            directoryAttrs: user.directoryAttrs,
           }}
         />
       ) : null}

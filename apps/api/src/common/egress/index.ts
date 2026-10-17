@@ -8,7 +8,8 @@
  *   - {@link createNodeTransport} / {@link createPinnedLookup} — the pinning transport internals.
  *   - {@link EgressError} + types — the error / option / result contracts (incl. the allowlist seam).
  *
- * Phase 0 prerequisite: NOT wired into any route or service yet.
+ * LIVE for every outbound call: workflow REST / WEBHOOK_OUT and connection tests, OAuth CIMD fetches, AI
+ * providers — a change to egress-guard.ts or ip-rules.ts changes what all of them can reach.
  */
 export {
   assertUrlAllowed,

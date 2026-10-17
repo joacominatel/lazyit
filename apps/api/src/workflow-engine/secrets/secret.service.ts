@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { CreateWorkflowSecret } from '@lazyit/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CredentialUnavailableError } from '../handlers/step-handler';
 
 /**
  * SecretService — the engine's OWN encrypted credential store (ADR-0054 §5,
@@ -260,16 +261,21 @@ export class SecretService implements OnModuleInit {
   /**
    * Load a LIVE (non-deleted) secret by id and return its cleartext — INTERNAL ONLY. The CORE wires
    * this into a `StepContext.revealSecret` accessor so a handler authenticates at call time. NEVER
-   * returned across an API boundary. Throws if the secret is absent / deleted / undecryptable.
+   * returned across an API boundary. Throws a {@link CredentialUnavailableError} if the secret is
+   * absent / deleted / undecryptable, so a handler can fail the step instead of throwing (AUD-071).
    */
   async revealById(id: string): Promise<string> {
     const row = await this.prisma.workflowSecret.findFirst({
       where: { id, deletedAt: null },
     });
     if (!row) {
-      throw new Error(`Workflow secret ${id} not found (or deleted).`);
+      throw new CredentialUnavailableError();
     }
-    return this.reveal(row);
+    try {
+      return this.reveal(row);
+    } catch {
+      throw new CredentialUnavailableError();
+    }
   }
 }
 

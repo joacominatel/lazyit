@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-08-09
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -508,7 +508,9 @@ keeping the human gate intact:
   overwrite the IP with the live fact **unless a human edited it**" policy. A human IP edit through the
   node panel stamps `MANUAL` **server-side** (derived from `ipAddress` being present in the PATCH — never
   a client-settable field, so the provenance marker stays trustworthy); a `MANUAL` node's IP is never
-  clobbered by a report thereafter.
+  clobbered by a report thereafter. **Amended 2026-10-14 (AUD-088):** an IP typed when a node is
+  *created* is the same human edit and is stamped `MANUAL` too — it used to land as `AGENT`, so merging
+  a re-imaged host's proposal into it overwrote the typed value.
 - **Hardware serial → `Asset.serial` at confirm.** The pure `sanitizeSerial(host)` mapper (trims, drops
   the well-known dmidecode junk placeholders — `To be filled by O.E.M.`, `Default string`, all-same-char,
   … — case-insensitive) promotes a real discovered serial to the minted Asset's canonical `serial`. A
@@ -528,6 +530,37 @@ keeping the human gate intact:
   same Valkey substrate ([[0053-async-workers-bullmq-valkey]]), copying the `import-commit` worker
   pattern. The endpoint returns fast (accepted), the work drains in the background.~~ — **never built;
   corrected below (2026-07-31, #1136).**
+
+**Amendment (2026-10-14, backend audit AUD-030/031/059) — one live node per Asset, and a confirm that
+cannot run twice.** Two nodes could end up linked to one Asset — a re-imaged host's new proposal
+confirmed (instead of merged) adopted its predecessor's auto-created Asset, and a manual attach never
+checked — and a detach of either archived the row the other still used. The rule is now: linking an
+Asset another live node already links is a `409` (create and first-attach alike, [[0070-infra-topology-graph]]
+§5); adoption ([[0093-chassis-routing-and-asset-adoption]] §3) skips such an Asset and mints instead,
+its documented fail-closed direction; and the archiving branch of a detach runs only when no other live
+node links the Asset — otherwise it only un-links. It is an application check, not a unique index:
+installs that already hold shared links keep reading them, and two attaches racing on the same Asset
+are not serialized (the detach guard is what keeps that race from destroying anything). Separately,
+`confirmNode` now **claims** `PENDING → CONFIRMED` with a conditional write before it adopts or mints,
+so two concurrent confirms of one node mint one Asset, not two; a failed adopt or mint returns the node
+to `PENDING`. The serial-collision retry stays, as the backstop for two *different* nodes confirming at
+once and for the skipped-adoption case above. *(2026-10-14, audit follow-up:)* restoring an archived node
+whose Asset another live node now links is a `409` too — a restore re-establishes the link, so it is an
+attach; detach the Asset from the live node, or merge the two, first.
+*(2026-10-15, CEO decision:)* the rule is now also a **database constraint**: the partial unique index
+`infra_nodes_assetId_active_key` on `("assetId") WHERE "deletedAt" IS NULL AND "assetId" IS NOT NULL`
+(migration `20261015130000_infra_single_live_node_per_asset`). Two attaches, restores or adopting
+confirms racing on one Asset no longer both land; the loser gets the same `409` (a confirm that loses
+returns its node to `PENDING`). Before building the index the migration resolves links already shared:
+for each Asset, the live node that **reported most recently** (`lastReportedAt DESC NULLS LAST`, then
+the oldest by `createdAt`, then `id`) keeps it and the others have their `assetId` cleared and a
+`specs._infraAssetUnlinked` marker `{ assetId, keptByNodeId, at }` stamped (unless `specs` is not a
+JSON object: such a node is un-linked but not stamped) — no row is deleted, the Asset
+is untouched, and an archived node is never considered (restoring one later is the guarded attach above).
+*(2026-10-16, CEO decision:)* the reporter wins rather than the oldest because after a re-image the oldest
+node is the dead predecessor: the live host keeps its Asset, and the marker lands on the node no report
+will overwrite. The marker is node-only provenance (never copied to an Asset); on an agent-reported node
+the next report that rewrites the blob replaces it.
 
 **Amendment (2026-07-31, #1136) — correction: ingestion is inline, there is no report queue.** The
 struck bullet above describes a design that was never built, and the one that was built is the right
@@ -599,7 +632,10 @@ duplicate-node failure the host key was designed to avoid, reproduced one level 
 host:** container names are unique only within one runtime, so a host-less key would fuse two boxes'
 `redis` into one node whose `RUNS_ON` edge flapped between hosts. The separator cannot occur in a host
 `externalId` (machine-ids, MachineGUIDs and platform UUIDs are hex and dashes), so a child key can
-never collide with a host one. The runtime id still ships, as corroborating evidence, never as a key.
+never collide with a host one. **Enforced on write since 2026-10-14 (AUD-102):** that held for every
+collector but was never checked, so an `infra:report` token could send `H/container/redis` and land a
+host the server then treated as a child. `AgentReportSchema` now rejects a host `externalId` containing
+`/container/` or `/guest/`; stored rows are read as they are. The runtime id still ships, as corroborating evidence, never as a key.
 
 **Absent and empty are different answers, and the server acts on the difference.** An **absent**
 `containers` key means the collector never probed — an older agent, a non-Linux collector, an
@@ -788,6 +824,9 @@ clone keeps reporting the same baked machine-id forever — so its node is keyed
 they are two). The row also carries `specs.identityConflict` naming the value actually reported and the
 peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
 weight as §2's canonicalisation rules — so it is stated here rather than left in code.
+*(2026-10-14, audit follow-up to AUD-102:)* the serial is agent free text, so when the derived key would
+carry `/container/` or `/guest/` the discriminator's slashes become `_`; every other derived key is
+unchanged, so no existing clone node moves.
 
 **A colliding host's CONTAINERS are not tracked, and that gap is deliberate (#1158, 2026-08-01).** A
 container child's key is `<hostExternalId>/container/<name>`, derived from the **reported**
@@ -1260,7 +1299,10 @@ The bulk `updateMany` can't report which rows it flipped, so the sweep **snapsho
 doomed set before the flip** and emits one nudge per snapshot node, POST-flip + best-effort (a failed emit
 never aborts the sweep). Deduped on the node's last-report instant → **one nudge per outage**, never
 once-per-sweep. Still the coarse liveness bit — no metrics, no thresholds beyond the existing staleness
-cutoff.
+cutoff. **Corrected 2026-10-14 (AUD-058):** the flip is now conditional — still not `OFFLINE`, still
+live, and still on the `lastReportedAt` the snapshot judged — and returns the rows it changed
+(`updateManyAndReturn`), so a node that reports between the read and the write is neither flipped nor
+announced. The nudge goes to the flipped rows only.
 
 **Amendment (2026-08-01, #1140) — the threshold is per node, not one global env var.**
 `INFRA_AGENT_STALE_AFTER_MS` was a single instance-wide cutoff, which made heterogeneous cadences

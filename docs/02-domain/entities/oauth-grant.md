@@ -3,7 +3,7 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-16
 ---
 
 # OAuthGrant
@@ -34,11 +34,22 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
   connected-apps lists). **A normal web logout does not**: it bumps only `sessionEpoch`, so the grant
   survives it ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24). Deactivation,
   `directoryOnly` and `mustChangePassword` also refuse it.
+- **Listed while it holds a live token**: the connected-apps lists show a grant only while one of its
+  tokens is unexpired. An OAuth grant whose refresh token idled out (30 days unused) and was swept can
+  never act again, so it leaves the lists; the row itself stays, unrevoked, for the record.
+- **Its owner always sees and can revoke it**: listing and revoking your own grants need no permission,
+  so a user who lost `ai:connect` can still review and cut what they hold (AUD-083). Creating one needs it.
 - **Authority** = the user's current permissions ∩ the scope class (`lazyit.read` → `read` tools,
   `lazyit.write` → `write`, `lazyit.admin` → `elevated`), re-checked on every call with `ai:connect` and
   the MCP switch.
 - `kind` `personal` (`lzit_pat_…`) exists only on `lan`, always with an expiry (90 days by default,
   365 at most).
+- **Announced once, recorded on the grant**: the first `/mcp` use sends the owner the
+  `mcp.client_connected` notice ([[notification]]) and, once the notice row exists, sets `announcedAt`.
+  The decision reads `announcedAt` (and, for grants that predate the column, the notice row), never the
+  grant's age, so a token first used long after it was minted is still announced (AUD-014). The notice's
+  unique `dedupeKey` keeps concurrent first uses to one notice; a failed send stamps nothing and is
+  retried.
 
 ## Fields
 
@@ -56,6 +67,7 @@ Prisma model `OAuthGrant` → table `oauth_grants`.
 | `sessionEpoch` | `int` | the user's `sessionEpoch` at issuance — informational only since 2026-09-24. |
 | `mcpCredentialEpoch` | `int` | the user's `mcpCredentialEpoch` at issuance; a mismatch means dead. Grants that predate the column were set to 0 when alive and -1 (never matches) when already dead. |
 | `expiresAt` / `lastUsedAt` | `datetime?` | expiry is mandatory for personal tokens. |
+| `announcedAt` | `datetime?` | when the first-use notice was sent; null = never announced. Added 2026-10-15: the migration filled it from the existing `mcp.client_connected` notices, every other grant reads null and is announced on its next use (one whose notice was already pruned by retention gets one extra notice, never a missed one). |
 | `revokeReason` / `revokedById` | `text?` / `uuid?` | |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | soft delete = revoked. |
 

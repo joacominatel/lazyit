@@ -64,12 +64,11 @@ export function UserMenu() {
   const canReadSecrets = useCan("secret:read");
   const { isUnlocked, lock } = useSecretSession();
   const showLock = canReadSecrets && isUnlocked;
-  // "AI & connected apps" (ADR-0097): for holders of `ai:connect` on an API that has the assistant — a
-  // successful `GET /ai/status` (an older API answers 404, which hides the entry). Shown even while MCP
-  // is off, so existing connections stay reachable for review and revoke.
-  const canConnectAi = useCan("ai:connect");
+  // "AI & connected apps" (ADR-0097): on an API that has the assistant — a successful `GET /ai/status`
+  // (an older API answers 404, which hides the entry). Shown without `ai:connect` and while MCP is off,
+  // so existing connections stay reachable for review and revoke (AUD-083).
   const aiStatus = useAiStatus();
-  const showAiConnections = canConnectAi && aiStatus.isSuccess;
+  const showAiConnections = aiStatus.isSuccess;
 
   // Prefer the lazyit row (`GET /users/me`, already warm) so a self-edited name (#1421) shows at once;
   // the sign-in token's name is the fallback until it loads.

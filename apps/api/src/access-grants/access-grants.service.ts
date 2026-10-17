@@ -21,6 +21,15 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
 import type { TriggerPlan } from '../workflow-engine/run/workflow-trigger.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import {
+  ACCESS_GRANT_EXPORT_SELECT,
+  type AccessGrantExportRow,
+} from './access-grant-export';
 
 /**
  * The free-form `accessLevel` values that denote an ADMIN-level grant — the trigger for the
@@ -59,7 +68,7 @@ export class AccessGrantsService {
   /**
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
    * default true) and `includeExpired` (default true; when false, hides grants already past their
-   * `expiresAt`). `expiresAt` never changes activeness — it's informative (ADR-0023).
+   * `expiresAt`, which the expiry sweeper has not yet revoked). ADR-0023, amended.
    *
    * Unpaginated — still used by the inherently-scoped nested lists (`/users/:id/access-grants`,
    * `/applications/:id/access-grants`). The top-level `GET /access-grants` uses {@link findPage}.
@@ -83,7 +92,7 @@ export class AccessGrantsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.accessGrant.findMany({
         where,
-        orderBy: { grantedAt: 'desc' },
+        orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
       }),
@@ -92,6 +101,24 @@ export class AccessGrantsService {
     // The Prisma rows carry `Date`s; the API serializes them to the ISO-string wire shape at the
     // HTTP boundary (same as findAll/findOne) — the AccessGrantListPage DTO documents that shape.
     return pageOf(items, total, page);
+  }
+
+  /** The lists' own `where` for the grant exports, walked by keyset with names joined (ADR-0103). */
+  exportSource(filters: FindAccessGrantsFilters) {
+    const where = this.buildWhere(filters);
+    return {
+      count: () => this.prisma.accessGrant.count({ where }),
+      fetchBatch: (
+        after: KeysetCursor<string> | null,
+        take: number,
+      ): Promise<AccessGrantExportRow[]> =>
+        this.prisma.accessGrant.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          select: ACCESS_GRANT_EXPORT_SELECT,
+        }),
+    };
   }
 
   /** The shared `where` for the grant lists — used identically by findAll, findPage and its count. */
@@ -336,6 +363,7 @@ export class AccessGrantsService {
    * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the authenticated User,
    * optional `notes`). 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking
    * one grant does not affect any other grant the same user holds on the same application.
+   * A racing revoke (e.g. the expiry sweeper) loses the conditional write and gets the same 409 (AUD-043).
    */
   async revoke(id: string, data: RevokeAccessGrant, principal?: Principal) {
     const grant = await this.findOne(id);
@@ -348,20 +376,20 @@ export class AccessGrantsService {
     const plan = await this.planTrigger('ACCESS_REVOKED', grant.applicationId);
 
     const { updated, runId } = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.accessGrant.update({
+      const revoked = await this.revokeIfActiveInTx(
+        tx,
+        id,
+        new Date(),
+        actor,
+        data.notes,
+      );
+      if (!revoked) {
+        throw new ConflictException(`AccessGrant ${id} is already revoked`);
+      }
+      const runId = await this.recordRevokeRun(tx, plan, grant, actor);
+      const updated = await tx.accessGrant.findUniqueOrThrow({
         where: { id },
-        data: {
-          revokedAt: new Date(),
-          // Attribute the REVOKE action: human → revokedById, service account → revokedBySaId. CHECK-safe
-          // by construction (ADR-0048).
-          ...(actor.userId != null ? { revokedById: actor.userId } : {}),
-          ...(actor.serviceAccountId != null
-            ? { revokedBySaId: actor.serviceAccountId }
-            : {}),
-          ...(data.notes !== undefined ? { notes: data.notes } : {}),
-        },
       });
-      const runId = await this.recordRevokeRun(tx, plan, updated, actor);
       return { updated, runId };
     });
 
@@ -385,16 +413,18 @@ export class AccessGrantsService {
 
   /**
    * Change the expiry — extend, shorten or clear it (`null` => permanent). A metadata edit, no actor.
-   * `expiresAt` is informative: changing it never revokes or reactivates the grant (ADR-0023). 404
-   * if missing.
+   * The write itself revokes nothing, but a past `expiresAt` is revoked by the next expiry sweep (ADR-0023,
+   * amended). 404 if missing; 400 if earlier than the stored `grantedAt`, the create schema's rule (AUD-097).
    */
   async updateExpiry(id: string, data: UpdateAccessGrantExpiry) {
-    await this.findOne(id);
+    const grant = await this.findOne(id);
+    const expiresAt = data.expiresAt === null ? null : new Date(data.expiresAt);
+    if (expiresAt !== null && expiresAt.getTime() < grant.grantedAt.getTime()) {
+      throw new BadRequestException('expiresAt must be on or after grantedAt');
+    }
     return this.prisma.accessGrant.update({
       where: { id },
-      data: {
-        expiresAt: data.expiresAt === null ? null : new Date(data.expiresAt),
-      },
+      data: { expiresAt },
     });
   }
 
@@ -404,6 +434,7 @@ export class AccessGrantsService {
    * auditability stays per-grant, exactly as the single-item {@link revoke} records it, never one
    * entry for the whole batch. An id that is missing or already revoked is SKIPPED (reported in the
    * result), not an error, so a partial multi-select still commits. Returns the per-id outcome.
+   * A grant revoked concurrently after the snapshot is skipped too, not a batch rollback (AUD-043).
    */
   async batchRevoke(
     ids: string[],
@@ -421,21 +452,14 @@ export class AccessGrantsService {
       },
     });
     const found = new Map(grants.map((g) => [g.id, g]));
-    const succeeded: string[] = [];
-    const skipped: { id: string; reason: string }[] = [];
-    for (const id of ids) {
-      const g = found.get(id);
-      if (!g) skipped.push({ id, reason: 'not_found' });
-      else if (g.revokedAt !== null)
-        skipped.push({ id, reason: 'already_in_state' });
-      else succeeded.push(id);
-    }
+    const candidates = ids.filter((id) => found.get(id)?.revokedAt === null);
 
+    const revoked = new Set<string>();
     const runIds: string[] = [];
-    if (succeeded.length > 0) {
+    if (candidates.length > 0) {
       // Pre-plan the ACCESS_REVOKED workflow per distinct application (best-effort, before the tx).
       const appIds = [
-        ...new Set(succeeded.map((id) => found.get(id)!.applicationId)),
+        ...new Set(candidates.map((id) => found.get(id)!.applicationId)),
       ];
       const plans = new Map<string, TriggerPlan | null>();
       for (const appId of appIds) {
@@ -444,27 +468,17 @@ export class AccessGrantsService {
 
       const now = new Date();
       await this.prisma.$transaction(async (tx) => {
-        for (const id of succeeded) {
+        for (const id of candidates) {
           const g = found.get(id)!;
-          const updated = await tx.accessGrant.update({
-            where: { id },
-            data: {
-              revokedAt: now,
-              // Per-grant actor attribution (same as the single-item revoke): human → revokedById,
-              // service account → revokedBySaId. CHECK-safe by construction (ADR-0048).
-              ...(actor.userId != null ? { revokedById: actor.userId } : {}),
-              ...(actor.serviceAccountId != null
-                ? { revokedBySaId: actor.serviceAccountId }
-                : {}),
-              // `null` clears the note, omitted (`undefined`) preserves it — matching the single-item
-              // revoke() and updateNotes().
-              ...(notes !== undefined ? { notes } : {}),
-            },
-          });
+          // `null` clears the note, omitted (`undefined`) preserves it — matching revoke()/updateNotes().
+          if (!(await this.revokeIfActiveInTx(tx, id, now, actor, notes))) {
+            continue;
+          }
+          revoked.add(id);
           const runId = await this.recordRevokeRun(
             tx,
             plans.get(g.applicationId) ?? null,
-            updated,
+            g,
             actor,
           );
           if (runId) runIds.push(runId);
@@ -475,7 +489,38 @@ export class AccessGrantsService {
     for (const runId of runIds) {
       await this.enqueueRunSafely(runId);
     }
+
+    const succeeded: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of ids) {
+      if (!found.has(id)) skipped.push({ id, reason: 'not_found' });
+      else if (revoked.has(id)) succeeded.push(id);
+      else skipped.push({ id, reason: 'already_in_state' });
+    }
     return { requested: ids.length, succeeded, skipped };
+  }
+
+  /** False when a concurrent revoke committed first, so its attribution is never overwritten. */
+  private async revokeIfActiveInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+    revokedAt: Date,
+    actor: ActorAttribution,
+    notes: string | null | undefined,
+  ): Promise<boolean> {
+    const { count } = await tx.accessGrant.updateMany({
+      where: { id, revokedAt: null },
+      data: {
+        revokedAt,
+        // CHECK-safe: resolveActor returns at most one of the pair (ADR-0048).
+        ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { revokedBySaId: actor.serviceAccountId }
+          : {}),
+        ...(notes !== undefined ? { notes } : {}),
+      },
+    });
+    return count === 1;
   }
 
   // --- engine outbox helpers (the INV-5-inverse decoupling) ----------------

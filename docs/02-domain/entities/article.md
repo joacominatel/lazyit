@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-10-16
 ---
 
 # Article
@@ -53,7 +53,8 @@ deferred.
   is consumed by the (later) bulk import to mint dozens of slugs frictionlessly; the **interactive
   single create still returns `409` on collision today** (wiring the suffix into that path is a small
   follow-up).
-- **Status** is `DRAFT` or `PUBLISHED`. A `DRAFT` is **private to its author**; `PUBLISHED` is
+- **Status** is `DRAFT` or `PUBLISHED`. A `DRAFT` is **private to its author** (an ADMIN or
+  `article:manage` holder may edit it and read it by link, id or slug — #877, AUD-086); `PUBLISHED` is
   visible to everyone. Transitions go through `publish`/`unpublish` endpoints — **`PATCH` never
   changes status**.
 - **`publishedAt`** is set on the **first** publish and **never cleared** (unpublishing keeps it,
@@ -84,6 +85,12 @@ deferred.
   god-mode); a non-admin `article:manage` holder must pass the destination check like anyone else. The
   rule is **write-path only** — an article already sitting in a folder its author cannot read is never
   re-validated, and repeating the folder it is already in is not a move.
+- **The home folder is re-checked under a lock.** A create, a move and each import write lock the
+  target folder row `FOR SHARE` inside their write transaction and re-check it is live, so an article
+  cannot land in a folder whose delete is committing at the same moment (audit 2026-10-10, AUD-023):
+  the delete's `FOR UPDATE` either sees the new article and refuses, or commits first and the write
+  gets the usual `400` — for an import, a single file fails with a "folder was deleted" message and a
+  `.zip` entry is reported as skipped (`failed`).
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
@@ -96,7 +103,11 @@ deferred.
   in the archive (images, binaries, a nested `.docx` in v1, dotfiles) is **reported as skipped, never
   an error**. The result is a **per-item batch** (created / renamed / skipped) polled via the same
   `GET /articles/import/:jobId`; `title`/`slug` form fields are ignored for a `.zip` (each entry
-  derives its own).
+  derives its own). A `.zip` entry whose create fails (attachment storage full, a slug taken by a
+  concurrent write, any other per-entry error) is reported as **skipped** with reason `storage-full`
+  or `failed`; the rest of the batch still imports. A **single-file** import auto-suffixes a slug
+  **derived from the title** the same way; an explicit `slug` field is kept as given and fails the job
+  with a "slug already exists" message when a live article holds it.
 - **Versioning** ([[0042-article-versioning-and-linking]]): create/import write [[article-version]]
   **v1**; an edit that changes `title`/`content`/`excerpt` and a `publish`/`unpublish` (status
   change) append the next version — all **in the same transaction** as the article write, so the
@@ -111,8 +122,13 @@ deferred.
   matches (#598). On top of that, the per-caller folder-access **in-app post-filter is retained as a
   defense-in-depth backstop** (re-running the read evaluator over the returned hits and dropping any the
   caller can't see — the index can lag a just-revoked grant, so authz never relies on Meili alone; INV-9)
-  — so a **restricted article never surfaces to a non-matching caller**. `categoryId` is retrieved
-  internally for the filter and **stripped** from the shipped hit.
+  — so a **restricted article never surfaces to a non-matching caller**. `categoryId` is retrieved for
+  the filter and **ships only on a hit that survives it** (#1539): the caller can already read that
+  folder, so a result row can show where the article lives; a dropped hit ships nothing. Surviving hits
+  also carry the article's **`updatedAt`**, read from the database in one `id IN [...]` query over live
+  rows (not from the index, so it needs no reindex). A hit whose row is no longer live ships without it,
+  and a failed read is logged and the hits ship without it — search never degrades over it. Both hit
+  fields are nullish in `ArticleHitSchema`, so an older API or a stale index document still parses.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`. A **cascade folder
   delete** ([[folder]]) **deindexes** every article it soft-deletes from Meilisearch (fire-and-forget,
   post-commit — mirroring the single-article delete path), so a cascade leaves no ghost hits (#595).
@@ -175,17 +191,45 @@ listings), `@@index([status, publishedAt])` (latest published).
   `?categoryId=&authorId=&status=&q=` (`q` = case-insensitive substring on title/excerpt) plus
   `?linked=only` (keep only articles with ≥1 [[article-link]]) and `?linkedTo=asset|application`
   (narrow that to a target kind) — both allowlisted, an unknown value → `400` ([[0042-article-versioning-and-linking]]).
+  `?includeSubfolders=true` (#1539) widens a `categoryId` filter to each selected folder **plus every
+  live descendant** (one query over the live folder tree, walked in memory, cycle-safe); folder access
+  still applies on top, so a descendant the caller may not read stays out. No effect without
+  `categoryId`. `?sort=updated|title|created` (#1539) picks the order — `updated` (the default) newest
+  first, `title` A to Z in the database collation, `created` newest first — and every order ends with
+  `id` so offset paging never repeats or skips a row. Both are allowlisted: any other value → `400`.
   The lean list item adds two card-UI affordances computed in the query (no body load, no N+1):
   `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
   metric). The owner is already exposed as `authorId`.
+  `?deleted=only` (#1647) lists the **archived** (soft-deleted) articles instead, newest-updated first,
+  and is **ADMIN-only** (`403` otherwise, `assertCanListDeleted` — the same slice as the other lists,
+  [[0030-list-pagination-contract]] §7); `deleted=active` is the default. Every other filter, the folder
+  pin and the draft rule still apply, so an admin sees archived PUBLISHED articles plus their **own**
+  archived drafts. The row carries `deletedAt`; restore is `POST /articles/:id/restore`.
+- `GET /articles/export` — a CSV of the article **index** the list would return for the same filters
+  (`categoryId`, `includeSubfolders`, `authorId`, `status`, `q`, `linked`, `linkedTo`, `assetId`,
+  `applicationId`; `sort` is ignored, the file walks newest-created first) — #1597,
+  [[0103-data-export-streaming-path]]. Same `article:read` and the same `where`: the folder pin
+  ([[0060-kb-folder-access-control]] §4) and the list's draft rule ([[0022-draft-visibility-auth-shim]]:
+  a draft only to its author — the AUD-086 manager read is by link and does not reach the file). The
+  export has no `deleted` slice: it always walks live articles, unlike the list's ADMIN `deleted=only`.
+  Columns, from the lean list row: ID, title, slug, status, folder, author (`(former member)` when offboarded), links, reading minutes, created, updated,
+  published. **Never the body, the excerpt or a version.** The folder cell is the path through the
+  folders the caller can read, and only with `category:read` (the folder list's permission); without
+  it the cell is the folder id. Every export is audited ([[data-export-log]]).
 - `GET /articles/by-slug/:slug` · `GET /articles/:id` — a draft requested by a non-author returns
-  `404` (never `403`, so existence isn't leaked).
+  `404` (never `403`, so existence isn't leaked). **By link (id or slug)**, an ADMIN or
+  `article:manage` holder — the callers who may already edit a foreign draft (#877) — reads it
+  (AUD-086); the folder ACL still applies to a non-admin. That opens the by-id sub-reads (versions,
+  links, aliases, backlinks target, attachments) with it; lists and search still show a draft to its
+  author only.
 - `POST /articles` — create (author = `X-User-Id`).
 - `POST /articles/import` — multipart `.md`/`.txt`/`.docx` (one article) or `.zip` (bulk, #398;
   selective extraction + folder mirroring + slug auto-suffix + best-effort link rewire,
   [[0059-kb-folders-links-and-import]] §5). Async: validates type+size, returns `202 + jobId`;
   `GET /articles/import/:jobId` polls — a single-file job yields `articleId`, a `.zip` yields a
-  per-item `batch` (created/renamed/skipped + counts + `foldersCreated` + `linksResolved`).
+  per-item `batch` (created/renamed/skipped + counts + `foldersCreated` + `linksResolved`). Job ids
+  are random UUIDs, and only the user who started the import may poll it: anyone else gets the same
+  `404` as an unknown id (the result names files, slugs and articles — INV-9).
   `MAX_IMPORT_SIZE_MB` caps the **upload**; a separate entry-count/uncompressed-size quota in the
   sandboxed child bounds the `.zip`'s expansion. Oversize/parse/over-quota → `failed` with a short,
   permanent message.
@@ -198,7 +242,8 @@ listings), `@@index([status, publishedAt])` (latest published).
 Versioning + linking ([[0042-article-versioning-and-linking]]):
 
 - `GET /articles/:id/versions` — paginated version history ([[0030-list-pagination-contract]]),
-  newest first; `GET /articles/:id/versions/:version` — one version. Drafts visible only to author.
+  newest first; `GET /articles/:id/versions/:version` — one version. A draft's history follows the
+  by-id read above (author, ADMIN or `article:manage` holder).
 - `POST /articles/:id/links` — link to an asset XOR application (author only, `ADMIN`/`MEMBER`);
   `DELETE /articles/:id/links/:linkId` — unlink; `GET /articles/:id/links` — list links.
 - `GET /assets/:id/articles` — reverse: PUBLISHED articles linked to an asset (lean list shape).
@@ -211,8 +256,8 @@ INV-9, SEC-074).
 ## Not yet implemented (deferred)
 
 - **Tags**; **export** (md/pdf) — still deferred ([[0021-knowledge-base-design]]). *(Edit history
-  and full-text-over-content shipped in [[0042-article-versioning-and-linking]].)*
-- **Rollback** — replay a past [[article-version]] onto the live article ([[0042]]).
+  and full-text-over-content shipped in [[0042-article-versioning-and-linking]]; restoring a past
+  [[article-version]] onto the live article shipped in #848.)*
 - ~~**Slug auto-suffixing** on collision~~ — the `nextAvailableSlug` **util shipped** (#392,
   [[0059-kb-folders-links-and-import]] §3); wiring it into the **interactive single-create** path
   (currently still `409`) is a small follow-up. **per-category `metadata`** validation still deferred.

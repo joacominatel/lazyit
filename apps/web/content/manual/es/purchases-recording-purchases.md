@@ -46,6 +46,10 @@ editar consumibles. Aplicar una línea de licencia cambia su aplicación, así q
 editar compras** *y* el permiso para editar aplicaciones. [Leer un documento con IA](#leer-un-documento-con-ia)
 necesita **Registrar y editar compras** *y* el permiso para usar el asistente de IA.
 
+Quien puede ver las compras puede descargar la lista con **Exportar CSV**: una fila por compra que coincide
+con la búsqueda y los filtros actuales, con sus totales y su estado de recepción, para pasársela a finanzas —
+mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Registrar una compra
 
 Elige **Nueva compra**. El formulario está pensado para ser rápido: solo hace falta lo que identifica la
@@ -317,6 +321,9 @@ activos existentes** y **Cancelar unidades restantes**. En una línea de consumi
 [Aplicar licencia](#aplicar-una-licencia) en su lugar. Una compra cuya **entrega prevista** ya pasó se
 marca como **Atrasada**.
 
+**Exportar CSV**, en la pestaña, descarga todas las líneas pendientes, filtradas por proveedor si hay uno
+elegido — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Documentos
 
 Una compra guarda sus **documentos** — el presupuesto, la orden, las facturas, una foto del remito — en la
@@ -454,6 +461,9 @@ garantía — y notas. Su página lista las compras que se le hicieron.
 
 Los nombres y los ID fiscales no son únicos, así que lazyit nunca rechaza un duplicado; en cambio,
 sugiere. Escribir un ID fiscal que otro proveedor ya tiene te dice de quién es.
+
+**Exportar CSV**, en la pestaña, descarga todos los proveedores que coinciden con la búsqueda — mira
+[Exportar datos](/help/notifications-activity-data-export).
 
 ### Fusionar proveedores duplicados
 

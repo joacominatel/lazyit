@@ -82,3 +82,20 @@ describe("parseKbNewPrefill", () => {
     expect(parseKbNewPrefill({})).toEqual({});
   });
 });
+
+describe("parseKbNewPrefill categoryId (#1539)", () => {
+  test("keeps a cuid-shaped folder id", () => {
+    expect(parseKbNewPrefill({ categoryId: "cmabc123def456ghi789jkl0" })).toEqual({
+      categoryId: "cmabc123def456ghi789jkl0",
+    });
+  });
+  test("drops anything that is not a folder id", () => {
+    expect(parseKbNewPrefill({ categoryId: "../../etc" })).toEqual({});
+    expect(parseKbNewPrefill({ categoryId: "" })).toEqual({});
+  });
+  test("a repeated param collapses to its first value", () => {
+    expect(
+      parseKbNewPrefill({ categoryId: ["cmabc123def456ghi789jkl0", "x"] }),
+    ).toEqual({ categoryId: "cmabc123def456ghi789jkl0" });
+  });
+});

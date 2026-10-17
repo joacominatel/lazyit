@@ -94,7 +94,7 @@ under **Set status** in the selection bar.
 
 ### Custom statuses
 
-If your administrators have defined **custom statuses** (Settings → Taxonomies → **Statuses**, see
+If your administrators have defined **custom statuses** (Settings → Taxonomies → **Custom statuses**, see
 [Custom asset statuses](/help/configuration-taxonomies#custom-asset-statuses)), every status picker —
 the asset form, the detail page's status dropdown, the row's **Change status**, **Set status** for a
 selection and **Receive stock** — lists them under the built-in status they belong to: the plain
@@ -248,7 +248,7 @@ else is this exact model" versus "what else is in this category."
 
 ### Exporting the inventory
 
-The **Export (filtered)** button at the top of the Assets page downloads a **CSV** of the inventory
+The **Export CSV** button at the top of the Assets page downloads a **CSV** of the inventory
 that matches your **current filters** — the whole result set, not just the page in front of you. Set
 the status, category, location, company, owner or search you care about first (for example *all the
 Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
@@ -259,6 +259,7 @@ company, purchase and warranty dates, current owners, notes, the created/updated
 asset's **supplier**, **purchase reference** and **invoice numbers**, as the last columns. Without that
 permission those three columns are left out of the file entirely. It is safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
 the *Show archived* view open, the export is that archived slice instead.
+Limits, the audit trail and opening the file in Excel are covered in [Exporting data](/help/notifications-activity-data-export).
 
 ### Choosing which columns to show
 

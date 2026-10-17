@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-16
 ---
 
 # PurchaseOrderLine
@@ -28,7 +28,9 @@ line, the units that came out of it.
 
 - **belongs to** one [[purchase-order]] (`purchaseOrderId`, `onDelete: Restrict`).
 - **maps to** an optional [[asset-model]] (`assetModelId`, `SetNull`). Optional on purpose: a draft line
-  does not force anyone to create a model; it is mapped when units are received.
+  does not force anyone to create a model; it is mapped when units are received. Deleting a model in use
+  detaches or re-points the lines of open purchases that still expect units, with a `LINE_UPDATED`
+  event each; other lines keep the archived model as history ([[asset-model]], SEC-041).
 - **produced** N [[asset]]s (`Asset.purchaseOrderLineId`, nullable). At most one line per asset.
 - **maps to** an optional [[consumable]] (`consumableId`, `SetNull`) — a `CONSUMABLE` line only (#1476).
   It is received as `IN` [[consumable-movement]]s that reference the line (`ConsumableMovement.purchaseOrderLineId`).
@@ -73,7 +75,9 @@ line, the units that came out of it.
   PATCH carries only one of the two). `POST /purchase-orders/:id/lines/:lineId/cancel-remaining { quantity?,
   reason? }` (#1473) cancels every pending unit by default, never more than are pending (`400`), is a `409`
   when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
-  records the change before and after.
+  records the change before and after. Every line update locks in the same order — the purchase (`FOR KEY
+  SHARE`, `FOR UPDATE` for a kind change), then the line `FOR UPDATE` — and checks the quantities it reads
+  under that lock, so it serializes with a cancel and never leaves more cancelled than ordered.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
 - The **kind** of a line that received units — live linked assets, stock moved in, or seats applied —
   cannot change (`409`): its received units would silently stop counting.
@@ -101,7 +105,7 @@ by the API and available to the web):
 | `purchaseCost` | `purchaseCost` **and** `purchaseCurrency` | the line's unit price with the purchase's currency label — cost and currency move together |
 | `warrantyEnd` | `warrantyEnd` | that purchase date + `warrantyMonths` (calendar months, UTC, clamped to the month's last day) |
 | `company` | `company` | the purchase's company |
-| `modelId` | `modelId` | the line's asset model (writes a `MODEL_CHANGED` history event too) |
+| `modelId` | `modelId` | the line's asset model while live (writes a `MODEL_CHANGED` history event too). An archived one reads `UNAVAILABLE` in the preview, and a link that would apply it is a `400` with nothing written |
 
 A field the purchase has no value for is never applied (never a clear). The diff action per asset and field
 is `FILL` (asset empty), `REPLACE` (different value; cost compares amount **and** label, trimmed and
@@ -139,6 +143,14 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 - A line can be removed (soft delete) only while nothing was received on it — no linked asset, no stock
   moved in, no seat applied (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
+- **Export** (`GET /purchase-orders/pending-lines/export?supplierId=`, #1597,
+  [[0103-data-export-streaming-path]]): a CSV of every line the *Pending units* list would return for the
+  same `supplierId`, under the same `purchaseOrder:read` (VIEWER denied by default), one row per line,
+  newest line first. Columns: `lineId, purchaseId, purchaseReference, supplier, purchaseStatus, orderDate,
+  expectedDate, kind, description, manufacturer, model, quantityOrdered, quantityCancelled,
+  quantityReceived, quantityPending` — the received and pending counts are the list's derived ones. The
+  list's purchase header has no delivery location, so neither has the file; prices are not exported. Every
+  export is audited ([[data-export-log]]).
 - `manufacturerText` / `modelText` / `description` feed smart entry (`GET /suggestions/manufacturer`,
   `/lineModel`, `/lineDescription` — the last since #1473), from live lines of live purchases.
 

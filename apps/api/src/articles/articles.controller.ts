@@ -9,6 +9,8 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -20,17 +22,21 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ArticleAliasSchema,
   ArticleBacklinkSchema,
+  ArticleIncludeSubfoldersSchema,
   ArticleLinkedFilterSchema,
   ArticleLinkedToSchema,
   ArticleLinkSchema,
   ArticleListPageSchema,
+  ArticleListSortSchema,
   ArticleSchema,
   ArticleStatusSchema,
   ArticleVersionPageSchema,
@@ -42,15 +48,18 @@ import {
   ImportJobAcceptedSchema,
   ImportJobStatusSchema,
   UpdateArticleSchema,
-  type ArticleLinkedFilter,
+  type ArticleListSort,
 } from '@lazyit/shared';
-import { ArticlesService } from './articles.service';
+import { ArticlesService, type ArticleListFilters } from './articles.service';
+import { ARTICLE_EXPORT_COLUMNS } from './article-export';
+import { ExportService } from '../common/export';
 import { ArticleImportService } from './import/article-import.service';
-import { maxImportBytes } from './article-import';
+import { importUploadOptions } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -83,19 +92,27 @@ export class ArticlesController {
   constructor(
     private readonly articles: ArticlesService,
     private readonly imports: ArticleImportService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
+      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted by default; deleted=only lists archived articles (ADMIN). Drafts are visible only to their author.',
   })
   @ApiQuery({
     name: 'categoryId',
     required: false,
     description:
       'Filter by category. Multi-value (#198): comma-separated (categoryId=cuid1,cuid2) or repeated; values OR-combine (union). Each element must be a cuid — an invalid element → 400. A single value still works.',
+  })
+  @ApiQuery({
+    name: 'includeSubfolders',
+    required: false,
+    enum: [...ArticleIncludeSubfoldersSchema.options],
+    description:
+      'true → widen the categoryId filter to each selected folder plus every live descendant folder (#1539). Folder access still applies: a descendant the caller may not read stays out. No effect without categoryId. Unknown value → 400.',
   })
   @ApiQuery({ name: 'authorId', required: false })
   @ApiQuery({
@@ -141,6 +158,13 @@ export class ArticlesController {
       'Narrow the linked filter to SPECIFIC Applications (#213): keep only articles linked to ≥1 of these exact applications. Multi-value (#198): comma-separated (applicationId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400. Implies linked=only.',
   })
   @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: [...ArticleListSortSchema.options],
+    description:
+      'Order (#1539): updated (default) = newest-updated first; title = A to Z; created = newest-created first. Each key fixes its own direction; every order ends with id as a unique tiebreak. Unknown value → 400.',
+  })
+  @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
@@ -158,6 +182,13 @@ export class ArticlesController {
     type: Number,
     description: '1-based page number (alternative to offset).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live articles; only = archived (soft-deleted) articles — ADMIN only (403 otherwise). Every other filter, the folder access and the draft rule still apply. (ADR-0041)',
+  })
   @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
     @CurrentUser() user: User | undefined,
@@ -174,48 +205,178 @@ export class ArticlesController {
     @Query('offset') offset?: string,
     @Query('page') page?: string,
     // The unified principal threads ADR-0060 §4 folder access into the read (ADMIN sees all; SA fails
-    // closed) — `user` still drives draft visibility (ADR-0022). Placed LAST so the existing positional
-    // filter args are unchanged (Nest resolves params by decorator, not position).
+    // closed) — `user` still drives draft visibility (ADR-0022). Placed after the original filters so
+    // their positional args are unchanged (Nest resolves params by decorator, not position).
     @CurrentPrincipal() principal?: Principal,
+    // #1539: the browse order and the subfolder widening — single-value allowlists, 400 on unknown.
+    @Query('sort') sort?: string,
+    @Query('includeSubfolders') includeSubfolders?: string,
+    @Query('deleted') deleted?: string,
   ) {
+    const pageQuery = parsePageQuery({ limit, offset, page, deleted });
+    assertCanListDeleted(pageQuery.deleted, user);
     return this.articles.findPage(
       {
-        // status / categoryId / linkedTo are multi-select (#198): each value OR-combines within the
-        // filter (union), filters AND-combine. Parsed to arrays here; each element is validated
-        // against its allowlist (unknown element → 400, ADR-0030). A single value still parses.
-        categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
-        authorId: parseUuidQuery(authorId, 'authorId'),
-        status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
-        q,
-        linked: this.parseLinked(linked),
-        linkedTo: parseEnumArrayQuery(
+        ...this.parseListFilters({
+          categoryId,
+          authorId,
+          status,
+          q,
+          linked,
           linkedTo,
-          ArticleLinkedToSchema,
-          'linkedTo',
+          assetId,
+          applicationId,
+          includeSubfolders,
+        }),
+        sort: this.parseSingleEnum<ArticleListSort>(
+          sort,
+          ArticleListSortSchema,
+          'sort',
         ),
-        // assetId / applicationId are the specific-entity link filters (#213) — multi-value cuids,
-        // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
-        assetId: parseCuidArrayQuery(assetId, 'assetId'),
-        applicationId: parseCuidArrayQuery(applicationId, 'applicationId'),
       },
-      parsePageQuery({ limit, offset, page }),
+      pageQuery,
       user,
       principal,
     );
   }
 
+  // Declared before `:id`, which would otherwise take `export` as an id.
+  @Get('export')
+  @RequirePermission('article:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of the article index matching the GET /articles filters (ADR-0103): metadata only, never a body, excerpt or version. Same permission, same rows: the folder ACL (ADR-0060) and the draft rule (ADR-0022, a draft to its author only) of the list. Audited; above 100,000 rows → 422; a parallel or sixth export in a minute → 429.',
+  })
+  @ApiQuery({ name: 'categoryId', required: false, isArray: true })
+  @ApiQuery({
+    name: 'includeSubfolders',
+    required: false,
+    enum: [...ArticleIncludeSubfoldersSchema.options],
+  })
+  @ApiQuery({ name: 'authorId', required: false })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...ArticleStatusSchema.options],
+    isArray: true,
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({
+    name: 'linked',
+    required: false,
+    enum: [...ArticleLinkedFilterSchema.options],
+  })
+  @ApiQuery({
+    name: 'linkedTo',
+    required: false,
+    enum: [...ArticleLinkedToSchema.options],
+    isArray: true,
+  })
+  @ApiQuery({ name: 'assetId', required: false, isArray: true })
+  @ApiQuery({ name: 'applicationId', required: false, isArray: true })
+  @ApiOkResponse({ description: 'The matching articles as CSV (text/csv).' })
+  async export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
+    @CurrentUser() user?: User,
+    @Query('categoryId') categoryId?: string | string[],
+    @Query('authorId') authorId?: string,
+    @Query('status') status?: string | string[],
+    @Query('q') q?: string,
+    @Query('linked') linked?: string,
+    @Query('linkedTo') linkedTo?: string | string[],
+    @Query('assetId') assetId?: string | string[],
+    @Query('applicationId') applicationId?: string | string[],
+    @Query('includeSubfolders') includeSubfolders?: string,
+  ): Promise<StreamableFile> {
+    const filters = this.parseListFilters({
+      categoryId,
+      authorId,
+      status,
+      q,
+      linked,
+      linkedTo,
+      assetId,
+      applicationId,
+      includeSubfolders,
+    });
+    return this.exports.exportCsv({
+      resource: 'ARTICLES',
+      principal,
+      response,
+      filters: { ...filters },
+      ...(await this.articles.exportSource(filters, user, principal)),
+      columns: ARTICLE_EXPORT_COLUMNS,
+      filename: 'articles',
+    });
+  }
+
+  /** The list's filter parser, shared by GET /articles and its export so both read the same rows. */
+  private parseListFilters(raw: {
+    categoryId?: string | string[];
+    authorId?: string;
+    status?: string | string[];
+    q?: string;
+    linked?: string;
+    linkedTo?: string | string[];
+    assetId?: string | string[];
+    applicationId?: string | string[];
+    includeSubfolders?: string;
+  }): ArticleListFilters {
+    return {
+      // status / categoryId / linkedTo are multi-select (#198): each value OR-combines within the
+      // filter (union), filters AND-combine. Parsed to arrays here; each element is validated
+      // against its allowlist (unknown element → 400, ADR-0030). A single value still parses.
+      categoryId: parseCuidArrayQuery(raw.categoryId, 'categoryId'),
+      authorId: parseUuidQuery(raw.authorId, 'authorId'),
+      status: parseEnumArrayQuery(raw.status, ArticleStatusSchema, 'status'),
+      q: raw.q,
+      linked: this.parseSingleEnum(
+        raw.linked,
+        ArticleLinkedFilterSchema,
+        'linked',
+      ),
+      linkedTo: parseEnumArrayQuery(
+        raw.linkedTo,
+        ArticleLinkedToSchema,
+        'linkedTo',
+      ),
+      // assetId / applicationId are the specific-entity link filters (#213) — multi-value cuids,
+      // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
+      assetId: parseCuidArrayQuery(raw.assetId, 'assetId'),
+      applicationId: parseCuidArrayQuery(raw.applicationId, 'applicationId'),
+      includeSubfolders:
+        this.parseSingleEnum(
+          raw.includeSubfolders,
+          ArticleIncludeSubfoldersSchema,
+          'includeSubfolders',
+        ) === 'true',
+    };
+  }
+
   /**
-   * Validate `?linked=` against the {@link ArticleLinkedFilterSchema} allowlist — the only accepted
-   * value is `only`. An unknown value is rejected with 400 (ADR-0030: an unknown filter value is
-   * never silently ignored). Mirrors the inline `status` check; the global ZodValidationPipe only
-   * validates `@Body()` DTOs, so raw `@Query` strings are otherwise unchecked.
+   * Validate a single-value enum query param (`?linked=`, `?sort=`, `?includeSubfolders=`) against its
+   * allowlist schema. An unknown value — or a repeated param, which Nest hands over as an array — is
+   * rejected with 400 (ADR-0030: an unknown filter value is never silently ignored); an omitted one is
+   * `undefined`. The global ZodValidationPipe only validates `@Body()` DTOs, so raw `@Query` strings are
+   * otherwise unchecked.
    */
-  private parseLinked(value?: string): ArticleLinkedFilter | undefined {
+  private parseSingleEnum<T extends string>(
+    value: string | undefined,
+    schema: {
+      safeParse: (
+        value: unknown,
+      ) => { success: true; data: T } | { success: false };
+      readonly options: readonly T[];
+    },
+    name: string,
+  ): T | undefined {
     if (value === undefined) return undefined;
-    const result = ArticleLinkedFilterSchema.safeParse(value);
+    const result = schema.safeParse(value);
     if (!result.success) {
       throw new BadRequestException(
-        `Invalid linked. Expected one of: ${ArticleLinkedFilterSchema.options.join(', ')}`,
+        `Invalid ${name}. Expected one of: ${schema.options.join(', ')}`,
       );
     }
     return result.data;
@@ -249,7 +410,7 @@ export class ArticlesController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
+      "List an article's version history (append-only; newest first; paginated). A draft's history is visible only to its author, an ADMIN or an article:manage holder (AUD-086). (ADR-0042)",
   })
   @ApiQuery({
     name: 'limit',
@@ -401,9 +562,7 @@ export class ArticlesController {
   // service-level file.size check stays as defense in depth. This does not bound .docx decompression
   // (SEC-002) — a limit-compliant zip can still expand during parsing — which is exactly why the
   // parse is deferred to the sandboxed worker child (ADR-0053).
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: maxImportBytes() } }),
-  )
+  @UseInterceptors(FileInterceptor('file', importUploadOptions()))
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
@@ -416,11 +575,14 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Poll the status of an async article import (ADR-0053 / ADR-0059 §5). state ∈ queued|active|completed|failed. On a completed SINGLE-file import articleId is set; on a completed .zip import batch carries the per-item outcome (created/renamed/skipped + counts + foldersCreated + linksResolved) and articleId is null. error is a short, permanent-failure message once failed. 404 for an unknown jobId.',
+      'Poll the status of an async article import (ADR-0053 / ADR-0059 §5). state ∈ queued|active|completed|failed. On a completed SINGLE-file import articleId is set; on a completed .zip import batch carries the per-item outcome (created/renamed/skipped + counts + foldersCreated + linksResolved) and articleId is null. error is a short, permanent-failure message once failed. Only the importing user may poll a job; 404 for an unknown jobId or one started by someone else.',
   })
   @ApiOkResponse({ type: ImportJobStatusDto })
-  importStatus(@Param('jobId') jobId: string) {
-    return this.imports.getStatus(jobId);
+  importStatus(
+    @Param('jobId') jobId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.imports.getStatus(jobId, principal);
   }
 
   @Patch(':id')

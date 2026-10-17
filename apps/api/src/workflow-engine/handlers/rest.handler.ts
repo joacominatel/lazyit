@@ -9,12 +9,16 @@ import { mapData, renderTemplate } from '../mapping/data-mapper';
 import {
   classifyThrownError,
   DEFAULT_OUTBOUND_TIMEOUT_MS,
+  discardBody,
   extractCorrelationId,
+  hasDotSegment,
   httpErrorClass,
   joinUrl,
   redactHost,
+  tryRevealSecret,
 } from './outbound-http';
 import {
+  CREDENTIAL_UNAVAILABLE_REASON,
   isTransientStatus,
   type StepContext,
   type StepHandler,
@@ -31,7 +35,7 @@ import {
  * enforces the v1 public-only posture (private/loopback/metadata denied by default; DNS-rebinding
  * pinned; redirects re-validated). It never logs secrets or bodies (INV-6).
  *
- * Retry posture mirrors `zitadel-management.service.ts`: a 4xx (other than 408/429) is PERMANENT
+ * Retry posture (`RETRYABLE_HTTP_STATUSES` in step-handler.ts): a 4xx (other than 408/429) is PERMANENT
  * (`retryable: false`); a 5xx/429/408 or a network/timeout error is TRANSIENT — but only retryable
  * when the step is declared `idempotent`, so a non-idempotent create is single-shot (a lost-response
  * retry must not double-provision). The handler itself NEVER retries; it returns the flag for the CORE.
@@ -58,14 +62,22 @@ export class RestStepHandler implements StepHandler<
     const renderedPath = renderTemplate(step.path, data, 'url');
     const url = joinUrl(connection.baseUrl, renderedPath);
     const targetHost = redactHost(url);
+    if (hasDotSegment(renderedPath)) {
+      return {
+        status: 'FAILED',
+        retryable: false,
+        metadata: {
+          method: step.method,
+          targetHost,
+          errorClass: 'invalid-path',
+          reason:
+            'the rendered path contains a "." or ".." segment, which would leave the connection base path',
+        },
+      };
+    }
 
     // 2) Headers: static default headers + auth (credential revealed in memory) + content-type.
-    const headers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(
-      connection.defaultHeaders ?? {},
-    )) {
-      headers[name] = stripControlChars(value);
-    }
+    const headers = defaultHeadersOf(connection);
     const authError = await applyAuth(headers, connection, ctx.revealSecret);
     if (authError) {
       return {
@@ -140,6 +152,7 @@ export class RestStepHandler implements StepHandler<
       };
     }
 
+    await discardBody(res);
     const transient = isTransientStatus(res.status);
     return {
       status: 'FAILED',
@@ -170,12 +183,7 @@ export class RestStepHandler implements StepHandler<
     ctx: TestConnectionContext<RestConnectionConfig>,
   ): Promise<TestConnectionResult> {
     const { connection } = ctx;
-    const headers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(
-      connection.defaultHeaders ?? {},
-    )) {
-      headers[name] = stripControlChars(value);
-    }
+    const headers = defaultHeadersOf(connection);
     const authError = await applyAuth(headers, connection, ctx.revealSecret);
     if (authError) {
       return { ok: false, reason: authError };
@@ -198,6 +206,7 @@ export class RestStepHandler implements StepHandler<
           timeoutMs: ctx.meta.timeoutMs ?? DEFAULT_OUTBOUND_TIMEOUT_MS,
         },
       );
+      await discardBody(res);
       return {
         ok: res.ok,
         statusCode: res.status,
@@ -232,6 +241,17 @@ function probedPathOf(probedUrl: string): string {
   }
 }
 
+/** Header names lower-cased so a case-variant default can never merge with the auth header (AUD-091). */
+function defaultHeadersOf(
+  connection: RestConnectionConfig,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(connection.defaultHeaders ?? {})) {
+    headers[name.toLowerCase()] = stripControlChars(value);
+  }
+  return headers;
+}
+
 /**
  * Apply the configured auth scheme to the headers by revealing the credential in memory. Returns a
  * non-secret error string when the config is incomplete (e.g. HEADER scheme without a header name, or a
@@ -246,7 +266,11 @@ async function applyAuth(
   if (scheme === 'NONE') {
     return undefined;
   }
-  const secret = await revealSecret();
+  const revealed = await tryRevealSecret(revealSecret);
+  if (!revealed.ok) {
+    return CREDENTIAL_UNAVAILABLE_REASON;
+  }
+  const secret = revealed.secret;
   if (!secret) {
     return `auth scheme ${scheme} requires a credential, but none is configured`;
   }
@@ -264,7 +288,7 @@ async function applyAuth(
       if (!name) {
         return 'auth scheme HEADER requires authHeaderName in the connection config';
       }
-      headers[name] = stripControlChars(secret);
+      headers[name.toLowerCase()] = stripControlChars(secret);
       return undefined;
     }
     default:

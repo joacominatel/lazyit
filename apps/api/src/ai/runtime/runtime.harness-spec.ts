@@ -6,6 +6,7 @@
  *
  * The importing spec must mock the generated Prisma client first (see `jest.mock` in each spec).
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import {
   AI_SETTINGS_DEFAULTS,
@@ -329,20 +330,57 @@ export class FakePrisma {
     this.tables.aiServiceAccountSettings,
   );
 
-  /** A transaction with rollback: a throw restores every table. */
+  private readonly txScope = new AsyncLocalStorage<FakeTx>();
+  private readonly rowLocks = new Map<
+    string,
+    { owner: FakeTx; released: Promise<void> }
+  >();
+
+  /** A transaction with rollback: a throw restores every table. Its row locks are released at the end. */
   async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
     const snapshot = Object.values(this.tables).map((table) =>
       table.rows.map((row) => structuredClone(row)),
     );
+    const tx: FakeTx = { release: [] };
     try {
-      return await fn(this);
+      return await this.txScope.run(tx, () => fn(this));
     } catch (err) {
       Object.values(this.tables).forEach((table, i) => {
         table.rows = snapshot[i]!;
       });
       throw err;
+    } finally {
+      tx.release.forEach((release) => release());
     }
   }
+
+  /** `SELECT … FOR UPDATE` only: holds the row (keyed by its bound values) until the transaction ends. */
+  async $queryRaw(
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<Row[]> {
+    const tx = this.txScope.getStore();
+    if (!tx || !strings.join('?').includes('FOR UPDATE')) return [];
+    const key = `${strings.join('?')}|${values.map(String).join('|')}`;
+    for (;;) {
+      const held = this.rowLocks.get(key);
+      if (!held) break;
+      if (held.owner === tx) return [];
+      await held.released;
+    }
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    this.rowLocks.set(key, { owner: tx, released });
+    tx.release.push(() => {
+      this.rowLocks.delete(key);
+      release();
+    });
+    return [];
+  }
+}
+
+interface FakeTx {
+  release: Array<() => void>;
 }
 
 // ─── Scripted model ──────────────────────────────────────────────────────────────────────────────

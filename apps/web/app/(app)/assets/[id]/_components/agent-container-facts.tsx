@@ -45,6 +45,8 @@ const CONTAINER_KEYS = new Set([
   "_infraAutoCreated",
   "diagnostics",
   "agentSkew",
+  // Stamped by the one-live-node-per-asset upgrade on the node that lost its asset link (#1599).
+  "_infraAssetUnlinked",
 ]);
 
 /**

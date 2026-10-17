@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-09
 ---
 
 # AI assistant — Frontend surfaces
@@ -50,9 +50,9 @@ updated: 2026-10-02
   its own switch, independent of the provider (CEO, round 2).
 - Every user-facing change updates the Manual (en + es) — [[0062-in-app-help-manual-surface]],
   [[manual-authoring]].
-- Standing constraint from issue #1310 (open, `needs-decision`): new features must not add
-  Zitadel/OIDC-specific paths; OAuth 2.1 for MCP clients "is issued by lazyit itself on top of the
-  local session."
+- Standing constraint from issue #1310: new features must not add Zitadel/OIDC-specific paths; OAuth 2.1
+  for MCP clients "is issued by lazyit itself on top of the local session." (#1310 was later narrowed by
+  [[0102-remove-bundled-zitadel]]: only the bundled Zitadel was removed, and generic OIDC stays opt-in.)
 
 ---
 
@@ -331,7 +331,7 @@ instance-level MCP configuration and every user's connected apps.
 | --- | --- | --- | --- |
 | *(panel, no route)* | mounted in `(app)/layout.tsx` | `aiStatus.chat.available` | none (client) |
 | `/settings/ai` | `(app)`, `AdminGate` | `settings:manage` | `aiKeys.config()` (primary read) |
-| `/account/ai` | `(app)` | `ai:connect`; install panel only if `aiStatus.mcp.available` | `aiKeys.oauthGrantsMine()` |
+| `/account/ai` | `(app)` | any signed-in user (AUD-083); install panel only if `aiStatus.mcp.available` | `aiKeys.oauthGrantsMine()` |
 | `/oauth/authorize?<OAuth params>` | `(auth)` / `AuthShell` | session required server-side (`await auth()` → `/login?callbackUrl=<path+query>`) | the `authorize/validate` read |
 
 Plus a hub card **"AI"** in `settings/page.tsx` (since #1533 the hub and the settings side nav are built
@@ -489,19 +489,31 @@ Settings › AI
    "AI is on — open the assistant with ⌘J"
 ```
 
-**Settings → AI — configured (editor)**: sectioned cards instead of re-walking the wizard.
-- Provider & model: edit, **Replace key** (masked `apiKeySet` field), Test.
-- Chat: retention.
-- MCP server: toggle, independent of the provider (usable with no provider configured); endpoint URL
-  `origin + /mcp` with copy button. On `lan` (plain HTTP) the card explains that clients connect with
-  personal tokens, because OAuth needs HTTPS.
-- Install in Claude Code (the shared panel).
+**Settings → AI — status tiles + tabs** (as built, #1540; [[ledger-design-language]] §4c). The page
+opens on four status tiles — **Provider** (configured / draft / missing), **Web search**, **Document
+reading** and **External agents** (On/Off plus the allowed-client count: built-ins kept + the admin's
+own) — derived by `aiStatusTiles` (`settings/ai/_lib/ai-status.ts`). Each tile opens its tab; the tab
+lives in `?tab=` through `useRecordTab`, and every panel stays mounted (hidden when inactive) so a
+half-filled form survives a tab switch. A missing `AI_SECRET_KEY` is one warning line between the tiles
+and the tabs, its explanation in a "?".
+- **Connection** — the wizard while the assistant is off; once it is on, the editor instead of
+  re-walking the wizard: Provider & model (edit, **Replace key** via the masked `apiKeySet` field, Test),
+  then the danger zone: **Turn off AI** (confirm dialog lists the consequences → hard reload).
+- **Limits** — behaviour & limits (retention, budgets, instructions).
+- **Capabilities** — web search (§11c) and purchase document extraction, each a section whose
+  "What leaves lazyit" disclosure sits in its switch's "?"; turning either switch ON opens
+  `AiEgressConfirm` with the full disclosure, and nothing saves until it is confirmed.
+- **External agents** — the MCP section: toggle, independent of the provider (usable with no provider
+  configured); how clients sign in on this instance in one line (OAuth on HTTPS, personal tokens on
+  `lan`, details in its "?"); endpoint URL `origin + /mcp` with copy; a link to `/account/ai`; the
+  Install in Claude Code panel. Below it, **Allowed clients**: the any-HTTPS switch, the built-in
+  clients as chips (✓ when verified) with the full rows — identifier, badges, Remove / Restore — behind
+  **View details**, and **Clients you added** with the add form as one inline row.
 - Connected apps — all users, with revoke (R9).
 - Headless: the per-SA AI access setting (off / read-only / read-write, optional mutation cap per run)
-  is edited on each Service Account's page under Settings → Service accounts; this card lists the SAs
-  that hold `ai:use` with their setting. Enabling AI access for an SA that holds `infra:report` is
-  refused ([[ai-assistant/security|security]] T-35).
-- Danger zone: **Turn off AI** (confirm dialog lists the consequences → hard reload).
+  is edited on each Service Account's row under Settings → Service accounts; the External agents tab
+  links there. Enabling AI access for an SA that holds `infra:report` is refused
+  ([[ai-assistant/security|security]] T-35).
 
 **`/account/ai`**
 
@@ -622,8 +634,8 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
 
 - **Mode detection** (`account/ai/_lib/mcp-snippets.ts` `detectMcpConnectMode`, bun-tested): from
   `GET /ai/status` `mcp` plus the page's own protocol. `unknown` (loading, error, 404, unrecognized body)
-  offers nothing; `unavailable` (switch off or no `ai:connect`) explains that existing connections are
-  paused; `oauth` adds a warning when the page itself was opened over `http:`; `personal-token` explains
+  offers nothing; `unavailable` explains that existing connections are paused (switch off) or, without
+  `ai:connect`, that the role can't connect new apps and the existing ones have stopped; `oauth` adds a warning when the page itself was opened over `http:`; `personal-token` explains
   *plain HTTP* (OAuth needs HTTPS) or, when the page is on `https:`, that the instance has no HTTPS
   `WEB_ORIGIN`. Every mode also states what cloud connectors (claude.ai, ChatGPT) need; `oauth` adds the
   internal-CA note (`NODE_EXTRA_CA_CERTS`).
@@ -641,8 +653,8 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
   lives only in the dialog's state (never the query cache), the dialog is locked until "I've saved it"
   (the #813 pattern). The live cap (20) is not in `@lazyit/shared`; the web mirrors it as guidance and the
   API's 409 is the gate.
-- **User menu** — "AI & connected apps" for `ai:connect` holders whenever `GET /ai/status` succeeds (so an
-  older API hides it), even with MCP off, so paused connections stay revocable. The layout breadcrumb
+- **User menu** — "AI & connected apps" whenever `GET /ai/status` succeeds (so an older API hides it),
+  without `ai:connect` and even with MCP off, so paused or stopped connections stay revocable (AUD-083). The layout breadcrumb
   labels the `ai` segment ("AI" / "IA").
 - **Consent page** — a Server Component validates with the session token (`POST /oauth/authorize/validate`)
   and renders an explanation for every stop: refusal, 404 (no authorization server: `lan` or no HTTPS
@@ -711,7 +723,7 @@ UI copy say so.
 | Launcher + panel | `GET /ai/status → chat.available` (server-combined: enabled ∧ provider configured ∧ `ai:use`) |
 | Settings → AI, hub card | `settings:manage` (`AdminGate`) |
 | `/account/ai` install panel | `mcp.available` (MCP switch ∧ `ai:connect`) |
-| `/account/ai` connected apps | `ai:connect` (own grants) |
+| `/account/ai` connected apps | none — own grants, listed and revocable without `ai:connect` (AUD-083) |
 | Consent page | session + server checks (`ai:connect`, MCP enabled, HTTPS instance) |
 | Admin all-users connected apps | `settings:manage` (R9) |
 | Per-SA AI access | `settings:manage` |
@@ -968,6 +980,8 @@ Edits to existing pages (en + es):
 1. **MCP without an LLM provider → yes, two independent switches** (CEO, round 2).
 2. **Non-admins' install + connected apps at `/account/ai`** for holders of `ai:connect`; Settings → AI
    shows the same install panel to admins (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 3. **Navigation → auto-navigate only for an explicit `navigate`-kind tool and only when no
    unsaved-changes guard is active**; otherwise an "Open" chip (R3).
 4. **Turning AI off → keep conversations and connected apps dormant** (retention keeps running; MCP
@@ -1278,14 +1292,17 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 
 ## 11c. As built — web search (#1389; ADR-0097 decision 3 as amended 2026-09-24)
 
-- **Settings → AI card** (`app/(app)/settings/ai/_components/ai-web-search-section.tsx`), shown on and off
-  like the limits card, inside the page's `AdminGate` (`settings:manage`): a switch
+- **Settings → AI, Capabilities tab** (`app/(app)/settings/ai/_components/ai-web-search-section.tsx`),
+  shown on and off like the limits section, inside the page's `AdminGate` (`settings:manage`): a switch
   (`webSearchEnabled`, saved through the wholesale `PUT` — `settingsToUpdate` re-sends both web search
-  fields as read, so another card's save never turns it off), a disclosure callout (the provider runs the
-  search, lazyit makes no request; the queries and context go to the provider, which may pass the queries
-  to its search backend or a partner, and may bill separately; once a conversation has searched nothing in
-  it is auto-approved; chat only; plus, for OpenAI only, the cached/indexed-web and `open_page` note), and a
-  "Searches per step" number (1–20, `parseWebSearchMaxUses`). `webSearchAvailability` (the shared
+  fields as read, so another section's save never turns it off) and its disclosure, `WebSearchDisclosure`
+  (the provider runs the search, lazyit makes no request; the queries and context go to the provider,
+  which may pass the queries to its search backend or a partner, and may bill separately; once a
+  conversation has searched nothing in it is auto-approved; chat only; plus, for OpenAI only, the
+  cached/indexed-web and `open_page` note). Since #1540 the disclosure lives in the switch's "?" tip, and
+  turning the switch ON opens `AiEgressConfirm` showing it in full — the save happens only on its confirm
+  button; turning it off saves at once (`egressNeedsConsent`). Document extraction follows the same
+  pattern with `DocumentExtractionDisclosure`. Then a "Searches per step" number (1–20, `parseWebSearchMaxUses`). `webSearchAvailability` (the shared
   `aiWebSearchSupported` rule) disables the switch with its reason — no provider, a provider without
   native search (OpenAI-compatible), or a model without it (Gemini before 3) — but never while it is on,
   so an admin can always turn it off. Copy: `aiSettings.webSearch.*`.

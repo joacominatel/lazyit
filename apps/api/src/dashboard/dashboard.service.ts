@@ -13,8 +13,6 @@ import {
   offsetOf,
   pageOf,
   RECENT_ACTIVITY_ACTIONS,
-  RECENT_ACTIVITY_CSV_HEADER,
-  recentActivityCsvRow,
   WARRANTY_EXPIRING_WITHIN_DAYS,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
@@ -22,8 +20,9 @@ import {
   LIKE_ESCAPE_CHAR,
   escapeLikePattern,
 } from '../common/escape-like-pattern';
-import { provenanceStampLine } from '../common/export-provenance';
+import type { CsvExportSpec } from '../common/export';
 import { PrismaService } from '../prisma/prisma.service';
+import { ACTIVITY_EXPORT_COLUMNS } from './activity-export-columns';
 
 /** AssetStatus enum values, in schema order — used to zero-fill the `byStatus` buckets. */
 const ASSET_STATUSES = [
@@ -40,20 +39,6 @@ const DEFAULT_EXPIRING_WITHIN_DAYS = 30;
 
 /** How many recent AssetHistory rows the activity slice returns. */
 const RECENT_ACTIVITY_LIMIT = 10;
-
-/**
- * Rows per round-trip when STREAMING the full filtered activity export (issue #840). The export
- * batches over the view so the whole filtered range never sits in memory at once.
- *
- * ponytail: bounded LIMIT/OFFSET loop at 1000 rows/iteration — the laziest strategy that matches the
- * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere`. CEILINGS: (1) deep
- * OFFSET is O(offset) per page, so a multi-hundred-thousand-row export degrades toward the tail (fine
- * for an admin audit dump; a keyset cursor would fix it, but the `recent_activity` UNION-ALL view has
- * no unique stable key — `occurredAt` collides, see #719 — so keyset isn't a one-liner). (2) Not
- * snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window and
- * dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
- */
-export const ACTIVITY_EXPORT_BATCH_SIZE = 1000;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -81,14 +66,35 @@ const ACTIVITY_FROM = Prisma.sql`
 `;
 
 /**
+ * Newest first, then a fixed order over the columns that tell rows apart (AUD-032). A batch operation
+ * stamps one `occurredAt` on many rows (an offboarding revokes every grant at the same instant), and
+ * Postgres orders ties arbitrarily, so OFFSET pages could repeat or drop rows at a boundary.
+ * The feed breaks ties on its output columns, not `sourceKey`: rows tied on all of them render identically.
+ * The export pages by keyset on `sourceKey` instead ({@link DashboardService.activityExport}).
+ */
+const ACTIVITY_ORDER_BY = Prisma.sql`
+  ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action",
+    ra."targetUserId", ra."actorId", ra."summary"
+`;
+
+/** The filtered count over the feed's own source; the page read and the export both use it. */
+const activityCountSql = (where: Prisma.Sql) => Prisma.sql`
+  SELECT COUNT(*)::bigint AS count
+  ${ACTIVITY_FROM}
+  ${where}
+`;
+
+/**
  * Read-only dashboard aggregation (CTO Round 1). Composes cheap counts/groupBys across the three
  * pillars into a single typed {@link DashboardSummary}. No persisted "dashboard" entity, no schema
  * change — every figure is derived from existing tables.
  *
- * Soft delete (ADR-0032): reads on soft-deletable models (Asset, Application, Consumable, Article)
- * are auto-scoped to `deletedAt: null` by the Prisma extension, so `count`/`groupBy` here already
- * exclude soft-deleted rows. The lifecycle joins (AssetAssignment, AccessGrant) are NOT
- * soft-deletable, so their close markers (`releasedAt` / `revokedAt`) are filtered explicitly.
+ * Soft delete (ADR-0032): top-level reads on Asset, Application and Article are auto-scoped to
+ * `deletedAt: null` by the Prisma extension. Consumable is deliberately outside the extension, so its
+ * reads filter `deletedAt: null` explicitly. The lifecycle joins (AssetAssignment, AccessGrant) and the
+ * append-only AssetHistory are not soft-deletable: archiving the parent leaves their rows in place, and
+ * the extension never scopes a relation filter, so they filter their close markers (`releasedAt` /
+ * `revokedAt`) AND the parent's `deletedAt: null` explicitly (SEC-071).
  *
  * The queries are independent, so they run concurrently in one `Promise.all` round-trip-ish batch.
  */
@@ -133,34 +139,41 @@ export class DashboardService {
         where: { warrantyEnd: { gt: now, lte: warrantyCutoff } },
       }),
       this.prisma.asset.groupBy({ by: ['status'], _count: { _all: true } }),
-      // Distinct assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
+      // Distinct live assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
       // row each, so its length is the distinct-asset count.
       this.prisma.assetAssignment
-        .groupBy({ by: ['assetId'], where: { releasedAt: null } })
+        .groupBy({
+          by: ['assetId'],
+          where: { releasedAt: null, asset: { is: { deletedAt: null } } },
+        })
         .then((rows) => rows.length),
 
       // --- Access ------------------------------------------------------------
-      this.prisma.accessGrant.count({ where: { revokedAt: null } }),
+      this.prisma.accessGrant.count({
+        where: { revokedAt: null, application: { is: { deletedAt: null } } },
+      }),
       this.prisma.accessGrant.count({
         where: {
           revokedAt: null,
           expiresAt: { gt: now, lte: expiryCutoff },
+          application: { is: { deletedAt: null } },
         },
       }),
-      // Active grants on critical apps. `application` is a relation filter; the related Application
-      // is auto-soft-delete-filtered, so grants whose app is soft-deleted are excluded.
       this.prisma.accessGrant.count({
-        where: { revokedAt: null, application: { is: { isCritical: true } } },
+        where: {
+          revokedAt: null,
+          application: { is: { isCritical: true, deletedAt: null } },
+        },
       }),
 
       // --- Consumables -------------------------------------------------------
-      this.prisma.consumable.count(),
+      this.prisma.consumable.count({ where: { deletedAt: null } }),
       // currentStock <= minStock, only for consumables that declare a minStock. Prisma can't compare
       // two columns, so we filter `minStock != null` and post-filter the rows; the set is small
       // (a low-stock alert list) so selecting the two ints and comparing in-process is cheap.
       this.prisma.consumable
         .findMany({
-          where: { minStock: { not: null } },
+          where: { deletedAt: null, minStock: { not: null } },
           select: { currentStock: true, minStock: true },
         })
         .then(
@@ -176,6 +189,7 @@ export class DashboardService {
 
       // --- Recent activity ---------------------------------------------------
       this.prisma.assetHistory.findMany({
+        where: { asset: { is: { deletedAt: null } } },
         orderBy: { id: 'desc' },
         take: RECENT_ACTIVITY_LIMIT,
         select: {
@@ -281,16 +295,12 @@ export class DashboardService {
         SELECT ${ACTIVITY_SELECT_COLUMNS}
         ${ACTIVITY_FROM}
         ${where}
-        ORDER BY ra."occurredAt" DESC
+        ${ACTIVITY_ORDER_BY}
         LIMIT ${take} OFFSET ${skip}
       `),
       // The COUNT carries the SAME LEFT JOIN + WHERE so a `q` over the actor name counts identically
       // to what the page returns — `total` is the FILTERED count, never the whole view.
-      this.prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
-        SELECT COUNT(*)::bigint AS count
-        ${ACTIVITY_FROM}
-        ${where}
-      `),
+      this.prisma.$queryRaw<[{ count: bigint }]>(activityCountSql(where)),
     ]);
 
     const total = Number(totalRows[0]?.count ?? 0);
@@ -300,44 +310,43 @@ export class DashboardService {
   }
 
   /**
-   * Bulk CSV export of the WHOLE filtered activity range (issue #840) — newest first, every row that
-   * matches the filters, not just the visible page. Reuses {@link buildActivityWhere} verbatim, so the
-   * export filters identically to the feed, and {@link recentActivityCsvRow} from `@lazyit/shared`, so
-   * the RFC-4180 escaping + formula-injection guard are byte-identical to the browser "export visible"
-   * path (one source of truth for the output-boundary security guards).
-   *
-   * Streams as an async generator of CSV chunks ({@link ACTIVITY_EXPORT_BATCH_SIZE} rows per chunk) so
-   * the controller can pipe it out via a `Readable` without ever holding the full result set in memory.
-   * Batching strategy + its ceilings: see {@link ACTIVITY_EXPORT_BATCH_SIZE}.
+   * The activity export's pieces for the engine (ADR-0103): the feed's own filters over the same view
+   * and actor join, newest first by keyset on `(occurredAt, sourceKey)` — an event recorded mid-export
+   * sorts ahead of the cursor and is never sent twice. The on-screen feed keeps its OFFSET pages.
    */
-  async *streamActivityCsvRows(
-    query: RecentActivityFilters,
-  ): AsyncGenerator<string> {
-    const where = this.buildActivityWhere(query);
-
-    // Leading provenance stamp (#909) — names the build that produced the file (no importer consumes it).
-    yield `${provenanceStampLine()}\n`;
-    yield `${RECENT_ACTIVITY_CSV_HEADER}\n`;
-
-    let offset = 0;
-    for (;;) {
-      const rows = await this.prisma.$queryRaw<RecentActivityRow[]>(Prisma.sql`
-        SELECT ${ACTIVITY_SELECT_COLUMNS}
-        ${ACTIVITY_FROM}
-        ${where}
-        ORDER BY ra."occurredAt" DESC
-        LIMIT ${ACTIVITY_EXPORT_BATCH_SIZE} OFFSET ${offset}
-      `);
-      if (rows.length === 0) break;
-
-      yield `${rows
-        .map((row) => recentActivityCsvRow(rowToActivityItem(row)))
-        .join('\n')}\n`;
-
-      offset += rows.length;
-      // A short batch means the view is exhausted — stop without an extra empty round-trip.
-      if (rows.length < ACTIVITY_EXPORT_BATCH_SIZE) break;
-    }
+  activityExport(query: RecentActivityFilters): ActivityExport {
+    const conditions = this.activityConditions(query);
+    return {
+      columns: ACTIVITY_EXPORT_COLUMNS,
+      count: async () => {
+        const [row] = await this.prisma.$queryRaw<[{ count: bigint }]>(
+          activityCountSql(whereOf(conditions)),
+        );
+        return Number(row?.count ?? 0);
+      },
+      fetchBatch: async (after, take) => {
+        // The Date itself, not an ISO string: the adapter writes it back as the wall-clock it read.
+        const keyset = after
+          ? [
+              Prisma.sql`(ra."occurredAt", ra."sourceKey") < (${after.createdAt}::timestamptz, ${String(after.id)})`,
+            ]
+          : [];
+        const rows = await this.prisma.$queryRaw<
+          (RecentActivityRow & { sourceKey: string })[]
+        >(Prisma.sql`
+          SELECT ${ACTIVITY_SELECT_COLUMNS}, ra."sourceKey"
+          ${ACTIVITY_FROM}
+          ${whereOf([...conditions, ...keyset])}
+          ORDER BY ra."occurredAt" DESC, ra."sourceKey" DESC
+          LIMIT ${take}
+        `);
+        return rows.map((row) => ({
+          ...row,
+          createdAt: row.occurredAt,
+          id: row.sourceKey,
+        }));
+      },
+    };
   }
 
   /**
@@ -396,6 +405,11 @@ export class DashboardService {
    * so a literal `%`/`_`/`\` matches literally (issue #593). The `[from, to)` window is closed-open.
    */
   private buildActivityWhere(query: RecentActivityFilters): Prisma.Sql {
+    return whereOf(this.activityConditions(query));
+  }
+
+  /** The filter predicates of {@link buildActivityWhere}, before they are joined into a WHERE. */
+  private activityConditions(query: RecentActivityFilters): Prisma.Sql[] {
     const conditions: Prisma.Sql[] = [];
 
     if (query.entityType !== undefined) {
@@ -431,9 +445,14 @@ export class DashboardService {
       );
     }
 
-    if (conditions.length === 0) return Prisma.empty;
-    return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+    return conditions;
   }
+}
+
+/** `WHERE a AND b …`, or nothing when no predicate is given. */
+function whereOf(conditions: Prisma.Sql[]): Prisma.Sql {
+  if (conditions.length === 0) return Prisma.empty;
+  return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 }
 
 /**
@@ -461,7 +480,7 @@ function rowToActivityItem(row: RecentActivityRow): RecentActivityItem {
  * `Date`; `actorId`/`actorName` are nullable). Narrowed to the {@link RecentActivityItem} wire shape
  * (ISO timestamp) in {@link rowToActivityItem}.
  */
-interface RecentActivityRow {
+export interface RecentActivityRow {
   occurredAt: Date;
   actorId: string | null;
   actorName: string | null;
@@ -476,3 +495,16 @@ interface RecentActivityRow {
   targetUserId: string | null;
   targetUserName: string | null;
 }
+
+/** One exported event: the feed row plus its keyset position, `(occurredAt, sourceKey)`. */
+export type ActivityExportRow = RecentActivityRow & {
+  sourceKey: string;
+  createdAt: Date;
+  id: string;
+};
+
+/** What `GET /dashboard/activity/export` hands the export engine. */
+export type ActivityExport = Pick<
+  CsvExportSpec<ActivityExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;

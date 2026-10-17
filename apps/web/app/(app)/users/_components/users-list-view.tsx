@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
@@ -54,7 +55,7 @@ import { TableCell } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useUserList } from "@/lib/api/hooks/use-users";
 import { useRestoreUser } from "@/lib/api/hooks/use-user-mutations";
-import { restoreUser } from "@/lib/api/endpoints/users";
+import { restoreUser, USER_EXPORT_PATH, userFilterParams } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
@@ -74,6 +75,7 @@ import { CloneUserWizard } from "./clone-user-wizard";
 import { ManagerDisplay } from "./manager-display";
 import { UserDirectoryBadge } from "./user-directory-badge";
 import { OffboardingSheet } from "./offboarding-sheet";
+import { canManageUser, notifyUserError } from "./role-ceiling";
 import { UserFormDialog } from "./user-form-dialog";
 import { UserRoleSelect } from "./user-role-select";
 import { UserStatusBadge } from "./user-status-badge";
@@ -206,7 +208,7 @@ export function UsersListView() {
   // User administration (create / edit / clone / role-change / offboard / restore) is the single
   // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
   // slice, which the API keeps ADMIN-only.
-  const { isAdmin } = usePermissions();
+  const { isAdmin, role: myRole } = usePermissions();
   const canManage = useCan("user:manage");
   const {
     q,
@@ -231,10 +233,10 @@ export function UsersListView() {
   const roleFilter = filters.role as RoleFilter;
 
   // `deriveUserParams` is the SAME URL→query mapping the server prefetch uses — `directory`→
-  // `directoryOnly`, `role`→`?role=`, archived→`deleted` (#693) — so this hook's key and the
-  // SSR-prefetched key are byte-identical (ADR-0067 / #733). `status` stays a client-side post-filter.
-  const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useUserList(deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin }));
+  // `directoryOnly`, `role`→`?role=`, `status`→`?isActive=`, archived→`deleted` (#693) — so this
+  // hook's key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
+  const listParams = deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
+  const { data: page, isLoading, isFetching, isError, error, refetch } = useUserList(listParams);
   const restoreUserMutation = useRestoreUser();
 
   // The server-orchestrated clone wizard (ADR-0058) is `cloning` — distinct from the create/edit form.
@@ -247,13 +249,7 @@ export function UsersListView() {
   const { formOpen, editing, cloning, deleting } = dialogs;
   const [bulkRestoring, setBulkRestoring] = useState(false);
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    if (statusFilter === "ALL") return items;
-    return items.filter((user) =>
-      statusFilter === "ACTIVE" ? user.isActive : !user.isActive,
-    );
-  }, [page?.items, statusFilter]);
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Selection only matters in the archived view (its sole bulk action: Restore).
   const visibleIds = useMemo(() => rows.map((user) => user.id), [rows]);
@@ -294,7 +290,7 @@ export function UsersListView() {
     const name = `${user.firstName} ${user.lastName}`;
     restoreUserMutation.mutate(user.id, {
       onSuccess: () => toast.success(t("list.toast.restored", { name })),
-      onError: (err) => notifyError(err, t("list.toast.restoreError")),
+      onError: (err) => notifyUserError(err, t("list.toast.restoreError"), t),
     });
   }
 
@@ -497,6 +493,13 @@ export function UsersListView() {
                 }}
               />
             ) : null}
+            <ExportButton
+              path={USER_EXPORT_PATH}
+              params={userFilterParams(listParams)}
+              total={page?.total}
+              filename="users"
+              permission="user:read"
+            />
             {canManage ? (
               <Button asChild>
                 <Link href="/users/new">
@@ -710,7 +713,7 @@ export function UsersListView() {
                 }
                 actions={
                   archived ? (
-                    canManage ? (
+                    canManage && canManageUser(myRole, user) ? (
                       <RestoreRowAction
                         onRestore={() => handleRestoreRow(user)}
                         disabled={restoreUserMutation.isPending}
@@ -718,9 +721,13 @@ export function UsersListView() {
                     ) : undefined
                   ) : canManage ? (
                     <RowActions
-                      onEdit={() => openEdit(user)}
+                      onEdit={canManageUser(myRole, user) ? () => openEdit(user) : undefined}
                       onClone={() => openClone(user)}
-                      onDelete={() => dispatchDialogs({ type: "openDelete", user })}
+                      onDelete={
+                        canManageUser(myRole, user)
+                          ? () => dispatchDialogs({ type: "openDelete", user })
+                          : undefined
+                      }
                       deleteLabel={t("list.offboardAction")}
                     />
                   ) : undefined
@@ -825,7 +832,7 @@ export function UsersListView() {
                 actions: (
                   <TableCell key="actions" className="text-right">
                     {archived ? (
-                      canManage ? (
+                      canManage && canManageUser(myRole, user) ? (
                         <div className="flex justify-end">
                           <RestoreRowAction
                             onRestore={() => handleRestoreRow(user)}
@@ -836,9 +843,13 @@ export function UsersListView() {
                     ) : canManage ? (
                       <div className={cn("flex justify-end", rowActionsReveal)}>
                         <RowActions
-                          onEdit={() => openEdit(user)}
+                          onEdit={canManageUser(myRole, user) ? () => openEdit(user) : undefined}
                           onClone={() => openClone(user)}
-                          onDelete={() => dispatchDialogs({ type: "openDelete", user })}
+                          onDelete={
+                            canManageUser(myRole, user)
+                              ? () => dispatchDialogs({ type: "openDelete", user })
+                              : undefined
+                          }
                           deleteLabel={t("list.offboardAction")}
                         />
                       </div>

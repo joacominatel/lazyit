@@ -81,6 +81,8 @@ jobs:
           # apps/agent is shipped (compiled into the API image) but bun build --compile does NOT
           # typecheck — so CI must, or agent type errors reach the image silently (ADR-0074 §7).
           bunx tsc --noEmit -p apps/agent/tsconfig.json
+          # The demo-data script is typed against @lazyit/shared so API drift breaks it here, not on a run.
+          bunx tsc --noEmit -p scripts/demo-data/tsconfig.json
 
       # Full-repo lint is REPORT-ONLY (`eslint .`, no --fix) — same as the repo's `lint` script;
       # `lint:fix` is the separate mutating fixer (#353). Both need the generated Prisma client,
@@ -183,6 +185,14 @@ jobs:
       # preinstalled on the ubuntu-latest runner.
       - name: Test update.sh release-tag trust
         run: sh infra/test/update-tag-trust.sh
+
+      # infra/update.sh per auth mode (#1545, ADR-0102): only the app DB is dumped, keys start.sh leaves unset for the mode are not gaps, and a bundled-Zitadel install is refused before any side effect. No Docker.
+      - name: Test update.sh auth-mode handling
+        run: sh infra/test/update-mode-aware.sh
+
+      # infra/update.sh's UpdateRun row (ADR-0084 §4): a pending request for another target is superseded as failed, never deleted, in the insert's transaction, so the one-active-run index holds. No Docker.
+      - name: Test update.sh UpdateRun row
+        run: sh infra/test/update-run-row.sh
 
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three

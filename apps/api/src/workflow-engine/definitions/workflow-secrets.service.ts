@@ -78,7 +78,7 @@ export class WorkflowSecretsService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.workflowSecret.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         select: REDACTED_SELECT,

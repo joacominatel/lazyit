@@ -45,19 +45,23 @@ last updated. The stock figure is colour-coded:
 You can search by name or SKU, and filter by **Category** or by **Low stock only**. Each row also
 carries the quick `−1` / `+1` buttons for adjusting the count in place.
 
+**Export CSV** downloads every item matching the current search and filters, with its stock and reorder
+threshold, for a stock count — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Categories
 
 Categories (Cables, Adapters, Peripherals, Office supplies, Other, …) are an optional grouping you
 manage yourself. They are **not** set up on the consumable form — you create and edit them under
-**Settings → Taxonomies**, on the Consumables tab. lazyit ships a small starter set; rename, add to
+**Settings → Taxonomies → Consumables → Categories**. lazyit ships a small starter set; rename, add to
 or remove it to suit your estate.
 
 A few things worth knowing:
 
 - A consumable can have **one** category, or none.
-- **Deleting a category does not delete its consumables.** Each consumable that pointed at it simply
-  becomes uncategorised — nothing is lost. (This differs from some other parts of lazyit that block
-  a delete while things still reference the item.)
+- **Deleting a category does not delete its consumables.** When it still has consumables, lazyit
+  shows you which ones and asks for **one decision for all of them**: leave them uncategorised, move
+  them to another category, or, if you can create categories, type a name to create one right there
+  and move them into it. Nothing is lost, and restoring the category later does not bring them back.
 - Categories are **soft-deleted** and a deleted name is freed for reuse, so you can recreate or
   restore one later without a clash.
 
@@ -65,6 +69,9 @@ A few things worth knowing:
 
 From a consumable's detail page or its row menu you can **Edit**, **Clone** or **Delete** it.
 
+- **Edit** changes any field. Empty a field and save to remove the value — for example, clear the
+  reorder threshold to stop low-stock alerts for that item. To drop the category, pick the selected
+  category again.
 - **Clone** opens a new consumable pre-filled from the original. The SKU is cleared and the stock
   starts at zero — handy for stocking a near-identical part.
 - **Delete** is a soft delete: the consumable is archived, not erased, and its movement history is

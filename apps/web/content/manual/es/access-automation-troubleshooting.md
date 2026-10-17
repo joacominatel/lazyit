@@ -8,7 +8,7 @@ subcategory: troubleshooting
 # Resolución de problemas de la automatización de accesos
 
 Cuando la automatización no hace lo que esperas, la cronología de la ejecución casi siempre te dice
-por qué. Empieza ahí: abre la pestaña **Flujos de trabajo** de la aplicación, busca la ejecución (o
+por qué. Empieza ahí: abre la pestaña **Automatización** de la aplicación, busca la ejecución (o
 fíjate en la etiqueta de la concesión — **Requiere atención** significa que una ejecución falló) y lee
 su [cronología](/help/access-automation-testing-observability).
 
@@ -50,6 +50,21 @@ activado **Reintentar al fallar**, lazyit lo reintenta automáticamente con espe
 intentos, corrige o espera al sistema externo y luego usa **Reintentar** en la ejecución fallida para
 reanudar la misma ejecución desde el paso que falló.
 
+## Un paso falló porque la credencial no está disponible
+
+Si la cronología dice que la credencial de la conexión **no está disponible**, la credencial asociada a
+la conexión fue revocada o ya no se puede descifrar (por ejemplo, después de que cambiara la clave de
+cifrado de la instancia). El paso falla sin reintentarse, y **Probar conexión** informa una
+comprobación fallida en lugar de un error. **Reemplaza** la credencial en la conexión, usa **Probar
+conexión** y luego **Reintentar** en la ejecución fallida.
+
+## Un paso falló con una ruta no válida
+
+Un paso REST cuya **Ruta** genera un segmento `.` o `..` falla antes de enviar nada, y no se
+reintenta: ese segmento saldría de la dirección base de la conexión. Suele significar que un valor
+mapeado (un nombre de usuario, por ejemplo) era `.` o `..`. La simulación muestra el mismo problema como
+advertencia. Corrige el dato o la **Ruta** del paso y luego usa **Repetir con la última versión**.
+
 ## Una ejecución se quedó en «Esperando (manual)»
 
 La ejecución se pausó para una persona — un paso de **Tarea humana** o un **Fallo escalado**. Seguirá
@@ -59,11 +74,19 @@ se reanuda. Si no puedes actuar sobre ella, confirma que tienes **`workflow:task
 destinatario permitido — consulta [Tareas manuales](/help/access-automation-manual-tasks) y
 [Permisos](/help/access-automation-permissions).
 
+Si eliges **Fallar ejecución** en una tarea escalada, más adelante puedes usar **Reintentar** en la
+ejecución desde el paso que falló.
+
 ## «Repetir con la última versión» fue rechazado
 
 Si repetir se rechaza porque la ejecución ya aprovisionó un paso no reversible, una ejecución nueva
 crearía esa cosa por segunda vez. No lo fuerces — **vuelve a otorgar el acceso** en su lugar, lo que
 inicia una ejecución nueva y limpia desde el principio.
+
+**Reintentar** y **Repetir con la última versión** también se rechazan cuando otra ejecución del mismo
+acceso ya está en curso, en espera o terminó con éxito — abre esa ejecución en su lugar; lanzar una
+segunda crearía la cuenta dos veces. También se rechazan cuando el acceso fue revocado o la persona fue
+dada de baja — vuelve a otorgar el acceso para aprovisionar de nuevo.
 
 ## Una credencial no funciona y no puedes ver su valor
 

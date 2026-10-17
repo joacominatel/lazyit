@@ -10,7 +10,8 @@ import { ArticleForm } from "../_components/article-form";
 //
 // #1106 Phase 4: a create-on-click from an unresolved `[[slug]]` arrives as `?slug=…&title=…`.
 // `parseKbNewPrefill` VALIDATES + SANITIZES those untrusted params (slug must match the slug rules,
-// title trimmed/bounded) before they seed the form — a crafted URL can never inject into it.
+// title trimmed/bounded) before they seed the form — a crafted URL can never inject into it. #1539 adds
+// `?categoryId=` (a folder header's "New article here"), which only preselects the home folder.
 export default async function NewArticlePage({
   searchParams,
 }: {

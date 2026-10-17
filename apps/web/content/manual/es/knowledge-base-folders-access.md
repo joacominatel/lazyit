@@ -14,21 +14,47 @@ carpetas son también el lugar donde controlas **quién puede leer** qué artíc
 
 Cada artículo tiene **exactamente una carpeta principal**, que se elige como su **Categoría** al
 redactarlo. Las carpetas pueden anidarse, así que puedes construir un árbol como
-`Servidores / Linux / Aprovisionamiento`. Explora el árbol desde la barra lateral de carpetas en la
-Base de conocimiento.
+`Servidores / Linux / Aprovisionamiento`. Explora el árbol en la sección **Carpetas** de la barra
+lateral de la Base de conocimiento, debajo de las vistas (consulta
+[Explorar la Base de conocimiento](/help/knowledge-base-articles-authoring#explorar-la-base-de-conocimiento)).
 
-- **Cada carpeta muestra cuántos artículos contiene** — un pequeño número en la fila de la carpeta.
-  Cuenta solo los artículos que **realmente puedes ver** (los publicados, más tus propios borradores),
-  así que nunca revela más de lo que mostraría la lista de la carpeta. Una **carpeta restringida que
-  no puedes leer no muestra número**, y las carpetas en un servidor más antiguo simplemente no
-  muestran ninguno hasta que se actualice.
-- **Crea una carpeta de primer nivel** con **Nueva carpeta**, arriba de la barra lateral de carpetas.
+- **Cada carpeta tiene un cuadro de color** — un pequeño cuadrado de color junto a su nombre. El color
+  se elige automáticamente a partir de la carpeta y es el mismo en todas partes (la barra lateral, las
+  tarjetas de la página de inicio, la página de la carpeta) y para todos. Es solo una ayuda visual; dos
+  carpetas pueden compartir color.
+- **Cada carpeta muestra cuántos artículos contiene** — un pequeño número a la derecha de la fila de
+  la carpeta. Cuenta la carpeta **y todas las subcarpetas que hay dentro**: una carpeta con 12
+  artículos y dos subcarpetas de 3 artículos cada una muestra **18**. Cuenta solo los artículos que
+  **realmente puedes ver** (los publicados, más tus propios borradores), así que nunca revela más de lo
+  que mostraría la lista de la carpeta, y una subcarpeta que no puedes leer no suma nada al número de
+  su carpeta padre. Una **carpeta restringida que no puedes leer no muestra número**. En un servidor
+  más antiguo el número cubre solo los artículos propios de la carpeta, hasta que se actualice.
+- **Una carpeta restringida muestra un candado** en su fila — consulta
+  [Restringir una carpeta](#restringir-una-carpeta). Todos ven el candado, no solo los administradores.
+- **Crea una carpeta de primer nivel** con el **+** junto al título **Carpetas** de la barra lateral, o
+  con la tarjeta punteada **Nueva carpeta** de la página de inicio de la Base de conocimiento.
 - **Crea una subcarpeta** desde el menú **⋯** de la carpeta dentro de la que la quieres → **Nueva
-  subcarpeta aquí**. No hay límite de profundidad: anida tanto como necesite tu documentación. La
-  carpeta nueva se abre en cuanto se crea.
-- **Renombra o mueve una carpeta** desde ese mismo menú **⋯**. **Mover a…** te deja elegir cualquier
-  otra carpeta como nuevo padre, o **Primer nivel (sin padre)** para devolverla a la raíz; sus
-  subcarpetas y sus artículos se mueven con ella.
+  subcarpeta aquí**, o con **Subcarpeta** en la página de esa carpeta. No hay límite de profundidad:
+  anida tanto como necesite tu documentación. La carpeta nueva se abre en cuanto se crea. Solo puedes
+  crear una subcarpeta dentro de una carpeta que puedes leer; la nueva queda restringida igual que su
+  padre.
+- **El menú ⋯** aparece cuando pasas el puntero por una fila de carpeta, cuando llegas a ella con el
+  teclado y siempre en la carpeta seleccionada; en una pantalla táctil está siempre visible. Contiene
+  **Nueva subcarpeta aquí**, **Editar**, **Mover a…** (administradores), **Acceso…**
+  (administradores) y **Eliminar carpeta**, cada opción visible solo para quien puede usarla.
+- **Edita una carpeta** desde el menú **⋯** → **Editar**. Puedes cambiar su **nombre**, su
+  **descripción** (una frase que se muestra en su tarjeta y en su página) y su **orden** — un número
+  entero opcional: los más bajos van primero, y las carpetas sin orden van después, por nombre. Editar
+  nunca mueve la carpeta ni cambia quién puede leerla. La descripción y el orden se pueden cambiar pero
+  todavía no quitar: si vacías el campo, el diálogo te lo indica y se mantiene el valor actual.
+- **Mueve una carpeta** con **Mover a…** en el mismo menú. Elige cualquier otra carpeta como nuevo
+  padre, o **Primer nivel (sin padre)** para devolverla a la raíz; sus subcarpetas y sus artículos se
+  mueven con ella. Como mover una carpeta cambia quién puede leer todo lo que contiene, hace falta el
+  permiso de *gestionar configuración* (lo tienen los administradores), y **Mover a…** solo aparece para
+  quien lo tiene. Si ese permiso se retira con el diálogo abierto, el movimiento se rechaza con un
+  mensaje que lo explica y nada se mueve. Cada movimiento queda registrado en el historial de versiones
+  de cada artículo que arrastra; un movimiento hecho mediante una cuenta de servicio (una automatización
+  o una herramienta de IA) muestra **Una cuenta de servicio** como autor.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
   `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no. Si el nombre ya está
   ocupado donde estás creando o moviendo, la app te lo dice y no se cambia nada.
@@ -38,6 +64,48 @@ Base de conocimiento.
   artículos — de la Base de conocimiento. La confirmación te indica cuántas carpetas y artículos se
   ven afectados. Los artículos se eliminan de forma lógica (recuperables por un administrador desde la
   base de datos), pero sigue siendo una acción de peso: lee el aviso antes de confirmar.
+
+Las carpetas se crean, se describen y se ordenan aquí, en la Base de conocimiento; **Configuración →
+Taxonomías** te trae aquí para ellas.
+
+## La página de una carpeta
+
+Al seleccionar una carpeta se abre su página. Arriba, una **ruta de navegación** muestra la ruta
+completa de la carpeta; cada tramo es un enlace para subir por el árbol. Debajo, una tarjeta de
+encabezado reúne el cuadro de color, el nombre y la descripción de la carpeta, y cuatro datos:
+
+- **Quién la ve** — **Todos con acceso a la base** para una carpeta pública. Para una restringida,
+  los administradores ven las reglas en palabras, como *Solo Administradores*, *Solo 3 personas* o
+  *Solo quienes tienen acceso a Finanzas*; el resto ve **Restringido**. Una carpeta restringida por una
+  carpeta padre dice **Restringida · por** esa carpeta.
+- **Artículos** — los artículos guardados directamente en esta carpeta, sin sus subcarpetas. El
+  número de la barra lateral incluye las subcarpetas, así que los dos difieren cuando una subcarpeta
+  tiene artículos.
+- **Subcarpetas** — cuántas carpetas hay directamente dentro.
+- **Último cambio** — cuándo se actualizó por última vez un artículo de la carpeta.
+
+Las acciones del encabezado:
+
+- **Artículo aquí** abre el editor de artículos con esta carpeta ya elegida como **Categoría**.
+  Puedes elegir otra carpeta antes de guardar.
+- **Subcarpeta** crea una carpeta dentro de esta.
+- **⋯** ofrece **Editar**, **Mover a…** (administradores), **Acceso…** (administradores) y
+  **Eliminar carpeta** — el mismo menú que en la barra lateral.
+
+Debajo del encabezado, las **subcarpetas** aparecen como una fila de chips: selecciona una para
+abrirla. Después viene **En esta carpeta**: los artículos de la carpeta, en la misma tabla que la
+página de inicio pero sin la columna Carpeta (ya estás en ella), con el mismo filtro de estado, orden y
+filtros.
+
+### Incluir subcarpetas
+
+Una carpeta con subcarpetas muestra un interruptor **Incluir subcarpetas** sobre su lista. Apagado
+(por defecto), la lista muestra solo los artículos guardados directamente en la carpeta. Encendido,
+muestra los artículos de la carpeta **y todo lo guardado en cualquier nivel por debajo**, y cada
+artículo de una subcarpeta muestra el nombre de esa subcarpeta antes de su resumen, para que sigas
+sabiendo dónde vive. **Último cambio** también sigue al interruptor. El acceso por carpeta se sigue
+aplicando: los artículos de una subcarpeta que no puedes leer quedan fuera de la lista. El interruptor
+forma parte de la dirección de la página, así que un enlace que compartas se abre igual.
 
 Para que un artículo *aparezca* en una segunda carpeta sin mover su carpeta principal, usa un
 **alias**: consulta [Enlaces y descubrimiento](/help/knowledge-base-linking-discovery). Un alias es
@@ -52,8 +120,8 @@ público — una carpeta nunca puede conceder *más* de lo que la Base de conoci
 
 ## Restringir una carpeta
 
-Restringir el acceso es una acción de **administrador**, por carpeta, desde los ajustes de la carpeta
-en la barra lateral. Añades una o más **reglas**; quien cumpla **cualquier** regla puede leer la
+Restringir el acceso es una acción de **administrador**, por carpeta, desde el menú **⋯** de la
+carpeta → **Acceso…** (en la barra lateral o en la página de la carpeta). Añades una o más **reglas**; quien cumpla **cualquier** regla puede leer la
 carpeta (las reglas se combinan con O). Los tipos de regla son:
 
 - **Usuarios** — un conjunto concreto de personas.
@@ -68,8 +136,12 @@ vigentes en el momento de la lectura. Revoca el acceso a la aplicación de algui
 su acceso a la Base de conocimiento desaparece automáticamente — no hay un permiso aparte de la Base
 de conocimiento que haya que acordarse de quitar cuando alguien deja un proyecto o el equipo.
 
-Una carpeta restringida muestra un icono de **candado**; una pública aparece abierta. Usa **Hacer
-público** para quitar todas las reglas y devolver una carpeta al estado por defecto.
+Una carpeta restringida muestra un **candado** junto a su nombre — en la barra lateral, en su tarjeta
+de la página de inicio (que además dice **Restringido**), en la columna Carpeta de la lista de
+artículos y en los resultados de búsqueda. Una carpeta pública no muestra ninguno. Una carpeta que solo
+está restringida porque lo está una carpeta padre muestra un candado más tenue; pasa el puntero por
+encima para ver cuál. Usa **Hacer público** para quitar todas las reglas y devolver una carpeta al
+estado por defecto.
 
 ### Las restricciones se heredan hacia abajo
 

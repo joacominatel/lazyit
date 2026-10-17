@@ -3,7 +3,7 @@ title: "Workflow Engine — Security & Threat Model"
 tags: [workflow-engine, security, threat-model, ssrf, secrets, rbac, audit, sandboxing]
 status: accepted
 created: 2026-06-07
-updated: 2026-09-24
+updated: 2026-10-15
 ---
 
 # Workflow Engine — Security & Threat Model
@@ -153,6 +153,13 @@ external system protects.
    attach and secret-bearing re-point); userinfo is refused on write, while a legacy row keeps running
    and is flagged `legacyUserinfo: true` on read for the UI to warn (§3.1). Stored rows are never
    rewritten.
+6. **An unavailable credential fails the step, never the process (AUD-071, PR #1579, as built).**
+   `SecretService.revealById` throws a typed `CredentialUnavailableError` when the connection's secret
+   is revoked (soft-deleted) or no longer decrypts. The REST and webhook handlers turn it into a
+   non-retryable `config` failure whose reason says the credential is unavailable and to attach a new
+   one; **Test connection** reports a failed probe instead of a 500. Revoking a secret **keeps** the
+   connection's `secretId` (CEO decision, 2026-10-15): nothing clears or flags the reference, and the
+   connection reports "credential unavailable" until a new credential is attached.
 
 ### 2.2 Key management
 
@@ -205,6 +212,10 @@ A central guard that EVERY outbound request passes through. Defense in depth, in
    - link-local `169.254.0.0/16` (**includes `169.254.169.254` cloud metadata / IMDS**), `fe80::/10`
    - `0.0.0.0/8`, broadcast, multicast, reserved/`100.64/10` CGNAT
    - IPv4-mapped/`-compatible` IPv6 forms of the above (normalize before checking)
+   - *As built (`common/egress/ip-rules.ts`):* the IPv6 discard prefix `100::/64` (AUD-065, PR #1591),
+     and the prefixes that embed or tunnel to an IPv4 or are otherwise not globally routable:
+     `2002::/16` (6to4), `2001::/32` (Teredo), `64:ff9b:1::/48` (local-use NAT64), `fec0::/10`
+     (deprecated site-local) and `3fff::/20` (documentation) (PR #1594)
 3. **Defeat DNS rebinding (TOCTOU).** A hostname can resolve to a public IP at validation time and a
    private IP at connect time. Mitigation: **pin the validated IP** — resolve once, validate the
    resolved address, then connect to **that exact IP** (e.g. a custom `lookup`/agent that returns the
@@ -410,6 +421,12 @@ single host — the highest-impact bug class possible here, sitting right next t
 4. **Output encoding per connector.** A value mapped into a downstream system can carry injection into
    *that* system (LDAP/SQL/command meta-characters for an AD/self-hosted target). The connector MUST
    encode/parameterize for its target; the engine treats every mapped value as hostile to the target.
+5. **A rendered path never climbs out of the base path (AUD-016, PR #1579, as built).** Placeholders in
+   a REST step's path are percent-encoded, so a value cannot inject a `/`, but a value of `.` or `..` is
+   still a whole segment that the URL parser collapses. The REST handler refuses a rendered path with a
+   `.` or `..` segment (including `%2e` spellings and `\` as a separator) as a non-retryable
+   `invalid-path` failure, before the credential is revealed (`handlers/outbound-http.ts`
+   `hasDotSegment`, `handlers/rest.handler.ts`); the dry-run flags it as a warning.
 
 ---
 

@@ -37,6 +37,12 @@ Import is an article-write action and runs as the importing **person**, never as
 Pick a `.md`, `.txt` or `.docx` file, choose a category and status, and **Import**. The file is
 processed and you are taken straight to the new article. Larger files take a moment.
 
+The article's slug (its address) is built from its title, which comes from the file name. If that
+slug is already taken, it gets a numbered suffix (`-2`, `-3`, …), the same way a bulk import does. A
+file name with no letters or digits cannot produce a slug: the import fails and asks you to rename
+the file and import it again. An import through the API that passes its own slug keeps it exactly
+as given, and fails with a "slug already exists" message if another article holds it.
+
 > [!NOTE]
 > The **New article** screen also lets you drag a file onto the form, but that shortcut reads the
 > file in your browser, so it only takes `.md`, `.markdown` and `.txt`. **Word documents and `.zip`
@@ -67,7 +73,12 @@ silent:
 - **Renamed** — imported, but the slug was auto-suffixed to avoid a clash (the requested name is
   shown).
 - **Skipped** — entries that were not imported, with the reason (a folder entry, a hidden file, an
-  unsupported type, or an empty file).
+  unsupported type, an empty file, attachment storage being full, or an error while creating that
+  one article).
+
+One entry that fails does not stop the rest: it is listed as skipped and the remaining entries are
+still imported. Fix the cause (for example, free attachment storage) and import the skipped files
+again.
 
 The summary also reports how many folders were created and how many wiki-links were reconnected.
 Review it, then close the dialog — a bulk import does not navigate you away to a single article.
@@ -96,9 +107,10 @@ Word or Markdown runbook keeps its screenshots:
   imported. Export those to PNG first.
 - Each image passes the **same checks as an editor upload**: its true type is verified, it is
   re-encoded (stripping camera/location metadata), and it counts against your instance's attachment
-  **storage limit**. An image that can't be read is dropped from the article; if attachment storage
-  is **full**, the whole import fails with a clear message — free space (or ask your administrator to
-  raise the limit) and import again. Documents with a very large number of embedded images keep only
+  **storage limit**. An image that can't be read is dropped from the article. If attachment storage
+  is **full**, a single-file import fails with a clear message, and in a `.zip` that entry is
+  skipped while the rest are imported — free space (or ask your administrator to raise the limit)
+  and import it again. Documents with a very large number of embedded images keep only
   the first several dozen.
 
 References you write yourself to images already uploaded in lazyit (`attachment:` links) are kept

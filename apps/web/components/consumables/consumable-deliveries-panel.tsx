@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DetailPanel } from "@/components/detail-panel";
+import { ExportButton } from "@/components/export-button";
 import { Pagination } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/api/client";
+import {
+  CONSUMABLE_DELIVERY_EXPORT_PATH,
+  consumableDeliveryFilterParams,
+} from "@/lib/api/endpoints/consumables";
 import { useConsumableDeliveries } from "@/lib/api/hooks/use-consumables";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import {
@@ -131,12 +136,22 @@ export function ConsumableDeliveriesPanel({
           : t("title")
       }
       actions={
-        canWrite && targetLive ? (
-          <Button size="sm" variant="outline" onClick={() => setDeliverOpen(true)}>
-            <PlusIcon />
-            {t("deliverAction")}
-          </Button>
-        ) : undefined
+        <div className="flex items-center gap-2">
+          <ExportButton
+            path={CONSUMABLE_DELIVERY_EXPORT_PATH}
+            params={consumableDeliveryFilterParams(params)}
+            total={data?.total}
+            filename="consumable-deliveries"
+            permission="consumable:read"
+            size="sm"
+          />
+          {canWrite && targetLive ? (
+            <Button size="sm" variant="outline" onClick={() => setDeliverOpen(true)}>
+              <PlusIcon />
+              {t("deliverAction")}
+            </Button>
+          ) : null}
+        </div>
       }
     >
       <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">

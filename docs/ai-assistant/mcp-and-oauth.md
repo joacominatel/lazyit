@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-16
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -34,7 +34,8 @@ updated: 2026-09-26
   authenticated via OAuth; scripts = Service Account ([[0048-service-accounts]], [[0080-service-account-secret-retrieval]]).
 - **"OAuth 2.1 desde el día uno."** All OIDC (bundled Zitadel + BYOI) will be removed (issue #1310), so lazyit
   is its own authorization server on top of the **local** session and this design adds **zero** dependency
-  on Zitadel/OIDC.
+  on Zitadel/OIDC. (#1310 was later narrowed by [[0102-remove-bundled-zitadel]]: only the bundled Zitadel
+  was removed, and generic OIDC stays opt-in; the MCP design is unaffected.)
 - Over MCP, **the client owns confirmation UX**; the user's permissions bound what can happen.
 - The AI may do **anything the user can**, except the Secret Manager (zero-knowledge,
   [[0061-secret-manager-zero-knowledge]]), operations that return a credential in cleartext (SA token
@@ -384,7 +385,7 @@ DCR creates a new client per connection anyway; always-prompt defeats silent re-
 | Token | `{origin}/oauth/token` (form-urlencoded) | api | public client (`client_id`) |
 | Registration (DCR) | `{origin}/oauth/register` (JSON) | api | none, rate-limited |
 | Revocation (RFC 7009) | `{origin}/oauth/revoke` | api | `client_id` |
-| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session + `ai:connect` |
+| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session; minting a personal token needs `ai:connect`, listing and revoking your own connections and personal tokens need none (AUD-083) |
 | All users' connections (admin) | `{origin}/api/oauth/grants?userId=` (list/revoke) | api | session + `settings:manage` |
 | Plugin marketplace + archive (public) | `{origin}/api/ai/claude-code/marketplace.json`, `…/lazyit-plugin.zip` | api | none — only when MCP is enabled on an HTTPS instance (R8) |
 | Plugin download (authenticated) | `{origin}/api/ai/claude-code/plugin.zip` | api | session + `ai:connect`; always available while MCP is enabled |
@@ -434,7 +435,8 @@ true`, `service_documentation` → the Manual page. **PRM** advertises `resource
 6. `POST /oauth/token` (`authorization_code`): atomic single use (`updateMany where usedAt null`), PKCE verify,
    redirect/client/resource match → creates the **grant** and returns `lzit_oat_` (1 h) + `lzit_ort_` (30 days)
    with `Cache-Control: no-store`.
-7. `POST /oauth/token` (`refresh_token`): atomic rotation; a rotated token presented again **outside** a 30 s grace
+7. `POST /oauth/token` (`refresh_token`): atomic rotation (the old token is burned in the same transaction
+   that issues the new pair, so a failed issue leaves it usable); a rotated token presented again **outside** a 30 s grace
    window = reuse → the whole grant is revoked (audited); inside the grace window → `invalid_grant` without
    revocation (benign concurrent-refresh race). Dead tokens always answer `invalid_grant`.
 8. Resource-server check on every `/mcp` request: token hash → grant (live, not expired) → **user reloaded**
@@ -557,9 +559,10 @@ lazyit-plugin.zip
 
 - **Settings → AI (admin)**: an "External agents (MCP)" switch, independent of provider configuration (decided — CEO, round 2),
   plus the list of all users' active connections with revoke, for incident response and offboarding (R9).
-- **Account → AI connections (`/account/ai`, every user holding `ai:connect`)**: install instructions (Claude
-  Code plugin commands, generic snippet), the user's connected apps (client, verified/unverified, access level,
-  created, last used, revoke), and — in `lan` — personal tokens (R9).
+- **Account → AI connections (`/account/ai`, every user)**: install instructions (Claude Code plugin commands,
+  generic snippet) for holders of `ai:connect`, the user's connected apps (client, verified/unverified, access
+  level, created, last used, revoke) for everyone, so a user who lost `ai:connect` can still revoke them
+  (AUD-083), and — in `lan` — personal tokens (R9).
 - Manual (en + es): "Connect an AI agent (MCP)" — per [[0062-in-app-help-manual-surface]].
 
 ### 5.7 OIDC mode — transitional footnote
@@ -612,6 +615,7 @@ model OAuthGrant {
   mcpCredentialEpoch Int                    // snapshot; mismatch with User.mcpCredentialEpoch = dead (R7)
   expiresAt     DateTime?                   // personal tokens only
   lastUsedAt    DateTime?
+  announcedAt   DateTime?                   // first-use notice sent (AUD-014); null = never announced
   revokeReason  String?                     // 'user' | 'admin' | 'refresh_reuse' | 'revocation_endpoint' | 'client_deleted'
   revokedById   String?   @db.Uuid
   createdAt     DateTime  @default(now())
@@ -781,6 +785,8 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 3. **Q3 — MCP without an LLM provider → yes.** An independent "External agents (MCP)" switch (CEO, round 2).
 4. **Q4 — Where "Install in Claude Code" lives → `/account/ai`** for holders of `ai:connect` (install,
    connected apps, personal tokens); Settings → AI for admins (the MCP switch and every user's grants) (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 5. **Q5 — SA tokens on `/mcp` → accepted, fail-closed, only if the SA holds `ai:connect`** (R10; adopted by
    default, CEO to confirm on review).
 6. **Q6 — Password change / "sign out everywhere" / admin reset kill MCP connections → yes**, through the
@@ -896,7 +902,7 @@ server must not depend on the provider configuration.
 | `POST /oauth/revoke` | 200, empty, whether or not the token was known; revoking either token revokes the grant |
 | `POST /oauth/authorize/validate` | 200 `OAuthAuthorizeValidation`; **400 `{ error, redirectTo }`** for a request error that belongs to the client (the page sends the browser to `redirectTo`, which carries `error`, `state`, `iss`) |
 | `POST /oauth/authorize/decision` | 200 `OAuthAuthorizeRedirect`; 403 `{ refusal }`; 403 `{ code: "STEP_UP_REQUIRED" \| "STEP_UP_FAILED" \| "STEP_UP_UNAVAILABLE" }` and 429 `{ code: "STEP_UP_RATE_LIMITED", retryAfterSec }` for `lazyit.admin` (the password goes through `PasswordStepUpVerifier`, the chat approvals' per-account backoff — one counter for both; each refusal audited `CONSENT_STEP_UP_FAILED`, SEC-082); 400 for scopes outside the request; the same 400 `{ error, redirectTo }`; 429 past 10/min per user |
-| `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `ai:connect` / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
+| `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `mine`: no permission, so a user who lost `ai:connect` still sees what they hold (AUD-083) / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
 
 `validate` refuses (never redirects) in this order: no human session or no `ai:connect` → `FORBIDDEN`; MCP
 off → `AI_DISABLED`; unknown client or a client the allowlist no longer admits → `INVALID_CLIENT`; a
@@ -1227,8 +1233,15 @@ configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected
 once per connection across replicas and restarts; a per-process memo spares the lookups and is set only
 once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
 follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
-always lands). A grant older
-than the bell's 90-day retention is not announced (its notice, if any, was sent). Service Accounts
+always lands). Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
+(AUD-014), never inferred from its age or `lastUsedAt`, so the bell's 90-day prune cannot make a grant
+that was never announced look announced — a personal token minted and first used months later is still
+announced. The column is set only once the notice row exists: two concurrent first uses both emit, the
+unique `dedupeKey` makes the loser a no-op (no row, no email), and both then stamp. A failed send stamps
+nothing, so the next request retries. A grant with `announcedAt` null whose notice row exists (sent
+before the column, or by an older replica during a rolling update) counts as announced and gets the
+column filled in. A legacy grant whose notice was already pruned by the 90-day retention before it was
+stamped is announced once more on its next use — an extra notice, never a missed one. Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
 token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).
@@ -1243,7 +1256,7 @@ ledger, never retried. Not started under `NODE_ENV=test`.
 | Route | Answers |
 | --- | --- |
 | `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused** — by the schema and again by the service, G3 F7). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user — counted and created in one transaction under a per-user `pg_advisory_xact_lock` (G3 F4). |
-| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant` |
+| `GET /oauth/personal-tokens` | No permission, human only: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant`. A user who lost `ai:connect` still sees, and can revoke, the tokens they hold (AUD-083) |
 | `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
 
 A personal token is a grant (`kind: "personal"`, `label`, `scopes`, `expiresAt`, the user's
@@ -1275,8 +1288,9 @@ lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_p
   `Host`, which a rebinding attacker controls. Accepted: `/mcp` authenticates only by a bearer token the
   page cannot read (no cookie, no ambient credential), so a rebound page gains nothing.
 - **F6 — per-connection rate limits and their prune cost.** The limits are per grant or SA, not per user
-  (one user with several connections gets several budgets), and each counter prunes its map on every hit
-  (linear in the live keys). Accepted at the 5–20 person scale.
+  (one user with several connections gets several budgets). The counters are the OAuth endpoints'
+  `FixedWindowRateLimiter`: constant work per hit (expired windows are dropped from the front of the
+  map) and at most 10,000 keys, past which the oldest window is evicted (AUD-005 / AUD-039).
 - **F9** — accepted as recorded in the review.
 - **Admin revoke of a personal token (F8)** — `DELETE /oauth/grants/:id` already records
   `PERSONAL_TOKEN_REVOKED` (reason `admin`); now pinned by a test.

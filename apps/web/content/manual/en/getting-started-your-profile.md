@@ -23,7 +23,7 @@ account. Everyone can open it; it shows only what applies to you:
 
 - **You** — your name, email, role and join date, with a shortcut to **My profile**.
 - **Your pages** — cards for **My profile**, [Notification emails](/help/notifications-activity-email-preferences),
-  **AI & connected apps** (only if you may connect AI apps and your instance has the assistant — see
+  **AI & connected apps** (only if your instance has the assistant — see
   [Connected apps](/help/ai-assistant-connected-apps)) and the **Secret Manager** (only if you can read
   secrets — your personal vault password lives there).
 - **Password & sessions** — who owns your password (lazyit, or your organization's sign-in provider),
@@ -58,8 +58,8 @@ You can fix your own **first and last name** — a typo, a changed surname, the 
 2. Change the first name, the last name or both (1 to 100 characters each), then select **Save**.
 
 The new name shows up everywhere at once: in the top-right menu, on asset owners and grants, and in the
-**Users** list. If your organization signs in through lazyit's bundled sign-in service, your name there
-is updated too. The change is recorded in your user history, like any other name change.
+**Users** list. The change is recorded in your user history, like any other name change. If your
+organization signs in through its own identity provider, your name there is not changed.
 
 Only the name is editable. Your email, role, employee number, username and manager stay with
 administrators.
@@ -69,8 +69,8 @@ or LDAP and you are one of them, the directory owns your name. The **Name** pane
 with a note saying so — an edit here would only be overwritten by the next sync. Ask an administrator to
 change it in the directory.
 
-**If saving fails.** If the sign-in service can't be updated at that moment, lazyit changes nothing and
-says so — try again in a moment. Service accounts have no profile, so they can't edit a name.
+**If saving fails.** lazyit changes nothing and says so — try again in a moment. Service accounts
+have no profile, so they can't edit a name.
 
 ## Your language and theme on every device
 
@@ -142,6 +142,9 @@ organization's single sign-on), your profile also has a **Change your password**
 - Enter your **current** password, then your **new** password twice. The new password must meet the
   live checklist (length, upper- and lower-case, a number and a symbol) and must differ from the
   current one.
+- After five wrong **current** passwords lazyit makes you wait before trying again ("Too many wrong
+  passwords"), for a time that grows with each failure, up to 15 minutes, and tells you how long is
+  left. The wait is shared with the password confirmations in the AI chat and on the MCP consent screen.
 - On success you **stay signed in on this device**; every *other* session is signed out, and your AI
   apps and personal tokens are disconnected — so a password change is also how you boot a forgotten,
   shared, lost or stolen session.

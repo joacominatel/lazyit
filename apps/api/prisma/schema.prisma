@@ -31,7 +31,7 @@ model User {
   // users AND non-first JIT users land read-only until an ADMIN promotes them. The first JIT user /
   // seed still becomes ADMIN so a fresh install is never un-administrable. The RolesGuard gates
   // Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is read-only.
-  // Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
+  // A user:manage holder assigns roles only up to their own (role ceiling, SEC-088); only an ADMIN acts on ADMIN.
   role           Role      @default(VIEWER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
@@ -58,7 +58,7 @@ model User {
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
   managerName    String?
   // Directory-only person (ADR-0069 amendment / ADR-0038 amendment): a row created by the bulk import
-  // for an asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role
+  // for an asset's "assigned to" that has NO login and NO IdP identity (externalId stays null, role
   // stays VIEWER). It IS a User so AssetAssignment.userId (uuid FK) points at it with zero schema churn.
   // EXCLUDED from the bootstrap first-user→ADMIN count (jwt-auth.guard.ts:365) so importing people can
   // never hand ADMIN to a non-login row. Flips to false when the person first signs in via OIDC and the
@@ -71,7 +71,7 @@ model User {
   directoryOnly  Boolean   @default(false)
   // Free-form directory attributes for a directory-only person (cargo/jobTitle, departamento, teléfono,
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
-  // optional, only populated on directory rows. NOT validated per-field in this MVP. AD sync also stashes
+  // optional; a manual create/edit also writes jobTitle/department here (#1646). NOT validated per-field in this MVP. AD sync also stashes
   // the entry's `memberOf` group DNs here INERT (store-now-act-later, #846) — never acted on as subjects.
   directoryAttrs Json?
 
@@ -176,6 +176,8 @@ model User {
   // losing the decider never blocks deleting them, the request record survives).
   accessRequestsMade    AccessRequest[] @relation("AccessRequestRequester")
   accessRequestsDecided AccessRequest[] @relation("AccessRequestDecidedBy")
+  // Requests this user filed on someone else's behalf (#1645). SetNull, like the decider.
+  accessRequestsFiled   AccessRequest[] @relation("AccessRequestFiledBy")
 
   // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
   assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
@@ -217,6 +219,9 @@ model User {
   // SetNull on both: deleting the user keeps the (soft-deletable) account and the append-only audit row.
   serviceAccountsCreated     ServiceAccount[]         @relation("ServiceAccountCreator")
   serviceAccountAuditEntries ServiceAccountAuditLog[] @relation("ServiceAccountAuditActor")
+
+  // Data exports this user ran (DataExportLog.actorId, SetNull: the append-only row survives). ADR-0103.
+  dataExports DataExportLog[] @relation("DataExportActor")
 
   // Applications Workflow Engine (ADR-0054, epic #248). The human-actor sides of the engine's
   // attribution columns — all SetNull, so deleting the user never blocks deletion and the
@@ -359,7 +364,7 @@ enum PermissionAuditAction {
 
 /// A NON-HUMAN principal (ADR-0048): a CI runner, a script, an integration that calls the lazyit API
 /// without a person behind it. Deliberately a SEPARATE entity from `User` (not a `type` flag, not a
-/// Zitadel machine-user), so the human table — JIT provisioning, the last-admin / first-admin
+/// IdP machine-user), so the human table — JIT provisioning, the last-admin / first-admin
 /// invariants, `externalId` linkage — stays untouched. A service account NEVER has a `Role` and is
 /// NEVER ADMIN-equivalent; it is authorized solely by its direct `ServiceAccountPermission` grants.
 ///
@@ -461,6 +466,9 @@ model ServiceAccount {
   aiActionLogActed AiActionLog[]             @relation("AiActionSaActor")
   aiSettings       AiServiceAccountSettings?
 
+  // Data exports this SA ran (DataExportLog.serviceAccountId, SetNull). ADR-0103.
+  dataExports DataExportLog[] @relation("DataExportSaActor")
+
   @@index([isActive])
   @@map("service_accounts")
 }
@@ -517,6 +525,31 @@ enum ServiceAccountAuditAction {
   REVOKE
   RESTORE
   PERMISSION_CHANGE
+}
+
+/// One server-side data export (ADR-0103): who pulled which list, with which filters, how many rows.
+/// Append-only (ADR-0006); read as the `export` source of Reports › Audit (ADR-0081).
+model DataExportLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id               Int             @id @default(autoincrement())
+  // At most one actor, human XOR service account (CHECK data_export_logs_one_actor, INV-SA-4).
+  actorId          String?         @db.Uuid
+  actor            User?           @relation("DataExportActor", fields: [actorId], references: [id], onDelete: SetNull)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("DataExportSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  // A DATA_EXPORT_RESOURCES label from @lazyit/shared. Text, so a new resource needs no migration.
+  resource         String
+  // The list filters the export applied, sanitized to flat JSON (never a secret).
+  filters          Json
+  // Matching rows counted before the first byte was sent.
+  rowCount         Int
+  createdAt        DateTime        @default(now())
+
+  @@index([actorId, id])
+  @@index([serviceAccountId, id])
+  @@index([resource, id])
+  @@index([createdAt])
+  @@map("data_export_logs")
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or
@@ -1035,7 +1068,9 @@ model UpdateRun {
   updatedAt         DateTime  @updatedAt
 
   // No deletedAt: an append-only ledger (ADR-0006), like WorkflowRun. Indexes: the active-run /
-  // reconcile scan by status, and the newest-first history list by createdAt.
+  // reconcile scan by status, and the newest-first history list by createdAt. At most one ACTIVE run
+  // (status not done/failed/rolled_back) via the partial unique index `update_runs_single_active_key`
+  // (raw SQL in the migration; Prisma can't express partial indexes — prisma-migrations.md §3).
   @@index([status])
   @@index([createdAt])
   @@map("update_runs")
@@ -1171,7 +1206,7 @@ enum AssetHistoryEventType {
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
 /// own audit trail — the counterpart of AssetHistory for the asset, closing the gap where Users had no
-/// queryable history (only fire-and-forget IdP write-back log lines). Append-only (ADR-0006): rows are
+/// queryable history (only structured log lines). Append-only (ADR-0006): rows are
 /// only ever INSERTed, never updated or deleted; `createdAt` only — no updatedAt / deletedAt. Emitted
 /// transactionally with the write it records (ADR-0033 pattern). Feeds the `recent_activity` view's
 /// fourth source (entityType "user"). See docs/02-domain/entities/user.md + ADR-0050.
@@ -1634,7 +1669,8 @@ model Application {
 /// Append-only with a revoke marker: rows are never deleted, only "closed" by setting revokedAt
 /// (ADR-0006). Multi-grant: a user may hold several active grants on one app at different
 /// accessLevels — there is deliberately NO uniqueness constraint (contrast AssetAssignment).
-/// The actor (grantedById / revokedById) comes from the X-User-Id shim (ADR-0022 / ADR-0023).
+/// The actor comes from the authenticated principal: a human in grantedById / revokedById, a service
+/// account in grantedBySaId / revokedBySaId (ADR-0023 / ADR-0048).
 /// See docs/02-domain/entities/access-grant.md
 model AccessGrant {
   id            String          @id @default(cuid())
@@ -1673,7 +1709,7 @@ model AccessGrant {
   // Applications Workflow Engine (ADR-0054, epic #248). The provisioning/deprovisioning runs this
   // grant triggered (WorkflowRun.accessGrantId). Restrict on that side: a grant with run history
   // can't be hard-deleted (grants are append-only anyway). The engine fires AFTER this grant's tx
-  // commits and NEVER rolls it back — the deliberate inverse of the Zitadel strong-coupling.
+  // commits and NEVER rolls it back.
   workflowRuns WorkflowRun[]
 
   // The self-service access request this grant was produced by, when it came from an approval
@@ -1707,10 +1743,14 @@ enum AccessRequestStatus {
 /// same pattern as AssetAssignment's active-key — ADR-0019/0041). See docs/02-domain/entities/access-request.md
 model AccessRequest {
   id            String              @id @default(cuid())
-  // Who is asking. @db.Uuid to match User.id (uuid). Restrict: a person's request history is preserved
-  // (soft delete bypasses it). NEVER set from the body — the requester is the authenticated caller.
+  // Who the access is for. @db.Uuid to match User.id (uuid). Restrict: a person's request history is
+  // preserved (soft delete bypasses it). The caller, unless an approver files on their behalf (#1645).
   requesterId   String              @db.Uuid
   requester     User                @relation("AccessRequestRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  // Who filed it on the requester's behalf (#1645). null = the requester filed it, as every row before
+  // #1645 did. SetNull: losing the filer never blocks deleting them.
+  filedById     String?             @db.Uuid
+  filedBy       User?               @relation("AccessRequestFiledBy", fields: [filedById], references: [id], onDelete: SetNull)
   // The application access is requested on. Restrict (soft delete bypasses).
   applicationId String
   application   Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)
@@ -1886,7 +1926,8 @@ enum ConsumableMovementType {
 // adjustment, and — DEBT-2 / issue #185 — UserHistory user lifecycle) into one normalized, newest-
 // first stream for the dashboard's recent-activity feed.
 // Columns: { occurredAt timestamptz, actorId uuid?, entityType text, entityId text, action text,
-// summary text }. Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL — created in
+// summary text, subjectName text?, targetUserId uuid?, targetUserName text?, sourceKey text } — sourceKey
+// ('<table>:<id>[:<action>]', unique per event) is the export's keyset tiebreak (ADR-0103). Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL — created in
 // prisma/migrations/20260601163936_recent_activity_view/migration.sql and REPLACED (CREATE OR REPLACE)
 // to add the UserHistory branch in prisma/migrations/<ts>_recent_activity_view_user/migration.sql (the
 // same "SQL Prisma can't represent" pattern as the partial unique indexes — see
@@ -1904,7 +1945,7 @@ enum ConsumableMovementType {
 // enabled workflow behaves EXACTLY as today (ADR-0023) — granting access just records the
 // AccessGrant, one indexed lookup of overhead, nothing fires.
 //
-// THE DECOUPLING INVARIANT (the deliberate inverse of the Zitadel strong-coupling, ADR-0043/INV-5):
+// THE DECOUPLING INVARIANT:
 // the engine fires AFTER the AccessGrant transaction commits, NEVER inside it. A failing external
 // call never rolls back, blocks or 503s the grant. The grant is the source of truth; provisioning
 // is an eventually-consistent downstream effect surfaced as a FAILED run + notification.
@@ -2661,6 +2702,8 @@ enum SecretAuditAction {
   // The decrypt happens CLIENT-SIDE (INV-10); this row records ONLY that a per-item reveal occurred — WHO
   // revealed WHICH item, when. NEVER the plaintext, ciphertext, DEK, or wrapped key.
   ITEM_REVEALED
+  // A vault was renamed (AUD-096): actorId + vaultId only. The old and new names are not recorded.
+  VAULT_RENAMED
 }
 
 /// An APPEND-ONLY audit log of Secret Manager actions (ADR-0061 §10, crypto note §8) — records WHO acted
@@ -2970,6 +3013,8 @@ model InfraNode {
   factChanges InfraNodeFactChange[]
 
   @@index([assetId])
+  // Raw-SQL partial UNIQUE `infra_nodes_assetId_active_key` on (assetId) WHERE deletedAt IS NULL AND
+  // assetId IS NOT NULL — one live node per asset (migration 20261015130000; prisma-migrations.md §3).
   @@index([kind])
   @@index([state]) // the PENDING review-tray query
   // v2: partial UNIQUE (reportingSource, externalId) WHERE both NOT NULL — added with the agent
@@ -3654,6 +3699,8 @@ model OAuthGrant {
   /// Personal tokens only — mandatory there.
   expiresAt    DateTime?
   lastUsedAt   DateTime?
+  /// When the owner was sent the first-use notice (mcp.client_connected); null = never announced.
+  announcedAt  DateTime?
   /// user | admin | refresh_reuse | revocation_endpoint | client_deleted (OAuthGrantRevokeReason).
   revokeReason String?
   revokedById  String?      @db.Uuid

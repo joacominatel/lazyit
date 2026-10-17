@@ -5,6 +5,7 @@ import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.m
 import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { ArticlesModule } from '../articles/articles.module';
 import { AssetTagSchemeModule } from '../asset-tag-scheme/asset-tag-scheme.module';
+import { ExportModule } from '../common/export';
 
 @Module({
   // ArticlesModule provides ArticlesService for the reverse GET /assets/:id/articles (ADR-0042).
@@ -14,6 +15,7 @@ import { AssetTagSchemeModule } from '../asset-tag-scheme/asset-tag-scheme.modul
     AssetHistoryModule,
     ArticlesModule,
     AssetTagSchemeModule,
+    ExportModule,
   ],
   controllers: [AssetsController],
   providers: [AssetsService],

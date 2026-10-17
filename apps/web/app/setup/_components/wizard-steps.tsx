@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 /**
  * Compact step indicator for the setup wizard — a row of numbered pips with the brand indigo for the
  * current/completed steps. The label list is supplied by the caller because the visible steps adapt
- * to the chosen IdP (the bundled-Zitadel path drops the no-op "Configure" step). Responsive: labels
- * collapse on narrow screens, the pips always show.
+ * to the auth mode (local mode has no "Configure" step). Responsive: labels collapse on narrow screens,
+ * the pips always show.
  */
 export function WizardSteps({
   labels,

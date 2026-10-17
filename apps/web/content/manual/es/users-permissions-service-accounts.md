@@ -16,6 +16,14 @@ Las cuentas de servicio son un tipo de principal distinto de los usuarios: nunca
 directorio de usuarios, nunca cuentan para la regla del último administrador y no dependen de tu
 proveedor de identidad. Las gestionas en **Configuración → Cuentas de servicio** (solo administradores).
 
+La página muestra cada cuenta en una fila: su nombre y el comienzo de su token, sus permisos como chips
+(pasados tres, el resto se agrupa en **+N** — pasa el puntero por encima, o léelo con un lector de
+pantalla, para ver la lista completa), cuándo se usó por última vez y cuándo vence su token — o una
+insignia cuando está **revocada**, **vencida** o **inactiva**. El menú **⋯** de una fila reúne
+**Cómo probarla**, **Editar**, **Rotar token**, **Acceso a IA** y **Revocar**. **Mostrar revocadas** cambia a
+las cuentas revocadas, cada una con **Restaurar**. Sin cuentas todavía, la página es una línea con el
+botón **Nueva cuenta de servicio**.
+
 ## Cómo se autoriza una cuenta de servicio
 
 Una cuenta de servicio se autoriza **solo por los permisos que le otorgas** — del mismo catálogo que
@@ -34,6 +42,20 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
   configuración de la instancia** ni **Gestionar usuarios**. Cualquiera de las dos la haría equivalente
   a un administrador (capaz de crear más cuentas o de crear un administrador humano), así que lazyit las
   rechaza — aunque intentes asignarlas.
+- **Solo puedes otorgar lo que tiene tu propio rol.** Si un administrador le dio a tu rol **Cambiar la
+  configuración de la instancia**, puedes gestionar cuentas de servicio, pero solo con permisos que tu
+  rol tiene. Se rechaza crear una cuenta, agregarle un permiso, volver a activarla, extender su
+  vencimiento, rotar su token, restaurarla o ampliar su **acceso a IA** cuando la cuenta tendría un
+  permiso que te falta. Renombrarla, quitarle permisos, desactivarla, acortar su vencimiento y
+  revocarla siempre funcionan. Los administradores tienen todos los permisos, así que esto nunca los
+  limita. Una excepción: **Reportar inventario de servidores (agente)** siempre se puede otorgar,
+  porque solo reporta inventario e instalar agentes ya requiere **Cambiar la configuración de la
+  instancia**, así que puedes seguir
+  [instalando agentes de reporte](/help/assets-topology-reporting-agent). Todos los demás permisos,
+  incluido **Obtener secretos de forma programática (cuenta de servicio)**, siguen limitados. El
+  selector muestra solo lo que puedes otorgar; un permiso que la cuenta ya tiene fuera de tu rol sigue
+  en la lista, marcado **Fuera de tu rol**, para que puedas quitarlo. Un rechazo nombra los permisos
+  que le faltan a tu rol.
 
 ## El token (se muestra una sola vez)
 

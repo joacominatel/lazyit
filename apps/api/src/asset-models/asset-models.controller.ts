@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AssetModelDeleteImpactSchema,
   AssetModelListPageSchema,
   AssetModelSchema,
   CreateAssetModelSchema,
@@ -32,11 +33,17 @@ import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { User } from '../../generated/prisma/client';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
+import { parseDeleteResolution } from '../common/delete-resolution';
 
 class AssetModelDto extends createZodDto(AssetModelSchema) {}
 class AssetModelListPageDto extends createZodDto(AssetModelListPageSchema) {}
 class CreateAssetModelDto extends createZodDto(CreateAssetModelSchema) {}
 class UpdateAssetModelDto extends createZodDto(UpdateAssetModelSchema) {}
+class AssetModelDeleteImpactDto extends createZodDto(
+  AssetModelDeleteImpactSchema,
+) {}
 
 @ApiTags('asset-models')
 @Controller('asset-models')
@@ -131,12 +138,51 @@ export class AssetModelsController {
     return this.models.update(id, dto);
   }
 
+  @Get(':id/delete-impact')
+  @RequirePermission('assetModel:delete')
+  @ApiOperation({
+    summary:
+      'What deleting this model would re-point or detach: live assets and the open purchase lines mapped to it (counts, plus the first 50 of each kind the caller may read).',
+  })
+  @ApiOkResponse({ type: AssetModelDeleteImpactDto })
+  deleteImpact(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.models.deleteImpact(id, principal);
+  }
+
   @Delete(':id')
   @RequirePermission('assetModel:delete')
-  @ApiOperation({ summary: 'Soft-delete an asset model — ADMIN only' })
+  @ApiOperation({
+    summary:
+      'Soft-delete an asset model — ADMIN only. While live assets or open purchase lines still point at it, give ONE strategy for all of them (409 DELETE_RESOLUTION_REQUIRED otherwise).',
+  })
+  @ApiQuery({
+    name: 'strategy',
+    required: false,
+    enum: ['detach', 'move'],
+    description:
+      'detach: the assets keep no model and the open purchase lines lose their mapping. move: all of them go to targetId.',
+  })
+  @ApiQuery({
+    name: 'targetId',
+    required: false,
+    description:
+      'With strategy=move: another live asset model, in any category.',
+  })
   @ApiOkResponse({ type: AssetModelDto })
-  remove(@Param('id') id: string) {
-    return this.models.remove(id);
+  remove(
+    @Param('id') id: string,
+    @Query('strategy') strategy?: string,
+    @Query('targetId') targetId?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.models.remove(
+      id,
+      parseDeleteResolution(strategy, targetId),
+      principal,
+    );
   }
 
   @Post(':id/restore')

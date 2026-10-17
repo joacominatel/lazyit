@@ -2,7 +2,7 @@
  * Pre-existing test-double debt: this spec drives a hand-rolled Prisma double (untyped `any` mock
  * methods) so the whole-file lint-on-changed-files gate surfaces hundreds of type-aware findings on
  * intentional test doubles. Scoped to this spec file only — production code is never touched by this. */
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ImportMappingSchema, type ImportMapping } from '@lazyit/shared';
 import { ImportDryRunService } from './dry-run.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -642,15 +642,73 @@ describe('ImportDryRunService — dry-run writes NOTHING + plumbing', () => {
     expect(report.result.counts.total).toBe(1);
     expect(report.result.rows[0].status).toBe('valid');
   });
+});
 
-  it('saveResolutionPlan persists to the session (owner-scoped) and 404s otherwise', async () => {
-    prisma = makePrisma({});
-    const service = new ImportDryRunService(prisma);
+describe('ImportDryRunService.saveResolutionPlan — owner scope + status gate (AUD-051)', () => {
+  function planPrisma(session: { status: string; mapping: unknown }) {
+    const updates: any[] = [];
+    const double = {
+      importSession: {
+        findFirst: async (args: any) =>
+          args.where.ownerId === OWNER ? session : null,
+        updateMany: async (args: { where: { status: { in: string[] } } }) => {
+          updates.push(args);
+          return {
+            count: args.where.status.in.includes(session.status) ? 1 : 0,
+          };
+        },
+      },
+    } as unknown as PrismaService;
+    return { double, updates };
+  }
+
+  it.each(['MAPPED', 'DRY_RUN'])(
+    'freezes the plan on a %s session with a mapping',
+    async (status) => {
+      const { double, updates } = planPrisma({ status, mapping: {} });
+      await expect(
+        new ImportDryRunService(double).saveResolutionPlan('s', OWNER, {
+          conflicts: [],
+        }),
+      ).resolves.toBeUndefined();
+      expect(updates).toHaveLength(1);
+      expect(updates[0].data.status).toBe('DRY_RUN');
+    },
+  );
+
+  it.each([
+    'PENDING',
+    'PARSING',
+    'PARSED',
+    'COMMITTING',
+    'COMMITTED',
+    'FAILED',
+  ])('409s on a %s session and never rewinds it', async (status) => {
+    const { double, updates } = planPrisma({ status, mapping: {} });
     await expect(
-      service.saveResolutionPlan('s', OWNER, { conflicts: [] }),
-    ).resolves.toBeUndefined();
+      new ImportDryRunService(double).saveResolutionPlan('s', OWNER, {
+        conflicts: [],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('409s on a MAPPED session that has no mapping', async () => {
+    const { double, updates } = planPrisma({ status: 'MAPPED', mapping: null });
     await expect(
-      service.saveResolutionPlan('s', 'someone-else', { conflicts: [] }),
+      new ImportDryRunService(double).saveResolutionPlan('s', OWNER, {
+        conflicts: [],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("404s for another owner's session", async () => {
+    const { double } = planPrisma({ status: 'MAPPED', mapping: {} });
+    await expect(
+      new ImportDryRunService(double).saveResolutionPlan('s', 'someone-else', {
+        conflicts: [],
+      }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

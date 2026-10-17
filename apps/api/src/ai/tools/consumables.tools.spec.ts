@@ -48,6 +48,7 @@ import { LocalCredentialService } from '../../auth/local/local-credential.servic
 import type { Principal } from '../../auth/principal';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { ConsumablesController } from '../../consumables/consumables.controller';
 import { ConsumablesService } from '../../consumables/consumables.service';
@@ -660,6 +661,7 @@ describe('consumables toolset (W2-7)', () => {
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: ConsumablesService, useValue: consumables },
+        { provide: ExportService, useValue: {} },
         {
           provide: AI_SETTINGS_READER,
           useValue: {
@@ -1188,6 +1190,29 @@ describe('consumables toolset (W2-7)', () => {
           ),
         ].sort(),
       );
+    });
+
+    it('consumable_update tells the model that null clears each nullable field (#1584)', async () => {
+      const [update] = (await tools.list(mcp(actor('ADMIN')))).filter(
+        (t) => t.name === 'consumable_update',
+      );
+      const properties = (
+        update.inputSchema as {
+          properties: Record<
+            string,
+            { anyOf?: Array<{ type?: unknown }>; description?: string }
+          >;
+        }
+      ).properties;
+      const nullable = Object.entries(properties).filter(([, p]) =>
+        (p.anyOf ?? []).some((branch) => branch.type === 'null'),
+      );
+      expect(nullable.map(([field]) => field).sort()).toEqual(
+        ['categoryId', 'description', 'minStock', 'notes', 'sku'].sort(),
+      );
+      for (const [, p] of nullable) {
+        expect(p.description).toMatch(/null clears it/);
+      }
     });
 
     it('annotates the writes from their class: update is destructive, a movement is not idempotent', async () => {

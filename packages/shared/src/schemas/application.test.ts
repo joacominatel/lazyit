@@ -291,6 +291,27 @@ describe("Application seat/license tracking (#949)", () => {
     ).toBe(true);
   });
 
+  test("UpdateApplicationSchema: null clears the optional fields and detaches the category (AUD-084)", () => {
+    const cleared = {
+      description: null,
+      url: null,
+      vendor: null,
+      categoryId: null,
+      metadata: null,
+      notes: null,
+    };
+    expect(UpdateApplicationSchema.parse(cleared)).toEqual(cleared);
+  });
+
+  test("UpdateApplicationSchema: required columns stay non-nullable", () => {
+    expect(UpdateApplicationSchema.safeParse({ name: null }).success).toBe(false);
+    expect(UpdateApplicationSchema.safeParse({ isCritical: null }).success).toBe(false);
+  });
+
+  test("UpdateApplicationSchema: a nullable url still refuses an executable scheme", () => {
+    expect(UpdateApplicationSchema.safeParse({ url: "javascript:alert(1)" }).success).toBe(false);
+  });
+
   test("UpdateApplicationSchema: REJECTS the derived seatsUsed (read-only)", () => {
     expect(UpdateApplicationSchema.safeParse({ seatsUsed: 5 }).success).toBe(
       false,

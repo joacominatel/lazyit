@@ -1,9 +1,12 @@
 import type {
   AssetCategory,
+  AssetCategoryDeleteImpact,
   CreateAssetCategory,
+  DeleteResolution,
   UpdateAssetCategory,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Data-access for Asset categories. The list read powers the asset list's category filter; the
@@ -33,9 +36,16 @@ export function updateAssetCategory(
   });
 }
 
-/** Soft-delete an asset category (returns the now-archived record). */
-export function deleteAssetCategory(id: string): Promise<AssetCategory> {
-  return apiFetch<AssetCategory>(`/asset-categories/${id}`, {
+export function getAssetCategoryDeleteImpact(id: string): Promise<AssetCategoryDeleteImpact> {
+  return apiFetch<AssetCategoryDeleteImpact>(`/asset-categories/${id}/delete-impact`);
+}
+
+/** Soft-delete an asset category; while models are still filed under it, `resolution` says where they go. */
+export function deleteAssetCategory(
+  id: string,
+  resolution?: DeleteResolution,
+): Promise<AssetCategory> {
+  return apiFetch<AssetCategory>(`/asset-categories/${id}${deleteResolutionQuery(resolution)}`, {
     method: "DELETE",
   });
 }

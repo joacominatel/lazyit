@@ -38,8 +38,14 @@ import {
   useUpdateUser,
 } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { notifyUserError } from "./role-ceiling";
 import { ManagerField } from "./manager-field";
+import { DirectoryProfileFields } from "./directory-profile-fields";
 import {
+  directoryProfilePatch,
+  directoryProfileValues,
+  isProfileManagedByDirectory,
+  newDirectoryProfile,
   toResolverInput,
   type UserFormValues,
   wireShapeResolver,
@@ -64,6 +70,7 @@ function toFormValues(user?: User): UserFormValues {
       legajo: user.legajo ?? "",
       username: user.username ?? "",
       manager: managerDescriptorToFormValue(user.manager),
+      ...directoryProfileValues(user.directoryAttrs),
       isActive: user.isActive,
     };
   }
@@ -74,6 +81,8 @@ function toFormValues(user?: User): UserFormValues {
     legajo: "",
     username: "",
     manager: EMPTY_MANAGER,
+    jobTitle: "",
+    department: "",
   };
 }
 
@@ -101,6 +110,7 @@ export function UserFormDialog({
   onCreated,
 }: UserFormDialogProps) {
   const t = useTranslations("users.form");
+  const tUsers = useTranslations("users");
   const tc = useTranslations("common");
   const isEdit = user != null;
   const createUser = useCreateUser();
@@ -114,7 +124,7 @@ export function UserFormDialog({
   // exactly once instead of re-serializing the resolver's already-wire output.
   const resolver = wireShapeResolver<UserFormValues>(
     zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema),
-    toResolverInput,
+    (values) => toResolverInput(values, user),
   );
 
   const form = useForm<UserFormValues>({
@@ -148,6 +158,7 @@ export function UserFormDialog({
             legajo: legajo === "" ? null : legajo,
             username: username === "" ? null : username,
             manager,
+            ...directoryProfilePatch(values, user),
           },
         },
         {
@@ -156,9 +167,8 @@ export function UserFormDialog({
             onOpenChange(false);
           },
           // The API's own message takes precedence (surfaced verbatim with the request id) — e.g. a
-          // duplicate email (409) or an identity-provider write-back failure (503). The fallback only
-          // applies if the response carried no message.
-          onError: (error) => notifyError(error, t("toast.updateError")),
+          // duplicate email (409). The fallback only applies if the response carried no message.
+          onError: (error) => notifyUserError(error, t("toast.updateError"), tUsers),
         },
       );
     } else {
@@ -172,6 +182,7 @@ export function UserFormDialog({
           ...(username !== "" ? { username } : {}),
           // null = "no manager"; a set value is the XOR input union. Always explicit.
           manager,
+          ...newDirectoryProfile(values),
         },
         {
           onSuccess: (created) => {
@@ -322,6 +333,12 @@ export function UserFormDialog({
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
+            />
+
+            <DirectoryProfileFields
+              control={form.control}
+              idPrefix="user"
+              managedByDirectory={user != null && isProfileManagedByDirectory(user)}
             />
 
             <Controller

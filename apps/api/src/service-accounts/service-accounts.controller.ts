@@ -59,8 +59,9 @@ class UpdateServiceAccountDto extends createZodDto(
 
 /**
  * Service Accounts management API (ADR-0048). EVERY route is gated by `@RequirePermission('settings:manage')`
- * — the ADMIN-tier coarse capability (ADR-0046): only an admin manages service accounts. The controller
- * is thin; the {@link ServiceAccountsService} owns the token lifecycle + audit.
+ * — the ADMIN-tier coarse capability (ADR-0046). A non-ADMIN holder of a delegated `settings:manage` can
+ * never give an account a verb its own role lacks (403 `PERMISSION_CEILING_EXCEEDED`, SEC-088). The
+ * controller is thin; the {@link ServiceAccountsService} owns the token lifecycle, the ceiling and audit.
  *
  * SECRETS: `POST /` and `POST /:id/rotate` are the ONLY routes that ever return the cleartext token, and
  * each returns it EXACTLY ONCE (it is never persisted in cleartext and never recoverable). Every other
@@ -85,7 +86,8 @@ export class ServiceAccountsController {
     description:
       'Creates a non-human principal with the given name + direct permission grants and returns the ' +
       'full lazyit-native token (lzit_sa_<id>_<secret>) EXACTLY ONCE. Store it now — only its SHA-256 ' +
-      'hash is persisted; the secret is never returned again. expiresAt (optional) must be in the future.',
+      'hash is persisted; the secret is never returned again. expiresAt (optional) must be in the future. ' +
+      "A verb the caller's own role lacks is refused with 403 `PERMISSION_CEILING_EXCEEDED` (SEC-088).",
   })
   @ApiCreatedResponse({ type: ServiceAccountWithSecretDto })
   create(
@@ -133,7 +135,8 @@ export class ServiceAccountsController {
     description:
       'Rename, edit the description, toggle isActive, change expiresAt (null clears it), and/or REPLACE ' +
       'the permission grant set wholesale. A grant change is audited (PERMISSION_CHANGE). The token is ' +
-      'never touched here — use POST /:id/rotate to mint a new secret.',
+      "never touched here — use POST /:id/rotate to mint a new secret. Adding a verb the caller's role lacks, " +
+      'or re-enabling or extending an account that holds one, is refused with 403 `PERMISSION_CEILING_EXCEEDED` (SEC-088).',
   })
   @ApiOkResponse({ type: ServiceAccountDto })
   update(
@@ -150,7 +153,8 @@ export class ServiceAccountsController {
     summary: 'Rotate the token (ADMIN — settings:manage)',
     description:
       'Mints a NEW secret (the old token stops working immediately) and returns the new full token ' +
-      'EXACTLY ONCE. The account id (and the token id segment) is unchanged.',
+      'EXACTLY ONCE. The account id (and the token id segment) is unchanged. Refused with 403 ' +
+      "`PERMISSION_CEILING_EXCEEDED` when the account holds a verb the caller's role lacks (SEC-088).",
   })
   @ApiCreatedResponse({ type: ServiceAccountWithSecretDto })
   rotate(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
@@ -176,7 +180,8 @@ export class ServiceAccountsController {
     summary: 'Restore a revoked service account (ADMIN — settings:manage)',
     description:
       'Clears the revocation (deletedAt). The EXISTING token resumes working — rotate separately to ' +
-      'invalidate it. Idempotent if already live. Audited (RESTORE).',
+      'invalidate it. Idempotent if already live. Audited (RESTORE). Refused with 403 ' +
+      "`PERMISSION_CEILING_EXCEEDED` when the account holds a verb the caller's role lacks (SEC-088).",
   })
   @ApiOkResponse({ type: ServiceAccountDto })
   restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {

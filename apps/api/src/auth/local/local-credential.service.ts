@@ -107,8 +107,7 @@ export interface VerifyResult {
  *
  * Split from the login flow (LoginService) and the guard on purpose: this class NEVER reads the DB and
  * NEVER touches Secret-Manager vault key material (INV-10, §7) — it only hashes/verifies passwords and
- * signs/verifies the first-party session JWT. `LocalIdentityProvider` stays a pure no-op; local
- * credentials live here, not in the IdP mirroring seam.
+ * signs/verifies the first-party session JWT.
  */
 @Injectable()
 export class LocalCredentialService {

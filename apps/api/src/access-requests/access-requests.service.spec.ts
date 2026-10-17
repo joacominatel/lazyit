@@ -5,10 +5,16 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { CreateAccessRequestSchema } from '@lazyit/shared';
 import { AccessRequestsService } from './access-requests.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
+import {
+  postgresLikeFindMany,
+  walkAllPages,
+} from '../../test/prisma/offset-window';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for the P2002 error class + erased types; the stand-in is defined INSIDE the factory
@@ -16,8 +22,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 jest.mock('../../generated/prisma/client', () => {
   class KnownRequestError extends Error {
     code: string;
-    meta?: { target?: string | string[] };
-    constructor(code: string, meta?: { target?: string | string[] }) {
+    meta?: Record<string, unknown>;
+    constructor(code: string, meta?: Record<string, unknown>) {
       super(code);
       this.code = code;
       this.meta = meta;
@@ -36,7 +42,7 @@ const FakeKnownRequestError = (
     Prisma: {
       PrismaClientKnownRequestError: new (
         code: string,
-        meta?: { target?: string | string[] },
+        meta?: Record<string, unknown>,
       ) => Error;
     };
   }
@@ -78,6 +84,8 @@ type EmitCall = [
     recipientUserId?: string | null;
     severity?: string;
     summary?: string | null;
+    title?: string;
+    metadata?: Record<string, unknown>;
   },
 ];
 type GrantCall = [Record<string, unknown>];
@@ -87,7 +95,7 @@ describe('AccessRequestsService', () => {
   let service: AccessRequestsService;
   let accessRequest: AccessRequestMock;
   let application: { findFirst: jest.Mock; findUnique: jest.Mock };
-  let user: { findUnique: jest.Mock };
+  let user: { findUnique: jest.Mock; findFirst: jest.Mock };
   let prisma: {
     $transaction: jest.Mock;
     accessRequest: AccessRequestMock;
@@ -105,7 +113,7 @@ describe('AccessRequestsService', () => {
       count: jest.fn(),
     };
     application = { findFirst: jest.fn(), findUnique: jest.fn() };
-    user = { findUnique: jest.fn() };
+    user = { findUnique: jest.fn(), findFirst: jest.fn() };
     prisma = {
       accessRequest,
       application,
@@ -183,14 +191,22 @@ describe('AccessRequestsService', () => {
       application.findFirst.mockResolvedValue({ id: APP_ID });
       accessRequest.findFirst.mockResolvedValue(null);
       accessRequest.create.mockRejectedValue(
-        new FakeKnownRequestError('P2002', {
-          target: 'access_requests_requester_application_pending_key',
-        }),
+        new FakeKnownRequestError(
+          'P2002',
+          adapterPgUniqueViolationMeta(
+            { index: 'access_requests_requester_application_pending_key' },
+            'AccessRequest',
+          ),
+        ),
       );
 
       await expect(
         service.create(REQUESTER, { applicationId: APP_ID }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toThrow(
+        new ConflictException(
+          'You already have a pending access request for this application.',
+        ),
+      );
     });
 
     it('400s when the application is not live', async () => {
@@ -222,6 +238,129 @@ describe('AccessRequestsService', () => {
       await expect(
         service.create(REQUESTER, { applicationId: APP_ID }),
       ).resolves.toMatchObject({ id: REQ_ID });
+    });
+  });
+
+  describe('create on behalf of another person (#1645)', () => {
+    const FILER = DECIDER;
+
+    function primeCreate(target: Record<string, unknown> | null) {
+      application.findFirst.mockResolvedValue({ id: APP_ID });
+      user.findFirst.mockResolvedValue(target);
+      accessRequest.findFirst.mockResolvedValue(null);
+      accessRequest.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ id: REQ_ID, accessLevel: null, ...data }),
+      );
+      application.findUnique.mockResolvedValue({ name: 'Jira' });
+      user.findUnique.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            where.id === FILER
+              ? { firstName: 'Hal', lastName: 'Desk' }
+              : { firstName: 'Ada', lastName: 'Lovelace' },
+          ),
+      );
+    }
+
+    it('files the request for the target and records the caller as filedById', async () => {
+      primeCreate({ isActive: true, directoryOnly: false });
+
+      const result = await service.create(FILER, {
+        applicationId: APP_ID,
+        requesterId: REQUESTER,
+      });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(REQUESTER);
+      expect(data.filedById).toBe(FILER);
+      expect(result).toMatchObject({
+        requesterId: REQUESTER,
+        filedById: FILER,
+      });
+      const emitted = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitted.title).toBe(
+        'Hal Desk requested access to Jira on behalf of Ada Lovelace',
+      );
+      expect(emitted.metadata).toMatchObject({ filedById: FILER });
+    });
+
+    it('treats the caller naming themselves as a self-service request', async () => {
+      primeCreate(null);
+
+      await service.create(REQUESTER, {
+        applicationId: APP_ID,
+        requesterId: REQUESTER,
+      });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(REQUESTER);
+      expect(data.filedById).toBeNull();
+      expect(user.findFirst).not.toHaveBeenCalled();
+      const emitted = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitted.title).toBe('Ada Lovelace requested access to Jira');
+      expect(emitted.metadata).not.toHaveProperty('filedById');
+    });
+
+    it('treats an uppercase copy of the caller id as self-filed', async () => {
+      primeCreate(null);
+      const self = '11111111-1111-4111-8111-11111111abcd';
+      const requesterId = CreateAccessRequestSchema.shape.requesterId.parse(
+        self.toUpperCase(),
+      );
+
+      await service.create(self, { applicationId: APP_ID, requesterId });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(self);
+      expect(data.filedById).toBeNull();
+      expect(user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['offboarded or missing', null],
+      ['inactive', { isActive: false, directoryOnly: false }],
+      ['directory-only (no account)', { isActive: true, directoryOnly: true }],
+    ])('refuses a %s target with 400 and writes nothing', async (_, target) => {
+      primeCreate(target);
+
+      const err: unknown = await service
+        .create(FILER, { applicationId: APP_ID, requesterId: REQUESTER })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        code: 'ACCESS_REQUEST_TARGET_UNAVAILABLE',
+      });
+      expect(accessRequest.create).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('applies the one-pending rule to the target, not the filer', async () => {
+      primeCreate({ isActive: true, directoryOnly: false });
+      accessRequest.findFirst.mockResolvedValue({ id: 'existing' });
+
+      await expect(
+        service.create(FILER, {
+          applicationId: APP_ID,
+          requesterId: REQUESTER,
+        }),
+      ).rejects.toThrow(
+        new ConflictException(
+          'This person already has a pending access request for this application.',
+        ),
+      );
+      const lookup = (
+        accessRequest.findFirst.mock.calls as Array<
+          [{ where: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(lookup.where).toEqual({
+        requesterId: REQUESTER,
+        applicationId: APP_ID,
+        status: 'PENDING',
+      });
+      expect(accessRequest.create).not.toHaveBeenCalled();
     });
   });
 
@@ -526,6 +665,25 @@ describe('AccessRequestsService', () => {
         applicationId: APP_ID,
         requesterId: REQUESTER,
       });
+    });
+
+    it('serves every request exactly once across pages when they share a createdAt (#1644)', async () => {
+      const createdAt = new Date('2026-10-01T00:00:00Z');
+      const rows = Array.from({ length: 23 }, (_, i) => ({
+        id: `req_${String(i).padStart(3, '0')}`,
+        createdAt,
+      }));
+      accessRequest.findMany.mockImplementation(postgresLikeFindMany(rows));
+      accessRequest.count.mockResolvedValue(rows.length);
+
+      const served = await walkAllPages(
+        (offset) =>
+          service.findPage({}, { limit: 5, offset, deleted: 'active' }),
+        5,
+      );
+
+      expect(served).toHaveLength(rows.length);
+      expect(new Set(served)).toEqual(new Set(rows.map((r) => r.id)));
     });
   });
 });

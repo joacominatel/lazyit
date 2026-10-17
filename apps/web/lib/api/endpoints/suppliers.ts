@@ -61,19 +61,27 @@ export interface SupplierListParams {
   deleted?: "only";
 }
 
+export const SUPPLIER_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function supplierFilterParams(params: SupplierListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 export function getSuppliers(
   params: SupplierListParams = {},
   signal?: AbortSignal,
 ): Promise<SupplierListPage> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = supplierFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<SupplierListPage>(search ? `${BASE}?${search}` : BASE, { signal });
 }

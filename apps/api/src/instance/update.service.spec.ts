@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '../../generated/prisma/client';
 import { UpdateService, UPDATE_CANCELLED_REASON } from './update.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,7 +10,15 @@ import type { Principal } from '../auth/principal';
 // No DB / no real Prisma client — the service only touches updateSettings + updateRun, both mocked.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: { PrismaClientKnownRequestError: class extends Error {} },
+  Prisma: {
+    PrismaClientKnownRequestError: class extends Error {
+      code: string;
+      constructor(message: string, opts: { code: string }) {
+        super(message);
+        this.code = opts.code;
+      }
+    },
+  },
 }));
 
 const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -531,6 +540,81 @@ describe('UpdateService', () => {
         id: 1,
         status: 'requested',
         toVersion: 'v1.5.0',
+      });
+    });
+
+    it('answers 409 when a concurrent enqueue wins the one-active-run index (AUD-061)', async () => {
+      runFindFirst.mockResolvedValue(null); // both requests passed the read
+      runCreate.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      const service = await build();
+
+      await expect(
+        service.enqueue({ toVersion: 'v1.5.0' }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does not mask other insert failures as a conflict', async () => {
+      runFindFirst.mockResolvedValue(null);
+      const boom = new Error('connection lost');
+      runCreate.mockRejectedValue(boom);
+      const service = await build();
+
+      await expect(
+        service.enqueue({ toVersion: 'v1.5.0' }, admin),
+      ).rejects.toBe(boom);
+    });
+  });
+
+  describe('getStatus', () => {
+    beforeEach(() => runFindMany.mockResolvedValue([]));
+
+    const cached = (latestVersion: string) => ({
+      id: 'singleton',
+      checkEnabled: false,
+      latestVersion,
+      latestHtmlUrl: null,
+      behindBy: 1,
+      securityRelevant: true,
+      checkedAt: null,
+    });
+
+    it('stops reporting "behind" once the running version reaches the cached latest (AUD-062)', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.4.2')); // cached before upgrading to v1.4.2
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({
+        latestVersion: 'v1.4.2',
+        behindBy: 0,
+        securityRelevant: false,
+      });
+    });
+
+    it('reports nothing behind when the cached latest is older than the running version', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.3.0'));
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({ behindBy: 0, securityRelevant: false });
+    });
+
+    it('serves the cached gap while the cached latest is still newer', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.5.0'));
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({
+        latestVersion: 'v1.5.0',
+        behindBy: 1,
+        securityRelevant: true,
       });
     });
   });

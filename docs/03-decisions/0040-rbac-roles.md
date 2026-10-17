@@ -3,7 +3,7 @@ title: "ADR-0040: Minimal RBAC — ADMIN / MEMBER / VIEWER role on User"
 tags: [adr, auth, authz, rbac, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-09-26
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,16 @@ accepted — 2026-06-01 (CEO decision). Builds directly on [[0038-jit-user-provi
 `JwtAuthGuard` that AUTHENTICATES every request and JIT-provisions a `User`) and supersedes the
 authorization side of [[0016-auth-strategy-deferred]]. This is the authorization layer that ADR-0038
 deliberately did not add: ADR-0038 sets `request.user`, ADR-0040 decides **what that user may do**.
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the `IdentityProvider` scaffold, the
+`IDENTITY_PROVIDER_TYPE` variable and the IdP role mirror described under Consequences are gone; the mode is
+read from `AUTH_MODE` and roles are never written to an IdP. DB-first authorization is unchanged.
+
+**Amended** — 2026-10-15 (SEC-088, AUD-002, AUD-040; CEO decision): a role ceiling on user administration
+and a stricter definition of a usable admin. See *Amendment — role ceiling and usable admins* below.
+**Amended** — 2026-10-16 (SEC-088; CEO decision): a clone copies only what the caller could grant by
+hand, and a promotion revokes the user's outstanding one-time credentials. See *Amendment — clone and
+promotion* below.
 
 ## Context
 
@@ -90,6 +100,8 @@ Concretely:
    `CreateUser`/`UpdateUser`. Accepting `role` on those payloads is safe **only because the Users
    controller is ADMIN-gated** — a non-admin never reaches it, so a non-admin can never set or
    escalate a role (no self-promotion path exists).
+   *Amended 2026-10-15 (SEC-088):* that premise stopped holding once [[0046-roles-permissions-v2]] made
+   `user:manage` delegable to MEMBER and VIEWER. The service-level role ceiling (below) now carries it.
 
 ### Role → capability matrix
 
@@ -168,6 +180,14 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   demotions both pass), never under-protects.
   *Amended 2026-09-23 (SEC-021, #1319):* deactivation (`isActive=false`) is also guarded, and the count
   is live **and active** ADMINs — an inactive account cannot authenticate, so it never counts.
+  *Amended 2026-10-14 (AUD-041):* the race description above was backwards. Two near-simultaneous
+  removals both passing **under**-protects: two ADMINs demoting or offboarding each other could leave
+  zero. The guard now runs inside the same transaction as the write: it takes a transaction-scoped
+  advisory lock on the admin set, re-reads the target and re-counts, so the second request waits, sees
+  the first one's result and gets the 409. Who counts as an admin is unchanged.
+  *Amended 2026-10-15 (AUD-040):* who counts is now a **usable** admin — see the amendment below.
+  *Amended 2026-10-16 (SEC-088 follow-up):* the 409 body carries `code: 'LAST_ADMIN_REQUIRED'`, so a
+  client matches the code instead of the wording. The message is unchanged.
 - **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
   Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
   another, so a single admin can never quietly elevate/strip their own role. The controller passes
@@ -219,6 +239,79 @@ newly-provisioned identity can read but mutate nothing until an ADMIN promotes i
 
 The MEMBER role itself is unchanged (still the normal writeable tier); only the *default* moved. The
 [role → capability matrix](#role--capability-matrix) above still holds.
+
+## Amendment — role ceiling and usable admins (2026-10-15, SEC-088 / AUD-002 / AUD-040)
+
+CEO decision on the 2026-10-10 backend audit: *"the granted role cannot exceed the caller's; only an
+ADMIN can act on an ADMIN"* and *"the last-admin guard counts only non-directory accounts with a login
+credential"*.
+
+**Role ceiling.** The roles are ordered `ADMIN > MEMBER > VIEWER` (`canManageRole` in `@lazyit/shared`).
+Every `user:manage` write in `UsersService` reads the caller's DB role (INV-1) and refuses with **403**
+`ROLE_CEILING_EXCEEDED` when:
+
+- the role it grants — on create, clone or a role change — ranks above the caller's; or
+- the user it acts on — update (any field), reset password, provision a local account, offboard/delete or
+  restore — ranks above the caller's.
+
+The target's role is read twice: once before the work starts, and again under a row lock
+(`SELECT "role" … FOR UPDATE`) inside the write transaction, so a concurrent promotion of the target cannot
+slip between the check and the write (update, password reset, offboard, restore).
+
+So only an ADMIN can create, promote to, demote, edit, reset, offboard or restore an ADMIN. A peer is
+reachable: a MEMBER holding `user:manage` manages MEMBERs and VIEWERs. The self-role-change refusal is
+unchanged. The order is fixed by role, not by what the matrix grants each role: a VIEWER configured with
+more permissions than MEMBER still ranks below it. The rule lives in the service, so the web UI, the API
+and the AI/MCP tools (which call the same routes) all get it.
+
+A **service account** has no role and is never ADMIN-equivalent (INV-SA-3), so its ceiling is the highest
+non-ADMIN role. It cannot hold `user:manage` in the first place (SEC-011, stripped at principal load by
+SEC-073); the ceiling is the second layer on the two routes that accept an SA actor (offboard, restore).
+A call with no actor at all fails closed at VIEWER. The only such caller is the directory sync, which only
+creates VIEWER directory persons; the bulk import always passes the importing human.
+
+**Usable admin.** The last-admin guard counts an ADMIN only when it is live, active, **not directory-only**
+and holds a **login credential** for the running mode: a password hash in local mode, an `externalId` (an
+IdP link from a first sign-in) under OIDC. The development shim signs anyone in, so it needs no
+credential. The refusal now reads "Cannot remove the last administrator who can sign in. Another
+administrator must sign in, or be promoted, first." A directory person's role can no longer be changed (**422**
+`DIRECTORY_PERSON_ROLE_LOCKED`, INV-DIR-1): it stays VIEWER until it is onboarded.
+
+**Consequences.**
+
+- Delegating `user:manage` no longer hands out ADMIN. The `settings:manage` path of SEC-088 (a delegate
+  editing the matrix for its own role) is **not** closed by this amendment. *(Closed 2026-10-16:
+  [[0046-roles-permissions-v2]] → Amendment — the matrix is edited by an ADMIN only.)*
+- The last-admin guard may now refuse an action it used to allow: on an OIDC instance whose other ADMINs
+  never signed in, the only signed-in ADMIN can no longer be demoted, deactivated or offboarded. This is
+  the intent, since those other ADMINs cannot administer anything until they sign in.
+- No migration and no data change. Existing roles stay as they are, including any directory person or
+  ADMIN created above a caller's rank before this change; the rule applies on the next write.
+
+## Amendment — clone and promotion (2026-10-16, SEC-088)
+
+CEO decision closing the remaining `user:manage` paths of SEC-088.
+
+**A clone copies only what the caller could grant by hand.** `POST /users/:id/clone` mirrors the source's
+asset assignments only when the caller holds `asset:write`, and its access grants only when it holds
+`accessGrant:grant` — the verbs of `POST /asset-assignments` and `POST /access-grants`. The caller's
+permissions are resolved DB-first from its role (INV-1). A selected row the caller cannot copy is
+reported in the result's `skipped` list with reason `permission_required`, never dropped silently; the new
+user is still created. See [[0058-user-manager-and-clone-actions]].
+
+**A promotion revokes one-time credentials.** When `PATCH /users/:id` raises a user's role up the
+`ADMIN > MEMBER > VIEWER` order, the same transaction revokes what a lower-ranked `user:manage` holder may
+have minted for that user: a temporary password not yet changed (`mustChangePassword` with a hash — the
+hash is cleared and the session and MCP epochs bump) and every live password-reset link (marked used).
+The promotion is judged against the target's role under the row lock. The `ROLE_CHANGED` row carries
+`credentialsRevoked: true` when anything was revoked. lazyit does not record who minted a credential, so
+the rule applies to every promotion, an ADMIN's own temporary password included: issue a new one after
+promoting. A demotion or a same-role edit revokes nothing. Under OIDC no such credential exists. The limit: a
+temporary password already replaced is the user's own password and is not revoked, so a caller who signed
+in with it and set the password before the promotion keeps that access.
+
+No migration and no data change: rows written before this amendment stay; the rule applies on the next
+clone or promotion.
 
 Related: [[0038-jit-user-provisioning]] · [[0016-auth-strategy-deferred]] ·
 [[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] ·

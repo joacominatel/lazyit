@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-09-26
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -17,6 +17,16 @@ deciders: [Joaquín Minatel]
 ACLs — Option B's per-resource matrix stays rejected). It **extends** [[0043-zitadel-source-of-truth]]
 (DB-first authorization, IdP write-back, BYOI): permissions are a new DB-first authorization source
 that, like roles, is never read from a token claim and never synced to the IdP.
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the three coarse roles no longer keep a
+`grantRole` write-back — lazyit writes nothing to the IdP, so roles are lazyit-local like permissions.
+
+**Amended** — 2026-10-15 (SEC-088, AUD-002): a delegated `user:manage` is bounded by a role ceiling. See
+*Amendment — the role ceiling on a delegated `user:manage`* below.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): `PUT /config/permissions` is ADMIN-only; a delegated
+`settings:manage` no longer edits the matrix. See *Amendment — the matrix is edited by an ADMIN only* below.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): a delegated `settings:manage` no longer saves SMTP, and
+mints service-account verbs only within its own role. See *Amendment — SMTP and service accounts* below.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -217,6 +227,9 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   `/users/:id/assignments`). `GET /users/me` stays OPEN (the self-read the frontend gates admin UI
   off). `GET /search` is gated `search:read` (open to all) and additionally drops the `users` facet
   from results for a caller without `user:read`, so a VIEWER cannot enumerate emails via search.
+  *Amended 2026-10-14 (AUD-015):* "open to all" held only for the default matrix. `GET /search` now drops
+  **every** index whose `<domain>:read` the caller lacks (the same read its dedicated routes require), not
+  only `users` and the purchase indexes — see [[0035-search-architecture]], amendment 2026-10-14.
 - **P4 — migrate the existing `@Roles` sites** to `@RequirePermission`, then RETIRE the legacy path.
   (done) The 63 `@Roles` write/lifecycle gates were swapped 1:1 to the `@RequirePermission` whose
   seed-holders EXACTLY equal the old `@Roles` set — **behavior-preserving**, proven by a golden parity
@@ -250,7 +263,8 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
       and `VIEWER` keys, so an `ADMIN`/extra key → 400; combined with the resolver's ADMIN-is-full
       short-circuit, ADMIN can never be scoped down (INV-8). MEMBER/VIEWER are otherwise fully
       configurable within the catalog (granting MEMBER a `:delete` or a coarse verb is the intended
-      feature — the only guardrails are ADMIN-immutable + catalog-membership).
+      feature — the only guardrails are ADMIN-immutable + catalog-membership). *Amended 2026-10-15:* a
+      delegated `user:manage` is additionally bounded by the role ceiling (see the amendment below).
     - **Transactional + audited + cache-coherent**: per editable role the desired set is diffed against
       the current rows; revoked rows are deleted and granted rows created in ONE `$transaction`, and one
       immutable `PermissionAuditLog` row is appended per change (`GRANT`/`REVOKE`, attributed to the
@@ -272,6 +286,18 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   (the backend has no block either; an admin-initiated delegation is accepted). `can(permission)` infra
   added (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed); the app-wide
   migration of existing `useCanWrite` gate sites to `can()` is a separate follow-up.
+  **Amended 2026-10-08 (#1540) — the role-first editor becomes one role × capability matrix**, by CEO
+  decision on the approved round-3 mockup. The original "one role at a time" screen proved hard to read:
+  two pages (near-empty role cards, then ~3600px of switches with long descriptions) and no way to
+  compare MEMBER with VIEWER without flipping tabs and remembering. `settings/roles` is now ONE page:
+  capabilities in rows (grouped by pillar, collapsible, with an n/m summary per role), ADMIN shown locked
+  as a reference column, MEMBER and VIEWER editable side by side, a preset selector in each role's
+  column header, descriptions behind "?" tips and ⚠ for admin-level capabilities. Both roles stage
+  together and save in the same full-matrix `PUT /config/permissions` behind one save bar; the
+  consequential confirm runs over both roles exactly as before, fine-tune stays below the matrix, and the
+  separate "what this role can do" summary is dropped because the matrix is that summary.
+  `settings/roles/permissions` redirects to `settings/roles`. Nothing in the API, the catalog, the human
+  layer or the "fully configurable, never client-blocked" rule changes.
 - **P6b — permission-aware UI gating** (the call-site migration, `apps/web`). (done) Every former
   `useCanWrite`/`isAdmin` write/delete gate now uses `can('domain:action')` matching its backend
   `@RequirePermission` (write→`:write`, delete/restore→`:delete`, grants→`accessGrant:grant`, user
@@ -310,6 +336,50 @@ in the deployment config.
 unaffected. The TTL only bounds how long a cached answer lives; it does not change what the DB
 resolves. A cache entry expiring during a user's active session causes at most a single extra DB
 read on the next `@RequirePermission` check — no user-visible disruption.
+
+### Amendment — the role ceiling on a delegated `user:manage` (SEC-088, AUD-002, 2026-10-15)
+
+P5 and P7 accepted delegating the coarse verbs to MEMBER or VIEWER with no ceiling. For `user:manage`
+that made every holder ADMIN-equivalent: it could create an ADMIN, promote to ADMIN, or reset an ADMIN's
+password and sign in as them (SEC-088). By CEO decision the delegation stays, bounded: a holder grants and
+acts on roles at or below its own only, so only an ADMIN can create, promote to or act on an ADMIN. The
+rule, its error (`403 ROLE_CEILING_EXCEEDED`) and its service-account reading are specified in
+[[0040-rbac-roles]] → *Amendment — role ceiling and usable admins*.
+
+What stays as P5/P7 described: `user:manage` and the other coarse verbs remain grantable to MEMBER and
+VIEWER, and the matrix UI still warns rather than blocks. What is **not** bounded yet: a delegated
+`settings:manage` can still edit the matrix for its own role, and so grant itself `user:manage` (the
+second half of SEC-088, still open). Under the ceiling that reaches at most the holder's own role.
+*Closed 2026-10-16 by the next amendment.*
+
+### Amendment — the matrix is edited by an ADMIN only (SEC-088, 2026-10-16)
+
+CEO decision: editing the permission matrix and the directory connection is ADMIN-only until custom roles
+(#1560) give them their own verb; a delegated `settings:manage` no longer covers them. `PUT
+/config/permissions` keeps `@RequirePermission('settings:manage')` and adds `AdminOnlyGuard`, which refuses
+any caller that is not a human whose DB role is ADMIN with **403** `ADMIN_REQUIRED`, whatever the matrix
+grants its role. `GET /config/permissions` is unchanged: a `settings:manage` holder still reads the matrix.
+A service account was already refused on both routes (INV-SA-3) and still is.
+
+This narrows P5/P7 for one verb on one route. `settings:manage` stays delegable and still gates the rest
+of instance configuration. The matrix UI keeps offering `settings:manage` to MEMBER and VIEWER; a holder
+sees the matrix but cannot save it. The directory connection write follows the same rule
+([[0091-on-prem-ad-ldap-directory-source]]). No data change: an instance that delegated `settings:manage`
+keeps the rows, and the holders lose only the matrix and directory writes.
+
+### Amendment — SMTP and service accounts (SEC-088, 2026-10-16)
+
+CEO decision, closing SEC-088. Two more `settings:manage` surfaces reached past the holder's own role:
+- **SMTP.** Repointing outbound mail at a relay the holder controls, then requesting an ADMIN's password
+  reset, hands them the reset link. `PUT /config/smtp` now carries `AdminOnlyGuard` (**403**
+  `ADMIN_REQUIRED`); the read and the test send stay on `settings:manage`
+  ([[0079-instance-smtp-outbound-email]]).
+- **Service accounts.** A holder could mint a token with verbs its own role lacks. Every write that
+  issues or re-arms a token is now capped at the caller's own verbs (**403**
+  `PERMISSION_CEILING_EXCEEDED`, [[0048-service-accounts]]), the same "only what you could grant by
+  hand" rule as the user clone ([[0058-user-manager-and-clone-actions]]).
+
+`settings:manage` stays delegable for the rest of instance configuration. No data change.
 
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 

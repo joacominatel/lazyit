@@ -1,9 +1,9 @@
-import { Readable } from 'node:stream';
 import {
   BadRequestException,
   Controller,
   Get,
   Query,
+  Res,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -13,6 +13,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import type { DashboardSummary, RecentActivityQuery } from '@lazyit/shared';
 import {
   ACTIVITY_ACTOR_ME,
@@ -25,6 +26,7 @@ import {
   RecentActivityFilterOptionsDto,
   RecentActivityPageDto,
 } from './dashboard.dto';
+import { ExportService } from '../common/export';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
@@ -38,7 +40,10 @@ const MAX_EXPIRING_WITHIN_DAYS = 365;
 @ApiTags('dashboard')
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    private readonly dashboard: DashboardService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get('summary')
   @RequirePermission('dashboard:read')
@@ -180,7 +185,7 @@ export class DashboardController {
   @ApiProduces('text/csv')
   @ApiOperation({
     summary:
-      'Bulk CSV export of the WHOLE filtered activity range (issue #840), gated on logs:read like the feed. Takes the SAME optional filters as GET /dashboard/activity (entityType/entityId/actorId/action/from/to/q) and streams EVERY matching row newest-first — not just the visible page. limit/offset/page are ignored (the export is unpaginated). Cells are RFC-4180 escaped with a spreadsheet formula-injection guard.',
+      'CSV export of the WHOLE filtered activity range (issue #840, ADR-0103), gated on logs:read like the feed. Takes the SAME optional filters as GET /dashboard/activity (entityType/entityId/actorId/action/from/to/q) and streams every matching event newest-first, keyset-paged so an event recorded mid-export is never repeated: UTF-8 BOM, CRLF rows, formula-guarded text cells. limit/offset/page are ignored. Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`).',
   })
   @ApiQuery({
     name: 'entityType',
@@ -197,6 +202,8 @@ export class DashboardController {
     description: 'The filtered activity log as CSV (text/csv).',
   })
   activityExport(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
     @Query('entityType') entityType?: string,
     @Query('entityId') entityId?: string,
     @Query('actorId') actorId?: string,
@@ -204,26 +211,29 @@ export class DashboardController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('q') q?: string,
-    @CurrentPrincipal() principal?: Principal,
-  ): StreamableFile {
-    // Reuse the SAME parse/validate/`"me"`-resolution as the feed. limit/offset/page are absent here,
-    // so the parsed window defaults are harmless — the export reads only the filter fields.
+  ): Promise<StreamableFile> {
+    // Reuse the SAME parse/validate/`"me"`-resolution as the feed; the export reads only the filter fields.
     const query = this.parseActivityQuery(
       { entityType, entityId, actorId, action, from, to, q },
       principal,
     );
-    const filename = `lazyit-activity-${new Date().toISOString().slice(0, 10)}.csv`;
-    // Readable.from drains the async generator one chunk at a time → never the whole result in memory.
-    return new StreamableFile(
-      // objectMode:false so each yielded string is written as a UTF-8 byte chunk to the HTTP response.
-      Readable.from(this.dashboard.streamActivityCsvRows(query), {
-        objectMode: false,
-      }),
-      {
-        type: 'text/csv; charset=utf-8',
-        disposition: `attachment; filename="${filename}"`,
-      },
-    );
+    const filters = {
+      entityType: query.entityType,
+      entityId: query.entityId,
+      actorId: query.actorId,
+      action: query.action,
+      from: query.from,
+      to: query.to,
+      q: query.q,
+    };
+    return this.exports.exportCsv({
+      resource: 'ACTIVITY',
+      principal,
+      response,
+      filters,
+      filename: 'activity',
+      ...this.dashboard.activityExport(filters),
+    });
   }
 
   /**

@@ -3,7 +3,7 @@ title: "ADR-0067: Server-prefetch + hydration rendering strategy for high-traffi
 tags: [adr, frontend, rendering, ssr, tanstack-query, nextjs]
 status: accepted
 created: 2026-06-16
-updated: 2026-09-26
+updated: 2026-10-08
 deciders: [Joaquín Minatel]
 ---
 
@@ -273,7 +273,7 @@ routes with a clear single primary read:
   `getArticleBySlug` gained `token?`).
 - **Reports + settings converted** — `reports` (`getDashboardActivity`), `settings/instance`
   (`getConfigStatus`), `settings/service-accounts` (`getServiceAccounts`),
-  `settings/roles/permissions` (`getPermissionMatrix`). Client permission gates (`logs:read` /
+  `settings/roles/permissions` (`getPermissionMatrix`; the matrix moved to `settings/roles` in #1540 and kept the prefetch). Client permission gates (`logs:read` /
   `AdminGate`) stay client-side, wrapped inside the hydrated subtree; a denied caller's prefetch
   error is swallowed → empty cache → the gate denies, unchanged.
 - **Recipe note + ADR-0020 amendment** — [[ssr-prefetch-recipe]] documents the mold; ADR-0020 gained
@@ -291,7 +291,7 @@ Still deliberately client-fetched (each marked with a `// ponytail:` note where 
   (cache-miss double-fetches); deferred until that derivation is a shared pure function.
 - **Secondary reads** — prefetch stays primary-read-only, for uniformity.
 - **No-data routes skipped** — `*/new` (empty forms), `settings` (link hub),
-  `settings/taxonomies` (tab shell), `settings/roles` (low-traffic counts), `imports` (no first
+  `settings/taxonomies` (tab shell), `imports` (no first
   paint read), and the workflows builder/run-detail (polling/no stable primary).
 - **Per-segment shape-matched detail skeletons** — the group-level `(app)/loading.tsx` still covers
   every segment; bespoke per-detail skeletons remain a low-priority polish item.

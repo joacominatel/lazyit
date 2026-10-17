@@ -15,6 +15,9 @@ import {
   attachmentsDir,
 } from './attachments.constants';
 import { attachmentsTmpDir, blobPathFor } from './attachment-storage';
+import { tryLockBlob } from './blob-lock';
+
+const ORPHAN_SCAN_PAGE = 1000;
 
 export interface GcSweepResult {
   /** Never-referenced ARTICLE images soft-deleted past the 24 h grace (pin 4, first pass). */
@@ -105,28 +108,45 @@ export class AttachmentsGcService implements OnModuleInit {
    * exempt — they have no body reference; their live row IS the reference.
    */
   private async orphanArticleImages(cutoff: Date, now: Date): Promise<number> {
-    const candidates = await this.prisma.attachment.findMany({
-      where: { entityType: 'ARTICLE', createdAt: { lt: cutoff } },
-      select: { id: true },
-      take: 1000,
-    });
     let orphaned = 0;
-    for (const candidate of candidates) {
-      if (await this.isPinned(candidate.id)) continue;
-      await this.prisma.attachment.update({
-        where: { id: candidate.id },
-        data: { deletedAt: now },
+    let after: { createdAt: Date; id: string } | undefined;
+    // Keyset pages over every candidate: a fixed window let pinned images starve the orphans (AUD-049).
+    for (;;) {
+      const page = await this.prisma.attachment.findMany({
+        where: {
+          entityType: 'ARTICLE',
+          createdAt: { lt: cutoff },
+          ...(after
+            ? {
+                OR: [
+                  { createdAt: { gt: after.createdAt } },
+                  { createdAt: after.createdAt, id: { gt: after.id } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, createdAt: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: ORPHAN_SCAN_PAGE,
       });
-      orphaned += 1;
+      for (const candidate of page) {
+        if (await this.isPinned(candidate.id)) continue;
+        await this.prisma.attachment.update({
+          where: { id: candidate.id },
+          data: { deletedAt: now },
+        });
+        orphaned += 1;
+      }
+      if (page.length < ORPHAN_SCAN_PAGE) return orphaned;
+      after = page[page.length - 1];
     }
-    return orphaned;
   }
 
   /**
    * Pass 2 (pins 2+3): physically unlink a blob only when EVERY row of its sha256 has been
    * soft-deleted for longer than the grace AND none of those rows is pinned by the reference set
    * (bodies incl. soft-deleted + all version snapshots). One live row anywhere — dedup included —
-   * keeps the blob.
+   * keeps the blob; the live-row check and the unlink run under the blob lock (AUD-021).
    */
   private async unlinkUnpinnedBlobs(cutoff: Date): Promise<number> {
     const deadRows = (await this.prisma.attachment.findMany({
@@ -148,11 +168,6 @@ export class AttachmentsGcService implements OnModuleInit {
     for (const [sha256, rows] of bySha) {
       // Grace: a just-deleted row keeps its blob for one window (cheap undo margin + upload races).
       if (rows.some((r) => r.deletedAt && r.deletedAt > cutoff)) continue;
-      // Pin 3: any LIVE row of this sha (dedup!) keeps the blob.
-      const liveCount = await this.prisma.attachment.count({
-        where: { sha256 },
-      });
-      if (liveCount > 0) continue;
       // Pin 2: any of this blob's rows referenced by a body/version keeps the blob (version restore).
       let pinned = false;
       for (const row of rows) {
@@ -162,8 +177,8 @@ export class AttachmentsGcService implements OnModuleInit {
         }
       }
       if (pinned) continue;
-      const removed = await this.rmIfExists(blobPathFor(sha256));
-      if (removed) unlinked += 1;
+      // Pin 3: any LIVE row of this sha (dedup!) keeps the blob.
+      if (await this.unlinkUnreferenced(sha256, 'live')) unlinked += 1;
     }
     return unlinked;
   }
@@ -199,9 +214,8 @@ export class AttachmentsGcService implements OnModuleInit {
       const knownSet = new Set(known.map((k) => k.sha256));
       for (const name of names) {
         if (knownSet.has(name)) continue;
-        const path = join(root, shard, name);
-        if (await this.isOlderThan(path, cutoff)) {
-          if (await this.rmIfExists(path)) removed += 1;
+        if (await this.isOlderThan(join(root, shard, name), cutoff)) {
+          if (await this.unlinkUnreferenced(name, 'any')) removed += 1;
         }
       }
     }
@@ -224,6 +238,23 @@ export class AttachmentsGcService implements OnModuleInit {
       where: { content: { contains: needle } },
     });
     return inVersion > 0;
+  }
+
+  // A blob locked by an in-flight upload is skipped until the next sweep, never waited on.
+  private async unlinkUnreferenced(
+    sha256: string,
+    rows: 'live' | 'any',
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await tryLockBlob(tx, sha256))) return false;
+      const references = await tx.attachment.count(
+        (rows === 'any'
+          ? { where: { sha256 }, includeSoftDeleted: true }
+          : { where: { sha256 } }) as Prisma.AttachmentCountArgs,
+      );
+      if (references > 0) return false;
+      return this.rmIfExists(blobPathFor(sha256));
+    });
   }
 
   private async readdirSafe(dir: string): Promise<string[]> {

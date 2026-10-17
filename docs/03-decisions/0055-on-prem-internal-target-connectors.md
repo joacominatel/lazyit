@@ -131,6 +131,11 @@ allowlist is consulted. This protects the engine's own co-located secrets (Valke
 and the cloud IMDS unconditionally. The allowlist is therefore strictly a way to widen reach **within**
 the two already-allowlistable categories, never beyond them.
 
+*(2026-10-14, audit follow-up:)* `reserved` now also covers the IPv6 special-purpose prefixes
+`2002::/16` (6to4, which embeds an IPv4 that may be internal), `2001::/32` (Teredo), `64:ff9b:1::/48`
+(local-use NAT64), `fec0::/10` (deprecated site-local) and `3fff::/20` (documentation). They used to fall
+through to `global`. This only denies more: none of them was ever allowlistable, and none becomes so.
+
 ### 2. A stored, per-connection `internalTargetAllowlist`
 
 A `WorkflowConnection` gains an optional **`internalTargetAllowlist`**: a list of specific

@@ -201,8 +201,17 @@ export function ApplicationForm({
     };
 
     if (application) {
+      // An emptied field is omitted on create but must be sent as null to clear it on a PATCH.
+      const data = {
+        ...payload,
+        description: payload.description ?? null,
+        url: payload.url ?? null,
+        vendor: payload.vendor ?? null,
+        categoryId: payload.categoryId ?? null,
+        notes: payload.notes ?? null,
+      };
       updateApplication.mutate(
-        { id: application.id, data: payload },
+        { id: application.id, data },
         {
           onSuccess: (updated) => {
             rememberVendor(values.vendor);

@@ -28,8 +28,6 @@ interface LocalAdPerson {
   id: string;
   directorySourceId: string | null;
   isActive: boolean;
-  // Read-only: the offboard sweep needs it for the last-admin skip. The reconcile NEVER writes `role`.
-  role: string;
   directoryOffboardedAt: Date | null;
   directoryReenabledAt: Date | null;
   firstName: string;
@@ -135,7 +133,6 @@ export class DirectoryReconcileService {
           id: true,
           directorySourceId: true,
           isActive: true,
-          role: true,
           directoryOffboardedAt: true,
           directoryReenabledAt: true,
           firstName: true,
@@ -207,21 +204,6 @@ export class DirectoryReconcileService {
         const lastSeen = lastSeenMs(p.directoryAttrs);
         if (lastSeen != null && lastSeen > cutoff) {
           // Still within grace — leave as-is; a later run offboards it if it stays gone.
-          counts.skipped += 1;
-          continue;
-        }
-        // Last-admin protection (SEC-021, ADR-0040): deactivating the last live, active ADMIN would leave
-        // the instance with nobody able to sign in and administer it. Skip that person instead — nothing
-        // is written, so the next run re-evaluates and offboards them once another active ADMIN exists —
-        // warn, and carry on with the rest of the sweep. Same predicate as the PATCH /users guard.
-        if (
-          p.role === 'ADMIN' &&
-          !(await this.users.hasAnotherActiveAdmin(p.id))
-        ) {
-          this.logger.warn(
-            `directory.offboard_skipped user=${p.id} reason=last-active-admin: absent from the directory ` +
-              `past grace but is the last active ADMIN; left active until another active ADMIN exists.`,
-          );
           counts.skipped += 1;
           continue;
         }
@@ -349,7 +331,7 @@ export class DirectoryReconcileService {
   }
 
   /**
-   * Create a NEW directory person into the PENDING tray via the sanctioned skipIdpWriteBack rail
+   * Create a NEW directory person into the PENDING tray via the sanctioned directoryOnly rail
    * (users.service.create) — which FORCES role VIEWER, leaves externalId null, grants no login, and stamps
    * directoryOnly=true + our directorySource/directorySourceId. firstName+lastName are required (skip the
    * entry if AD gives neither). Email is the mapped mail IFF it does not collide with a live user, else a
@@ -390,7 +372,7 @@ export class DirectoryReconcileService {
         { email, firstName, lastName },
         undefined, // system actor: the create rail can't thread a service-account actor
         {
-          skipIdpWriteBack: true,
+          directoryOnly: true,
           directorySource: DIRECTORY_SOURCE_AD,
           directorySourceId: guid,
           directoryAttrs: directoryAttrs as Prisma.InputJsonValue,
@@ -421,6 +403,12 @@ export class DirectoryReconcileService {
    * path: the guard already refuses the inactive row, but refreshMatched's automatic reactivation would
    * otherwise revive every token minted before — including a "keep me signed in" token with no time-based
    * expiry. The sweep never sends an already-inactive person here (#1311).
+   *
+   * Last-admin protection (SEC-021, ADR-0040): deactivating the last live, active ADMIN would leave the
+   * instance with nobody able to sign in and administer it. That person is skipped instead — nothing is
+   * written, so the next run re-evaluates and offboards them once another active ADMIN exists — with a
+   * warning, and the sweep carries on. The check is the PATCH /users guard's, run in this write's
+   * transaction under the same admin-set lock, so a concurrent admin demotion cannot slip past it (AUD-041).
    */
   private async offboard(
     person: LocalAdPerson,
@@ -428,7 +416,16 @@ export class DirectoryReconcileService {
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
-    const offboarded = await this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      if (
+        await this.users.wouldRemoveLastAdmin(
+          tx,
+          person.id,
+          (target) => target.role === 'ADMIN' && target.isActive,
+        )
+      ) {
+        return 'last-admin';
+      }
       // Conditional on the row still matching the sweep's snapshot: an admin edit mid-sweep wins (#1311).
       const { count } = await tx.user.updateMany({
         where: {
@@ -446,16 +443,22 @@ export class DirectoryReconcileService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
-      if (count !== 1) return false;
+      if (count !== 1) return 'stale';
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', reason: 'offboarded' },
         actor,
       });
-      return true;
+      return 'offboarded';
     });
-    if (offboarded) counts.offboarded += 1;
+    if (outcome === 'last-admin') {
+      this.logger.warn(
+        `directory.offboard_skipped user=${person.id} reason=last-active-admin: absent from the directory ` +
+          `past grace but is the last active ADMIN; left active until another active ADMIN exists.`,
+      );
+    }
+    if (outcome === 'offboarded') counts.offboarded += 1;
     else counts.skipped += 1;
   }
 

@@ -3,7 +3,7 @@ title: ArticleWikiLink
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-10-14
 ---
 
 # ArticleWikiLink
@@ -40,6 +40,12 @@ fast link resolution. Introduced in [[0059-kb-folders-links-and-import]]. Distin
   `@lazyit/shared`); it strips a `|display` alias and a `#heading` anchor and `slugify`s the target.
 - **Best-effort resolution.** Each `targetSlug` is resolved to a **live** article id in one query
   (`resolvedTargetId`), else null — a forward reference. A save never blocks on an unresolved slug.
+- **Forward references resolve when the slug appears.** Creating or importing an article, restoring a
+  soft-deleted one, and changing an article's slug each set `resolvedTargetId` on every edge whose
+  `targetSlug` is that slug and that is unresolved (`resolvedTargetId IS NULL`) **or still cached on a
+  soft-deleted article** — links follow the slug ([[0059-kb-folders-links-and-import]] §3) — in the same
+  transaction, so the source shows up in the new article's backlinks without being re-edited. An edge
+  resolved to a live article (one whose slug has since changed) is left alone.
 - **Backlinks** ("References") are the reverse read: all rows whose `resolvedTargetId` = an article
   (`GET /articles/:id/backlinks`), returning the **source** id/slug/title for the list.
 - **Access still applies** — the backlink read **404s if the target isn't readable** and **ANDs the
@@ -70,8 +76,8 @@ write. Schemas (`ArticleWikiLinkSchema`, `ArticleBacklinkSchema`) in `@lazyit/sh
   schemas/parser. Resolves the article↔article-links deferral from
   [[0042-article-versioning-and-linking]].
 - **Built (#398, ADR-0059 §5):** the bulk `.zip` import's **best-effort intra-batch rewire**. After a
-  `.zip` batch is created, the worker re-resolves still-unresolved edges (`resolvedTargetId IS NULL`)
-  whose `targetSlug` matches a slug **minted earlier in the same batch** — so a forward-referencing
+  `.zip` batch is created, the worker re-resolves the edges that are unresolved or cached on a
+  soft-deleted article and whose `targetSlug` matches a slug **minted earlier in the same batch** — so a forward-referencing
   cross-linked vault arrives already wired, not as a wall of tooltips. A slug nobody minted stays an
   unresolved forward reference (the §3 tooltip), never a failure.
 - **Still deferred:** a **slug-change inbound-rewire** pass (a target slug edit can stale a link to an

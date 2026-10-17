@@ -3,7 +3,7 @@ title: PurchaseOrder
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-16
 ---
 
 # PurchaseOrder
@@ -43,7 +43,9 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   archived purchase's documents 404 until it is restored. Each document may carry an optional free-text
   **type label** (quote, invoice, delivery note), set at upload or edited later (#1476, [[attachment]]).
 - **delivers to** an optional [[location]] (`deliveryLocationId`), used as the default location when
-  receiving units.
+  receiving units. Deleting that location moves or clears it, with an `UPDATED` event, while the purchase
+  is **open** — live, `DRAFT` or `ORDERED`, and either a countable line still has units pending or it has
+  no countable line at all; a cancelled, fully received or archived purchase keeps it as history (AUD-024).
 - **produced** N [[asset]]s, indirectly: each asset points at one line (`Asset.purchaseOrderLineId`).
 
 ## Business rules
@@ -81,6 +83,15 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   and live line descriptions (`q`), and filters by `status` (multi-value), `supplierId` and `receipt` — a
   derived state, or `PENDING`: at least one unit pending on a purchase that is not `CANCELLED`. The receipt
   filter is computed with the same functions as the detail, so the list and the shown state agree.
+- **Export** (`GET /purchase-orders/export`, #1597, [[0103-data-export-streaming-path]]): a CSV of every
+  purchase the list would return for the same filters (`q`, `status`, `supplierId`, `receipt`, `deleted`),
+  under the same `purchaseOrder:read` (VIEWER denied by default) and the same ADMIN-only `deleted=only`. One
+  row per purchase, never per line: `reference, supplier, status, receipt, orderDate, expectedDate,
+  invoiceNumbers, invoiceDate, company, lineCount, unitsOrdered, unitsReceived, unitsPending, total,
+  currency, unpricedLines, createdAt`. `total` is the list's total in major units with a dot decimal (empty
+  when unknown), in that row's `currency` label; the units are the derived receipt's, empty on a purchase
+  with no countable line. Notes and line detail are not exported. Every export is audited
+  ([[data-export-log]]).
 - **Global search** (#1499, [[0035-search-architecture]]): the `purchases` index carries the reference,
   supplier name, invoice numbers, stored status, order and creation dates, and the live lines' descriptions
   (searchable, never returned). Never money or notes. Searched only by a principal holding
@@ -92,6 +103,7 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
 - **Pending units** (`GET /purchase-orders/pending-lines`, `purchaseOrder:read`): the countable lines with
   pending > 0 on live purchases that are neither `DRAFT` nor `CANCELLED`, oldest order date first, each with
   its purchase header and supplier; paged, filterable by `supplierId`. The *Pending units* tab reads it.
+  `GET /purchase-orders/pending-lines/export` streams the same lines as CSV ([[purchase-order-line]] § Export).
 - **Totals are derived, never stored**: the sum of its lines' quantity × unit price, in the purchase's
   currency label ([[0100-money-as-64-bit-minor-units]]). On the wire `totals` is a list of
   `{ currency, amount, unpricedLines }` built by the shared `groupMoneyTotals` — one entry for a purchase

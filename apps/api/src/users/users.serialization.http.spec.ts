@@ -20,9 +20,10 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { UserHistoryService } from '../user-history/user-history.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
-import { IDENTITY_PROVIDER } from '../auth/identity/identity-provider.interface';
+import { ExportService } from '../common/export';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import { PasswordLifecycleService } from '../auth/local/password-lifecycle.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { ActorService } from '../common/actor.service';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
@@ -137,9 +138,10 @@ describe('User wire shape never carries credential columns (SEC-085)', () => {
         { provide: UserHistoryService, useValue: {} },
         { provide: WorkflowTriggerService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
-        { provide: IDENTITY_PROVIDER, useValue: {} },
+        { provide: ExportService, useValue: {} },
         { provide: LocalProvisioningService, useValue: {} },
         { provide: PasswordLifecycleService, useValue: {} },
+        { provide: PermissionResolverService, useValue: {} },
         { provide: getLoggerToken(UsersService.name), useValue: {} },
         {
           provide: ActorService,

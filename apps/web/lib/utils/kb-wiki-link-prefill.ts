@@ -1,4 +1,4 @@
-import { SLUG_MAX_LENGTH, SLUG_REGEX } from "@lazyit/shared";
+import { ArticleSchema, SLUG_MAX_LENGTH, SLUG_REGEX } from "@lazyit/shared";
 
 /**
  * Create-on-click prefill for unresolved KB wiki-links (#1106 Phase 4). A reader who may author
@@ -29,6 +29,12 @@ export function buildKbCreateHref(slug: string, label: string): string {
 export interface KbNewPrefill {
   title?: string;
   slug?: string;
+  /**
+   * The folder to preselect (#1539, "New article here" on a folder header). Shape-checked only; the
+   * form keeps it only when the folder is in the viewer's live folder list, and the API still decides
+   * whether the article may be filed there.
+   */
+  categoryId?: string;
 }
 
 /**
@@ -38,6 +44,7 @@ export interface KbNewPrefill {
  *     hyphens, ≤ {@link SLUG_MAX_LENGTH}); an invalid slug is dropped and the form derives one from the
  *     title — never injected verbatim.
  *   - `title` is trimmed and capped to {@link PREFILL_TITLE_MAX_LENGTH}; empty/whitespace is dropped.
+ *   - `categoryId` is kept only when it has the folder-id (cuid) shape (#1539).
  * A repeated param (`?title=a&title=b`) collapses to its first value.
  */
 export function parseKbNewPrefill(
@@ -52,6 +59,13 @@ export function parseKbNewPrefill(
 
   const rawTitle = firstValue(params.title)?.trim();
   if (rawTitle) prefill.title = rawTitle.slice(0, PREFILL_TITLE_MAX_LENGTH);
+
+  // #1539: `?categoryId=` preselects the home folder. It must be a cuid (the folder id shape); anything
+  // else is dropped rather than seeded into the form.
+  const rawCategoryId = firstValue(params.categoryId);
+  if (rawCategoryId && ArticleSchema.shape.categoryId.safeParse(rawCategoryId).success) {
+    prefill.categoryId = rawCategoryId;
+  }
 
   return prefill;
 }

@@ -459,14 +459,16 @@ const consumableUpdate = defineTool({
     .strictObject({
       consumable: reference,
       name: UPDATE_FIELDS.name,
-      sku: UPDATE_FIELDS.sku,
+      sku: UPDATE_FIELDS.sku.describe('null clears it.'),
       categoryId: UPDATE_FIELDS.categoryId.describe(
-        'A consumable category id.',
+        'A consumable category id; null clears it.',
       ),
-      description: UPDATE_FIELDS.description,
-      minStock: UPDATE_FIELDS.minStock.describe('Reorder threshold.'),
+      description: UPDATE_FIELDS.description.describe('null clears it.'),
+      minStock: UPDATE_FIELDS.minStock.describe(
+        'Reorder threshold; null clears it (no low-stock alert).',
+      ),
       unit: UPDATE_FIELDS.unit,
-      notes: UPDATE_FIELDS.notes,
+      notes: UPDATE_FIELDS.notes.describe('null clears it.'),
     })
     .refine((v) => UPDATE_FIELD_NAMES.some((f) => v[f] !== undefined), {
       error: 'At least one field must be provided to update',
@@ -674,6 +676,11 @@ export const consumablesToolset: AiToolset = {
       ConsumablesController,
       ['findDeliveries'],
       'Deferred: the consumable deliveries read (ADR-0098, #1364) — the AI consumables surface was kept unchanged; extending it with delivery targets, returns and this list is a recorded ADR-0098 follow-up.',
+    ),
+    unexposed(
+      ConsumablesController,
+      ['export', 'exportMovements', 'exportDeliveries'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
   ],
 };

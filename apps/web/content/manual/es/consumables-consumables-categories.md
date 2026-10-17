@@ -47,19 +47,23 @@ cuándo se actualizó cada ítem por última vez. La cifra de stock está codifi
 Puedes buscar por nombre o SKU, y filtrar por **Categoría** o por **Solo stock bajo**. Cada fila
 incluye además los botones rápidos `−1` / `+1` para ajustar el conteo en el sitio.
 
+**Exportar CSV** descarga todos los ítems que coinciden con la búsqueda y los filtros actuales, con su stock
+y su umbral de reposición, para un recuento — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Categorías
 
 Las categorías (Cables, Adaptadores, Periféricos, Material de oficina, Otros, …) son una agrupación
 opcional que gestionas tú. **No** se configuran en el formulario del consumible: las creas y editas
-en **Configuración → Taxonomías**, en la pestaña Consumibles. lazyit incluye un conjunto inicial
+en **Configuración → Taxonomías → Consumibles → Categorías**. lazyit incluye un conjunto inicial
 pequeño; renómbralo, amplíalo o recórtalo según tu parque.
 
 Conviene saber algunas cosas:
 
 - Un consumible puede tener **una** categoría, o ninguna.
-- **Eliminar una categoría no elimina sus consumibles.** Cada consumible que apuntaba a ella
-  simplemente queda sin categoría; no se pierde nada. (Esto difiere de otras partes de lazyit que
-  bloquean una eliminación mientras algo sigue referenciando el ítem.)
+- **Eliminar una categoría no elimina sus consumibles.** Si todavía tiene consumibles, lazyit te
+  muestra cuáles y te pide **una sola decisión para todos**: dejarlos sin categoría, moverlos a otra
+  categoría o, si puedes crear categorías, escribir un nombre para crear una ahí mismo y moverlos a
+  ella. No se pierde nada, y restaurar la categoría después no los devuelve.
 - Las categorías se **eliminan de forma reversible** y un nombre eliminado queda libre para
   reutilizarse, así que puedes recrear o restaurar una más adelante sin conflicto.
 
@@ -68,6 +72,9 @@ Conviene saber algunas cosas:
 Desde la página de detalle de un consumible o desde el menú de su fila puedes **Editar**, **Clonar**
 o **Eliminar**.
 
+- **Editar** cambia cualquier campo. Vacía un campo y guarda para eliminar el valor; por ejemplo,
+  borra el umbral de reposición para dejar de recibir alertas de stock bajo de ese ítem. Para quitar
+  la categoría, vuelve a elegir la categoría seleccionada.
 - **Clonar** abre un consumible nuevo precargado a partir del original. El SKU se borra y el stock
   empieza en cero, práctico para dar de alta una pieza casi idéntica.
 - **Eliminar** es una eliminación reversible: el consumible se archiva, no se borra, y se conserva su

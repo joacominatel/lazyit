@@ -19,8 +19,8 @@ es una capacidad de administrador (las mismas personas que pueden otorgar acceso
 ## Cómo solicitar acceso
 
 1. Abrí la aplicación desde **Aplicaciones** y entrá a su página de detalle.
-2. En el panel **Acceso activo**, hacé clic en **Solicitar acceso**. (Si ya tenés acceso, o ya tenés
-   una solicitud esperando una decisión, el botón se reemplaza por un estado breve.)
+2. Arriba de la página, hacé clic en **Solicitar acceso**. (Si ya tenés acceso, o ya tenés una
+   solicitud esperando una decisión, el botón se reemplaza por *Tienes acceso* o *Acceso solicitado*.)
 3. Opcionalmente agregá:
    - un **nivel de acceso** —el tipo de acceso que necesitás, si la aplicación los distingue—; y
    - una **justificación** —una nota breve para que quien apruebe entienda por qué lo necesitás—.
@@ -41,10 +41,30 @@ avisa en lugar de crear una duplicada.
 - La aprobación y el rechazo son definitivos para esa solicitud. Si una solicitud fue rechazada y
   todavía necesitás acceso, podés crear una nueva.
 
+## Cargar una solicitud para otra persona
+
+Quienes pueden aprobar solicitudes también pueden cargar una **en nombre de otra persona** —el caso de
+mesa de ayuda, cuando un colega te lo pide en persona y querés que la solicitud quede registrada—. Solo
+quienes tienen el permiso **Otorgar y revocar acceso** ven esta opción.
+
+- En la página de una aplicación, hacé clic en **Solicitar para alguien**; o, desde **Acceso →
+  Solicitudes de acceso**, hacé clic en **Cargar una solicitud** y elegí la aplicación.
+- Elegí a la persona en **En nombre de**. Dejalo vacío para pedir acceso para vos. La persona tiene
+  que estar **activa y tener una cuenta de acceso** —las personas solo de directorio y las dadas de baja
+  no se pueden elegir, y lazyit rechaza la solicitud si lo son—.
+- La regla de una solicitud pendiente se aplica a esa persona: si ya tiene una esperando para esta
+  aplicación, lazyit te lo avisa en lugar de crear una duplicada.
+
+Después la solicitud sigue el flujo de aprobación normal. Registra **quién la cargó**: la cola, la
+pestaña **Solicitudes** de la aplicación y el perfil de la persona muestran **Cargada por**, y la
+exportación CSV tiene una columna **Filed by**. La notificación de la decisión le llega a la persona
+para la que es la solicitud, no a quien la cargó.
+
 ## Revisar solicitudes (administradores)
 
 Abrí **Acceso → Solicitudes de acceso** para ver todo lo que espera una decisión. Cada fila muestra
-quién pide, qué aplicación, el nivel solicitado, la justificación (si hay) y cuándo se creó.
+quién pide, qué aplicación, el nivel solicitado, la justificación (si hay), cuándo se creó y, si se
+cargó en nombre de alguien, quién la cargó.
 
 - **Aprobar** otorga el acceso en el acto —sin formulario adicional—. El nuevo acceso se comporta
   exactamente como uno creado a mano (ejecuta cualquier flujo de acceso y queda registrado en el
@@ -55,10 +75,17 @@ quién pide, qué aplicación, el nivel solicitado, la justificación (si hay) y
 Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar o rechazar requiere el
 mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
 
+**Exportar CSV**, sobre la cola, descarga todas las solicitudes pendientes — mira [Exportar datos](/help/notifications-activity-data-export).
+
+La página de cada aplicación también tiene una pestaña **Solicitudes** con solo las solicitudes de esa
+aplicación: primero las **Pendientes**, después las **Aprobadas** y **Denegadas**, cada una con quién
+decidió y cuándo (y el motivo, si se denegó). Las pendientes se pueden aprobar o denegar ahí mismo, y
+su **Exportar CSV** descarga las solicitudes del estado seleccionado.
+
 ## Seguir tus solicitudes
 
 Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado
 actual (**Pendiente**, **Aprobada** o **Rechazada**)—. Una solicitud rechazada muestra el motivo que
-dio quien aprobó. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
+dio quien aprobó, y una que cargó un aprobador para vos lo indica. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
 salvo que lo desactives—, así que esta lista es el historial completo, no la única forma de enterarte
 del resultado.

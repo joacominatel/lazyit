@@ -9,7 +9,8 @@ subcategory: connected-apps
 
 Every AI app that can act as you is listed under **Connected apps** on **AI & connected apps** (user menu
 → **AI & connected apps**, at `/account/ai`). Review it now and then, and cut off anything you don't
-recognize.
+recognize. The list is there for everyone: even if you may not connect new AI apps, you still see and can
+revoke the ones you have, and a note at the top of the page says your role can't connect new ones.
 
 ## What the list shows
 
@@ -64,7 +65,7 @@ they expire so you can revoke them.
 | You **sign out** of lazyit | **Nothing** — connections belong to your account, not your browser session. |
 | Your **password changes** or is reset | **Every** app and token stops and disappears from the list. Reconnect afterwards. |
 | Your account is **deactivated or offboarded** | **Every** app and token stops. |
-| Your role **loses a permission** | Your apps lose it too — a connection never has more access than you. |
+| Your role **loses a permission** | Your apps lose it too — a connection never has more access than you. If it was the permission to connect AI apps, every app and token stops, but stays listed so you can revoke it. |
 | An administrator turns **External AI agents (MCP)** off | Every connection is **paused**, and works again when MCP is turned back on. |
 | A token reaches its **expiry** | It stops; create a new one. |
 

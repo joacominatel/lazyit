@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -24,10 +23,10 @@ import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useAssets } from "@/lib/api/hooks/use-assets";
-import { useDeleteLocation } from "@/lib/api/hooks/use-location-mutations";
 import { useLocation } from "@/lib/api/hooks/use-locations";
 import { AssetStatusBadge } from "../../../assets/_components/asset-status-badge";
 import { StackedOwnerAvatars } from "../../../assets/_components/stacked-owner-avatars";
+import { LocationDeleteDialog } from "../../_components/location-delete-dialog";
 import { LocationFormDialog } from "../../_components/location-form-dialog";
 import { LocationTypeBadge } from "../../_components/location-type-badge";
 
@@ -54,7 +53,6 @@ export function LocationDetailView({ id }: { id: string }) {
     locationId: id,
     limit: MAX_PAGE_LIMIT,
   });
-  const deleteLocation = useDeleteLocation();
   // Consumables LEFT at this place (ADR-0098) — a destination, not per-location stock.
   const deliveryTarget = useMemo<DeliveryTargetRef>(
     () => ({ kind: "location", id }),
@@ -268,14 +266,14 @@ export function LocationDetailView({ id }: { id: string }) {
         onOpenChange={setEditOpen}
         location={location}
       />
-      <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        entityKey="location"
-        name={location.name}
-        onConfirm={() => deleteLocation.mutateAsync(location.id)}
-        onDeleted={() => router.push("/locations")}
-      />
+      {deleteOpen ? (
+        <LocationDeleteDialog
+          open
+          onOpenChange={setDeleteOpen}
+          location={location}
+          onDeleted={() => router.push("/locations")}
+        />
+      ) : null}
     </div>
   );
 }

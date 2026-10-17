@@ -10,6 +10,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   ErrorState,
@@ -33,6 +34,7 @@ import {
   useRestoreSupplier,
   useSuppliers,
 } from "@/lib/api/hooks/use-suppliers";
+import { SUPPLIER_EXPORT_PATH, supplierFilterParams } from "@/lib/api/endpoints/suppliers";
 import { notifyError } from "@/lib/api/notify-error";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
@@ -63,14 +65,15 @@ export function SuppliersListView() {
   const { q, sort, dir, offset, limit, filters, setQ, toggleSort, setFilter, setOffset, clearFilters, filtersActive } =
     useListParams(SUPPLIER_LIST_OPTIONS);
   const archived = isAdmin && filters.archived === "only";
-  const { data: page, isLoading, isFetching, isError, error, refetch } = useSuppliers({
+  const listParams = {
     q: q || undefined,
     sort,
     dir: sort ? dir : undefined,
     limit,
     offset,
-    deleted: archived ? "only" : undefined,
-  });
+    deleted: archived ? ("only" as const) : undefined,
+  };
+  const { data: page, isLoading, isFetching, isError, error, refetch } = useSuppliers(listParams);
   const deleteSupplier = useDeleteSupplier();
   const restoreSupplier = useRestoreSupplier();
   const [editing, setEditing] = useState<Supplier | "new" | null>(null);
@@ -148,6 +151,13 @@ export function SuppliersListView() {
                 onCheckedChange={(on) => setFilter("archived", on ? "only" : "ALL")}
               />
             ) : null}
+            <ExportButton
+              path={SUPPLIER_EXPORT_PATH}
+              params={supplierFilterParams(listParams)}
+              total={page?.total}
+              filename="suppliers"
+              permission="purchaseOrder:read"
+            />
             {canWrite ? (
               <Button onClick={() => setEditing("new")}>
                 <PlusIcon />

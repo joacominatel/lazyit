@@ -3,7 +3,7 @@ title: "ADR-0056: In-app notification bell — append-only Notification + per-ad
 tags: [adr, notifications, frontend, rbac, workflow-engine, data-model]
 status: accepted
 created: 2026-06-09
-updated: 2026-09-23
+updated: 2026-10-17
 deciders: [Joaquín Minatel]
 ---
 
@@ -283,12 +283,15 @@ The first targeted notification:
 
 - **Condition:** at login, a user who **holds `secret:read`** ([[0061-secret-manager-zero-knowledge]] §7
   / [[0046-roles-permissions-v2]]) **but has no `UserKeypair`** (they have never set a vault passphrase,
-  so they cannot decrypt any vault) gets a **one-time targeted** notification — `recipientUserId = that
-  user` — copy *"set up your vault passphrase"*, deep-linking to `/secrets`.
+  so they cannot decrypt any vault) gets a targeted notification **at most once per retention window**
+  — `recipientUserId = that user` — copy *"set up your vault passphrase"*, deep-linking to `/secrets`.
 - **Idempotent** via the existing dedupe mechanism (§4): **`dedupeKey = secret.vault_setup:<userId>`**.
-  Because `dedupeKey` is `@unique` on `Notification` (live schema), the emit **never re-fires** — a user
-  who logs in ten times before setting up their vault gets **exactly one** vault-setup notification, and
-  none after they create their `UserKeypair`. This is the same "the emitter is best-effort, so it must be
+  Because `dedupeKey` is `@unique` on `Notification` (live schema), the emit collapses onto the existing
+  row while that row exists — a user who logs in ten times before setting up their vault gets **one**
+  vault-setup notification, and none after they create their `UserKeypair`. *(Reworded 2026-10-15,
+  AUD-089:)* the 90-day retention prune deletes that row like any other, so a user who still has no
+  keypair is nudged again on their next login after it — **at most once per retention window**, not once
+  ever. Accepted as the intended reminder. This is the same "the emitter is best-effort, so it must be
   safe to fire twice" posture as §4. A new closed `NotificationType` literal (e.g. `secret.vault_setup`)
   is added to the shared enum (§5) — the standard additive catalog-as-code change, with the golden-test
   update + **web exhaustive-map re-typecheck** the §6 discipline already requires.
@@ -511,7 +514,69 @@ regardless of `dismissedAt`. A dismissed notification is forgotten on the same s
 - **Upgrade safety:** existing `notification_reads` rows get `dismissedAt = NULL`, so every existing
   notification stays visible exactly as before until a user dismisses it.
 
-Related: #313 · #248 · #453 · #470 · #1309 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
+## Amendment (2026-10-17) — the grouped bell (issue #1649)
+
+**Status: accepted (CEO decision on #1649: group "by type and day").** A demo seed granted thousands of
+accesses on critical applications and left 900+ `critical_app_access` notifications in each admin's
+bell: the badge broke, the list could not be scrolled, and identical nudges were listed one by one. The
+bell now reads **groups**; the flat feed and every existing endpoint are unchanged.
+
+### A. Grouping key and API
+
+A group is **(type, calendar day in a time zone)** — e.g. "312 grants on critical applications · today".
+
+- `GET /notifications/groups?tz=` → `Page<NotificationGroup>` (`{ type, day, count, unread, latestAt,
+  latest }`; `latest` previews the newest 3 items as full `Notification` rows). Offset paging per
+  [[0030-list-pagination-contract]], ordered `latestAt` desc, `day` desc, `type` asc — a total order, since
+  `(type, day)` is unique — so pages neither repeat nor skip a group while the data is unchanged.
+- `GET /notifications/groups/items?type=&day=&tz=` → `Page<Notification>`, `createdAt` desc with `id` desc
+  as the tiebreaker.
+- `PATCH /notifications/read-group` `{ type, day, tz? }` → `MarkReadResult`. One `INSERT … SELECT … ON
+  CONFLICT DO NOTHING` on the read join: idempotent, and a dismissed row keeps its stamps.
+
+Schemas in `@lazyit/shared`: `NotificationGroupsQuerySchema`, `NotificationGroupKeySchema`,
+`MarkNotificationGroupReadSchema`, `NotificationGroupSchema`, `NotificationGroupPageSchema`,
+`NotificationTimeZoneSchema`, `NOTIFICATION_GROUP_PREVIEW_SIZE`.
+
+**Authorization is the flat feed's:** any authenticated human, service accounts 403'd, every query scoped
+to own targeted rows plus the broadcast set only with `notification:read`, minus the caller's dismissed
+rows. The raw-SQL scope (`visibilitySql`) and the Prisma one (`visibilityWhere`) read the same permission
+check and must stay in step.
+
+### B. The time zone comes from the client
+
+The instance's display zone lives only on the web (`NEXT_PUBLIC_DEFAULT_TIME_ZONE`, default `UTC` —
+`docs/04-development/i18n.md`), and the API has none. Rather than add a second setting that could drift,
+the web sends it as `tz`. It must be an IANA name (default `UTC`): a raw offset such as `+03:00` is
+rejected, because Postgres reads it with the POSIX (inverted) sign. A day's window is computed in SQL as
+`[local midnight, next local midnight)` and applied as a `createdAt` range, so the existing
+`(type, createdAt)` index serves group items, previews and mark-group.
+
+### C. Volume and the unread count
+
+Aggregation runs in SQL (`GROUP BY` plus one `LATERAL` preview per group on the page), never by loading
+rows. Measured on Postgres 18 with 31k notifications (900 critical grants in one day, ~30k read joins per
+admin): the group page ~36 ms, a group's items page ~5 ms, mark-group over 915 rows ~26 ms. The unread
+count stays exact — the UI caps the badge at `99+` — and is unchanged: one hash anti-join, ~12 ms at that
+volume. No index was added; the broadcast predicate matches almost every row, so the scan is inherent to
+counting what has no read join.
+
+### D. Tests
+
+The grouping SQL runs against a real Postgres in `apps/api/test/notifications-groups.db.spec.ts`
+(`bun run test:db`, which needs `DB_TEST_URL` pointing at a throwaway, migrated database and fails
+without it). It is not yet a CI job. The unit suite covers the routes, validation and authorization; the
+shared tests cover the contract.
+
+### Amendment consequences
+
+- **Positive:** a bulk operation no longer makes the bell unusable; a whole group is read in one call.
+- **Negative / trade-offs (accepted):** offset paging can shift a group across pages when a new
+  notification lands between requests (the [[0030-list-pagination-contract]] trade-off); a client that
+  sends a different `tz` to the list and to the group calls addresses a different day window.
+- **Upgrade safety:** no migration and no data change; existing notifications group on first read.
+
+Related: #313 · #248 · #453 · #470 · #1309 · #1649 · [[0054-applications-workflow-engine]] · [[0048-service-accounts]] ·
 [[0046-roles-permissions-v2]] · [[0044-recent-activity-view]] · [[0034-consumables-design]] ·
 [[0033-asset-history-event-model]] · [[0031-logging-strategy]] · [[0030-list-pagination-contract]] ·
 [[0023-access-management-design]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

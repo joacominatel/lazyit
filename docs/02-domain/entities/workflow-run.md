@@ -3,7 +3,7 @@ title: WorkflowRun
 tags: [domain, entity, workflow-engine, access, append-only, async]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-15
 ---
 
 # WorkflowRun
@@ -24,8 +24,9 @@ also the **transactional-outbox row** and the **idempotency unit** of the engine
 > `{ workflowRunId }` BullMQ job and the `workflow-run.sweeper` covers the crash / broker-down window.
 > The engine therefore fires **after** the grant commits, **never inside it**, and a failing enqueue is
 > **swallowed** (the run stays `PENDING`; the sweeper re-enqueues). A failing external call **never**
-> rolls back, blocks or 503s the grant — the deliberate **inverse** of the Zitadel strong-coupling
-> ([[0043-zitadel-source-of-truth]] / [[INVARIANTS]] INV-5). The grant is the durable audit fact; an
+> rolls back, blocks or 503s the grant — the deliberate **inverse** of the Zitadel strong-coupling it was
+> designed against ([[0043-zitadel-source-of-truth]] / [[INVARIANTS]] INV-5), since removed by
+> [[0102-remove-bundled-zitadel]]. The grant is the durable audit fact; an
 > un-provisioned external account is a recoverable `FAILED` run + notification, not a split-brain.
 
 ## Relationships
@@ -63,7 +64,12 @@ The walk is driven by `run/workflow-run.orchestrator.ts` over the pinned `steps`
 ## Business rules
 
 - **Idempotency: at most one run per grant event.** The unique `idempotencyKey`
-  (`"<trigger>:<accessGrantId>"`) yields **at most one** `WorkflowRun` per grant event. **Retries live
+  (`"<trigger>:<accessGrantId>:<replaySeq>"`) yields **at most one** organic `WorkflowRun` per grant
+  event (`replaySeq = 0`); each manual replay-latest clone takes the next `replaySeq`
+  ([[0057-retry-fix-and-replay]]). Retry and replay-latest are refused (`409`) while another run of the
+  same grant event is `PENDING`, `RUNNING`, `AWAITING_INPUT` or `SUCCEEDED`, under a per-lineage
+  advisory lock, and when an `ACCESS_GRANTED` run's grant was revoked or its user offboarded (AUD-007,
+  AUD-069, PR #1572). **Retries live
   *inside* a run** as [[workflow-step-run]] `attempt` rows, never as new runs — **the run is the
   idempotency unit; the step is the retry unit** ([[0054-applications-workflow-engine]] §3). A full
   unique index (no soft delete here, so no ghost-row concern).
@@ -101,7 +107,9 @@ client create DTO.
 | `applicationId` | `cuid` | FK → [[application]] (denormalized for reporting), `onDelete: Restrict`. |
 | `trigger` | `WorkflowTrigger` | the firing event. |
 | `accessGrantId` | `cuid?` | FK → [[access-grant]], `onDelete: Restrict`; `null` for a future `SCHEDULED` run. |
-| `idempotencyKey` | `string` | `@unique`; `"<trigger>:<accessGrantId>"` for grant-derived triggers. |
+| `idempotencyKey` | `string` | `@unique`; `"<trigger>:<accessGrantId>:<replaySeq>"` for grant-derived triggers ([[0057-retry-fix-and-replay]]; the ADR-0057 migration backfilled `:0` onto older keys). |
+| `replaySeq` | `int` | `@default(0)`; `0` for the organic grant run, `n` for the nth replay-latest clone. Part of `idempotencyKey`. |
+| `supersedesRunId` | `cuid?` | self-FK, `SetNull`; the FAILED run a replay-latest clone supersedes (lineage). |
 | `status` | `WorkflowRunStatus` | `@default(PENDING)`. |
 | `triggeredById` | `uuid?` | FK → [[user]] (`@db.Uuid`), `SetNull`; the **human** cause. At-most-one-actor CHECK with `triggeredBySaId`. |
 | `triggeredBySaId` | `cuid?` | FK → [[service-account]], `SetNull`; the **non-human** cause. |
@@ -118,12 +126,18 @@ Indexes: `@@index([applicationId])`, `@@index([workflowId])`, `@@index([accessGr
 
 ## Endpoints
 
-`apps/api/src/workflow-engine/runs/` (`workflow-runs.controller.ts`); ADMIN-only in the seed. **Reads
-only** — runs are engine-written:
+`apps/api/src/workflow-engine/runs/` (`workflow-runs.controller.ts`); ADMIN-only in the seed. Runs are
+engine-written; no endpoint creates one directly:
 
 - `GET /workflow-runs` — list / page (filterable). `@RequirePermission('workflow:read')`.
 - `GET /workflow-runs/:id` — the run detail **plus its ordered [[workflow-step-run]] attempts**, each
   projected with the DAG transition it took. `workflow:read`.
+- `POST /workflow-runs/:id/retry` — resume a FAILED run from its failed step (optional request-scoped
+  `overrides`). `workflow:run`. `409` per the idempotency rule above; `422` with no resolvable failed
+  step. Failing an escalated manual task leaves the run retryable from the step that failed (AUD-070).
+- `POST /workflow-runs/:id/replay-latest` — clone a FAILED run to a new run on the latest version.
+  `workflow:run`. `409` per the idempotency rule above; `422` when the source already succeeded a
+  non-idempotent create on or before the failed step ([[0057-retry-fix-and-replay]]).
 
 ## Not yet implemented (deferred)
 

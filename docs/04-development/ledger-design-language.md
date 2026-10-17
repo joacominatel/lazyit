@@ -134,6 +134,35 @@ sections.
 - **Actions**: the everyday ones stay visible (one primary fill), the rest go in a `⋯` menu with
   destructive items last, behind a separator.
 
+### KB browse (#1539)
+
+The Knowledge Base browse page (`app/(app)/kb/`) applies the same frame to a collection rather than a
+record. Its layout follows the URL (`lib/utils/kb-browse.ts`), so the rail, the page and a shared link
+always agree, and nothing about *where you are* lives in component state.
+
+- **Rail** (`lg:w-72`, in the persistent `KbShell`): a **Views** list (All articles · My drafts ·
+  Recent · Linked) over a **Folders** tree, each section under a small uppercase label; the folders
+  label carries the only "+" (new root folder). Views carry mono counts from `limit: 1` reads. A folder
+  row is chevron · colour tile · name · padlock (only when restricted, one icon, muted when inherited)
+  · mono count, then a `⋯` trigger that shows on hover, focus-within, selection and always under
+  `[@media(hover:none)]`. Low-frequency actions (Edit, Move, Access, Delete) live in that menu, never
+  as always-visible icon buttons.
+- **Colour tile**: a folder's hue is one of the five `--chart-*` tints, hashed from its id
+  (`lib/utils/kb-folder-color.ts`) — a `/15` tint plus the glyph in the full hue, decorative only
+  (the name is always beside it), so it stays inside the chart-hue AA rule.
+- **Home**: `PageHeader` with one stats sentence (mono figures) instead of a subtitle, the search box,
+  root-folder cards (tile, name, two-line description, counts, "Restricted"), then the table.
+- **Folder header**: §4b's summary card — breadcrumb above, tile + name + description + actions
+  (one primary: "New article here"; "Subfolder" outline; the rest in `⋯`), then `RecordFacts`: Who can
+  see · Articles · Subfolders · Last change. Sub-folders follow as chips.
+- **Table**: a CSS-grid list inside a `@container` card, one link per row, an `aria-hidden` column
+  header row. Columns are chosen by **container** width (`@xl`, `@2xl`/`@3xl`), not viewport, because
+  the room depends on the app sidebar and the rail; below `@xl` rows stack to two lines. Data cells
+  (reading time, relative dates) are mono; the full date rides in `title`.
+- **Controls above a list**: a status segmented control (`aria-pressed` toggles with counts), a Sort
+  dropdown and a Filters popover for the rarer narrowing; active narrowing shows as chips. Anything that
+  changes *how* the list is shown (sort, include sub-folders) survives "Clear filters".
+
 ## 4c. Settings pages
 
 Every page under `/settings` (#1533) is a configuration surface, not documentation. They share one frame,
@@ -174,6 +203,40 @@ and items live in `settings/_lib/settings-nav.ts` (`SETTINGS_NAV`), which also b
 they carry the same gating — `settings:manage` for the area, an optional per-item permission
 (Bulk import → `import:run`). The nav shows no state badges: each state is its own read, and fetching
 them for the nav would add requests to every settings page. Form pages cap their width at `max-w-3xl`.
+
+**Patterns for the larger settings pages** (#1540). Three shapes for a page that would otherwise be a
+long stack of sections:
+
+- **Status tiles + tabs** (`settings/ai`). When a page holds several independent capabilities, open it on
+  a row of status tiles — one per capability, each a button with an icon, a label, an On/Off dot and a
+  one-word value (*Anthropic*, *Off · 14 clients*), plus a warning badge only when something is missing.
+  A tile opens the tab that configures it. The tabs live in `?tab=` through `useRecordTab`, as on the
+  record pages (§4b). A risk callout that applies to every tab (a missing server key) sits once between
+  the tiles and the tabs, as one line with its explanation in a "?". **Consent is never moved into a
+  tip alone**: a switch that sends data out of lazyit keeps its disclosure in its "?" day to day, and
+  turning it ON opens a confirmation showing the disclosure in full (`AiEgressConfirm`); nothing saves
+  until it is confirmed, and turning it off saves at once. Long, homogeneous lists inside a tab (the
+  built-in MCP clients) render as chips, with the full rows behind a "View details" toggle.
+- **Role × capability matrix** (`settings/roles`). When the same set of switches is configured per role,
+  render one table: capabilities in rows, grouped and collapsible with a `granted/total` summary per
+  column on each group row; roles in columns, a locked reference column first (ADMIN, a check in every
+  cell), then the editable ones with their holder count (a link to the filtered Users list) and a preset
+  `Select` in the header. A cell is a checkbox — indeterminate when only part of the capability is held —
+  and is tinted while it differs from the server. Descriptions go in a "?" per row; an admin-level row
+  gets a ⚠ `HelpTip` instead of a badge. Every column is staged together and saved by ONE sticky
+  `SettingsSaveBar` ("Save N changes", N = changed cells, from `countMatrixChanges`); any confirmation the
+  save needs fires as before. The table scrolls inside its own box below ~34rem, with the capability
+  column sticky; the page itself never scrolls sideways. Raw per-permission control (Fine-tune) stays a
+  collapsed section below.
+- **Two-pane list** (`settings/taxonomies`). When a page manages several small lists, show a grouped list
+  of them on the left (module headings, a count per entry, a link out for a list managed elsewhere) and
+  the selected list on the right; below `md` the left list becomes a `Select`. The selection lives in
+  `?tab=`, keeping old values working (`parseTaxonomyTab`). Rows are compact (`taxonomy-list.tsx`): the
+  name, the description muted only when present, an "In use" count in mono (*42 assets* / *Unused*,
+  nothing when the API sent no count), and a `⋯` `RowActions` menu holding the existing dialogs. No
+  checkbox or Updated columns by default — a bulk action, when one exists, hides behind a "Select" toggle.
+  A list whose entries need only a name ends in an inline "New …" row; the full dialog stays for richer
+  edits. A filter box sits in the pane header.
 
 ## 5. Do / Don't (register translation)
 

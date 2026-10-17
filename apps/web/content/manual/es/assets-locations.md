@@ -22,6 +22,9 @@ Abre **Ubicaciones** y crea una nueva. Una ubicación tiene:
 
 El piso es una **etiqueta, no un número** — valores como "PB", "Subsuelo 1" o "Entrepiso" son válidos.
 
+**Exportar CSV**, en la lista de Ubicaciones, descarga todas las ubicaciones que coinciden con la búsqueda y
+el filtro de tipo actuales — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Tipos de ubicación
 
 Cada ubicación se clasifica con un tipo, elegido de un conjunto fijo:
@@ -78,10 +81,32 @@ un único conteo de stock por consumible, no un conteo por lugar. Consulta
 
 ## Quitar una ubicación
 
-Las ubicaciones se **borran de forma lógica**, nunca se destruyen. Quitar una ubicación **no** borra
-los activos que la referencian — esos activos simplemente quedan sin ubicación en ese vínculo, y el
-registro se conserva para el historial. lazyit prioriza la auditabilidad por sobre la prolijidad
-estricta.
+Las ubicaciones se **borran de forma lógica**, nunca se destruyen, y quitar una nunca borra lo que la
+referencia. Cuando la ubicación todavía tiene **activos**, **ubicaciones hijas** o **compras abiertas**
+que se entregan ahí, lazyit primero te muestra qué se verá afectado y te pide **una sola decisión para
+todo** — no se puede elegir ítem por ítem:
+
+- **Dejarlos sin ubicación** — los activos quedan sin ubicación, las ubicaciones hijas pasan a ser de
+  nivel superior y las compras abiertas quedan sin ubicación de entrega.
+- **Moverlos a otra ubicación** — todo pasa a la ubicación que elijas. Debe ser una ubicación activa
+  que no esté dentro de la que quitas.
+- **Crear una ubicación nueva** — escribe un nombre: lazyit la crea con el mismo tipo y la misma
+  ubicación padre que la que quitas (en el nivel superior si esa no tiene padre o su padre fue
+  quitado), y luego mueve todo ahí. Si la ubicación nueva se crea pero la baja falla, el diálogo lo
+  dice y en el siguiente intento ofrece mover todo a ella, así nunca quedan dos. Esta opción solo
+  aparece si también puedes crear ubicaciones.
+
+El diálogo nombra hasta 50 de cada tipo y los cuenta a todos. Si no tienes permiso para ver un tipo
+(las compras, por ejemplo), solo ves cuántos hay — la decisión también se aplica a ellos.
+
+El movimiento y la baja ocurren juntos, y cada activo movido registra el cambio de ubicación en su
+historial. Lo que ya es historial sigue apuntando a la ubicación quitada: los consumibles entregados
+ahí, las compras canceladas o recibidas por completo y los activos archivados. Una ubicación a la que
+nada apunta se quita directamente.
+
+Un administrador puede recuperar una ubicación quitada desde la vista de archivados. Restaurarla no
+devuelve lo que se movió. Restaurar una ubicación cuyo padre sigue quitado se rechaza: restaura primero
+el padre.
 
 ## Qué sigue
 

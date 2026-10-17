@@ -24,16 +24,16 @@
   "account": {
     "title": "AI & connected apps",
     "subtitle": "Connect Claude Code and other AI apps to lazyit, and review or revoke the apps that can act as you.",
-    "forbidden": {
-      "title": "Your role can't connect AI apps",
-      "body": "Connecting AI apps needs the “Connect external AI agents (MCP)” permission (ai:connect). Ask an administrator if you need it."
-    },
     "statusError": "Couldn't check how AI apps connect to this instance. Your connected apps are listed below."
   },
   "mode": {
     "unavailable": {
       "title": "Connections for AI apps are off",
-      "body": "An administrator hasn't turned on the MCP server (Settings → AI), or your role doesn't allow connecting AI apps. Connections you already have are listed below: while the MCP server is off they are paused, not revoked — revoke any you no longer want."
+      "body": "An administrator hasn't turned on the MCP server (Settings → AI). Connections you already have are listed below: while the MCP server is off they are paused, not revoked — revoke any you no longer want."
+    },
+    "unavailableRole": {
+      "title": "Your role can't connect AI apps",
+      "body": "Connecting AI apps needs the “Connect external AI agents (MCP)” permission. Apps and tokens you connected before have stopped working, but they stay listed below so you can revoke them. Ask an administrator if you need the permission."
     },
     "oauth": {
       "title": "This instance uses OAuth sign-in",
@@ -74,6 +74,7 @@
         "tryOnce": "To try it for one session without installing, run <code>{command}</code> instead.",
         "stepSignInOauth": "Start Claude Code and run <code>/mcp</code> to sign in.",
         "stepToken": "Create a personal token below. Claude Code asks for it when you enable the plugin and keeps it in your system's keychain — it is never stored in the plugin files.",
+        "stepTokenProfile": "Create a personal token in <link>your profile → AI & connected apps</link>. Claude Code asks for it when you enable the plugin and keeps it in your system's keychain — it is never stored in the plugin files.",
         "errors": {
           "originUnknown": "The instance doesn't know its own address, so the plugin can't be built. An administrator needs to set the instance's public address (WEB_ORIGIN).",
           "unavailable": "The plugin isn't available: connections for AI apps were turned off.",
@@ -85,6 +86,7 @@
       "title": "Other MCP clients",
       "descriptionOauth": "Connect any MCP client that supports remote servers over HTTP. It signs in through your browser the first time.",
       "descriptionToken": "Connect any MCP client that supports remote servers over HTTP. Replace <code>{placeholder}</code> with a personal token you create below.",
+      "descriptionTokenProfile": "Connect any MCP client that supports remote servers over HTTP. Replace <code>{placeholder}</code> with a personal token you create in <link>your profile → AI & connected apps</link>.",
       "endpoint": "MCP server address",
       "copyEndpoint": "Copy the MCP server address",
       "tabs": {

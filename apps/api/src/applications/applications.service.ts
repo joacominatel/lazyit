@@ -1,22 +1,35 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreateApplication,
+  DeletedFilter,
   PageQuery,
   UpdateApplication,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type Application } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectApplication } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { applicationMoneyToDb, applicationMoneyToWire } from '../common/money';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 
 /** Optional filters for listing applications. */
 export interface ApplicationFilters {
   /** Case-insensitive substring over name / vendor / url / description (OR). */
   q?: string;
+  /** Exact category; an archived category still matches the applications filed under it. */
+  categoryId?: string;
+  isCritical?: boolean;
 }
 
 /**
@@ -69,23 +82,51 @@ export class ApplicationsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.application.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,
       }),
       this.prisma.application.count({ where, ...escapeHatch }),
     ]);
-    // Derived license seats (#949): ONE distinct query for the whole page, folded in memory — no
-    // per-row fan-out (N+1). Absent app → 0 seats used.
+    return pageOf(await this.toListItems(items), total, page);
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where` and rows, walked newest first by keyset. */
+  exportSource(filters: ApplicationFilters, deleted: DeletedFilter) {
+    const where: Prisma.ApplicationWhereInput = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.application.count({ where, ...escapeHatch }),
+      fetchBatch: async (after: KeysetCursor<string> | null, take: number) =>
+        this.toListItems(
+          await this.prisma.application.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            ...escapeHatch,
+          }),
+        ),
+    };
+  }
+
+  /**
+   * List rows: money on the wire plus the derived license seats (#949), ONE distinct query for the whole
+   * set, folded in memory — no per-row fan-out (N+1). Absent app → 0 seats used.
+   */
+  private async toListItems(items: Application[]) {
     const seatsUsed = await this.seatsUsedByApplication(
       items.map((application) => application.id),
     );
-    const withSeats = items.map((application) => ({
+    return items.map((application) => ({
       ...applicationMoneyToWire(application),
       seatsUsed: seatsUsed.get(application.id) ?? 0,
     }));
-    return pageOf(withSeats, total, page);
   }
 
   /**
@@ -113,17 +154,25 @@ export class ApplicationsService {
   }
 
   /** The shared `where` for the application list — used identically by findPage and its count. */
-  private buildWhere({ q }: ApplicationFilters): Prisma.ApplicationWhereInput {
-    return q
-      ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { vendor: { contains: q, mode: 'insensitive' } },
-            { url: { contains: q, mode: 'insensitive' } },
-            { description: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  private buildWhere({
+    q,
+    categoryId,
+    isCritical,
+  }: ApplicationFilters): Prisma.ApplicationWhereInput {
+    return {
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { vendor: { contains: q, mode: 'insensitive' } },
+              { url: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      ...(categoryId !== undefined ? { categoryId } : {}),
+      ...(isCritical !== undefined ? { isCritical } : {}),
+    };
   }
 
   /**
@@ -145,6 +194,7 @@ export class ApplicationsService {
   }
 
   async create(data: CreateApplication) {
+    await this.assertCategoryLive(this.prisma, data.categoryId);
     const { metadata, ...rest } = data;
     const application = await this.prisma.application.create({
       data: {
@@ -173,10 +223,14 @@ export class ApplicationsService {
     // 404 if missing or already soft-deleted (the read filter hides archived rows).
     const existing = await client.application.findFirst({
       where: { id },
-      select: { id: true },
+      select: { id: true, categoryId: true },
     });
     if (!existing) {
       throw new NotFoundException(`Application ${id} not found`);
+    }
+    // Filing under an archived category is refused (400); keeping a legacy one is not.
+    if (data.categoryId !== existing.categoryId) {
+      await this.assertCategoryLive(client, data.categoryId);
     }
     const { metadata, ...rest } = data;
     const application = await client.application.update({
@@ -184,12 +238,38 @@ export class ApplicationsService {
       data: {
         ...applicationMoneyToDb(rest),
         ...(metadata !== undefined
-          ? { metadata: metadata as Prisma.InputJsonValue }
+          ? {
+              metadata:
+                metadata === null
+                  ? Prisma.DbNull
+                  : (metadata as Prisma.InputJsonValue),
+            }
           : {}),
       },
     });
     this.search.upsert('applications', projectApplication(application));
     return applicationMoneyToWire(application);
+  }
+
+  /**
+   * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
+   * without this an application could be filed under a category the taxonomy hides (SEC-052). Write-only:
+   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   */
+  private async assertCategoryLive(
+    client: Prisma.TransactionClient | PrismaService,
+    categoryId: string | null | undefined,
+  ): Promise<void> {
+    if (!categoryId) return;
+    const category = await client.applicationCategory.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `ApplicationCategory ${categoryId} not found (missing or archived)`,
+      );
+    }
   }
 
   /**

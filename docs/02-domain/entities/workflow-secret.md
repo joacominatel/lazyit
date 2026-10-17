@@ -3,7 +3,7 @@ title: WorkflowSecret
 tags: [domain, entity, workflow-engine, access, security, secrets]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-15
 ---
 
 # WorkflowSecret
@@ -50,7 +50,10 @@ to no one after it is set.
   is worse than an absent one"). The encryption itself lives in `workflow-engine/secrets/secret.service.ts`.
 - **Rotation in place or by replacement.** `PATCH /workflow-secrets/:id` re-encrypts a live secret's
   value (a new IV/tag, same row). Alternatively, create a new secret and **point the connection at it**
-  ([[workflow-connection]] rotation); the old one soft-deletes.
+  ([[workflow-connection]] rotation); the old one soft-deletes. Revoking a secret a connection still
+  references does not detach it: the connection keeps its `secretId`, and the step and Test connection
+  fail with "credential unavailable" until a new credential is attached (AUD-071; CEO decision
+  2026-10-15 — the reference is neither cleared nor flagged).
 
 ## Conventions
 

@@ -29,7 +29,7 @@ import {
 } from '@lazyit/shared';
 import { AttachmentsService } from './attachments.service';
 import {
-  attachmentsUploadStorage,
+  attachmentsUploadOptions,
   contentDispositionFor,
 } from './attachment-upload.storage';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -76,10 +76,10 @@ export class AssetAttachmentsController {
   // diskStorage to attachments/tmp (NEVER memoryStorage — ADR-0082 red line) + the hard multer cap
   // so an oversized stream aborts early (413) instead of filling the disk; the service re-checks.
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: attachmentsUploadStorage(),
-      limits: { fileSize: ASSET_ATTACHMENT_MAX_MB * 1024 * 1024 },
-    }),
+    FileInterceptor(
+      'file',
+      attachmentsUploadOptions(ASSET_ATTACHMENT_MAX_MB * 1024 * 1024),
+    ),
   )
   upload(
     @Param('assetId') assetId: string,

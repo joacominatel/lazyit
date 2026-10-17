@@ -19,19 +19,12 @@
   },
   "toast": {
     "adminCreated": "Administrator created",
-    "adminCreatedMirrored": "Administrator created and mirrored to your IdP",
     "adminCreateError": "Couldn't create the administrator"
   },
   "welcome": {
-    "question": "How do you want users to sign in to lazyit?",
-    "idpLabel": "Identity provider",
-    "zitadel": {
-      "title": "Bundled Zitadel",
-      "description": "The recommended self-hosted identity provider, set up for you. No external accounts to wire."
-    },
     "byoi": {
-      "title": "Bring your own OIDC",
-      "description": "Point lazyit at an OIDC provider you already run (Okta, Authentik, Keycloak, Entra ID…)."
+      "title": "Your own OIDC provider",
+      "body": "This instance signs users in through an OIDC provider you run — Entra ID, Okta, Keycloak, Authentik or any other. Your provider owns sign-in; users and roles stay in lazyit. Set the variables below, then continue to create the first administrator."
     },
     "local": {
       "title": "Local accounts",
@@ -40,17 +33,17 @@
     "continue": "Continue"
   },
   "configure": {
-    "zitadelReadyTitle": "Bundled Zitadel is ready",
-    "zitadelReadyBody": "Your identity provider was provisioned automatically — there is nothing to configure here. If sign-in isn't available yet, Zitadel may still be starting up; give it a moment.",
     "byoiConfirm": "Confirm your OIDC provider is wired before continuing — the administrator you create next must be able to sign in through it.",
     "back": "Back",
     "continue": "Continue"
   },
   "byoi": {
-    "instructions": "Set these on the web app, then restart it:",
+    "instructions": "Set these on the web app and the API, then restart both:",
+    "webLabel": "Web app",
+    "apiLabel": "API",
     "copyLabel": "Copy environment variables",
     "copied": "Copied",
-    "note": "lazyit discovers the rest from your provider. User and role management stays local — your IdP owns sign-in only."
+    "note": "Register lazyit as a client in your provider to get the client ID and secret. OIDC_JWKS_URI is the jwks_uri from your provider's discovery document. User and role management stays local — your IdP owns sign-in only."
   },
   "admin": {
     "intro": "Create the first administrator. This person can manage users, access and everything else.",

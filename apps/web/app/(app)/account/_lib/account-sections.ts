@@ -16,11 +16,10 @@ export interface AccountSection {
 
 /** What the caller can reach — resolved by the component from `can()` and `GET /ai/status`. */
 export interface AccountNavContext {
-  /** The caller holds `ai:connect`. */
-  canConnectAi: boolean;
   /**
    * `GET /ai/status` answered successfully. An API without the assistant answers 404, which hides the
-   * AI entry exactly like the user menu does (ADR-0097).
+   * AI entry exactly like the user menu does (ADR-0097). No permission is needed: everyone lists and
+   * revokes their own connections (AUD-083).
    */
   aiStatusAvailable: boolean;
 }
@@ -32,11 +31,9 @@ const SECTIONS: readonly AccountSection[] = [
   { key: "ai", href: "/account/ai" },
 ];
 
-/** The sections the caller sees, in display order. Fails closed: AI needs both signals. */
+/** The sections the caller sees, in display order. Fails closed: AI needs a live `/ai/status`. */
 export function accountSections(ctx: AccountNavContext): AccountSection[] {
-  return SECTIONS.filter(
-    (s) => s.key !== "ai" || (ctx.canConnectAi && ctx.aiStatusAvailable),
-  );
+  return SECTIONS.filter((s) => s.key !== "ai" || ctx.aiStatusAvailable);
 }
 
 /**

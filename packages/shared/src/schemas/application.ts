@@ -157,18 +157,21 @@ export const CreateApplicationSchema = z.strictObject({
   renewalDate: z.iso.datetime().nullish(),
 });
 
-/** Partial update; any subset of the editable fields (an empty body is rejected). */
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected). `null` clears an
+ * optional field — `categoryId: null` detaches the category.
+ */
 export const UpdateApplicationSchema = requireAtLeastOneKey(
   z
     .strictObject({
       name: z.string().trim().min(1).max(200),
-      description: z.string().trim().min(1).max(2000),
-      url: ApplicationUrlSchema,
-      vendor: z.string().trim().min(1).max(200),
-      categoryId: z.cuid(),
+      description: z.string().trim().min(1).max(2000).nullable(),
+      url: ApplicationUrlSchema.nullable(),
+      vendor: z.string().trim().min(1).max(200).nullable(),
+      categoryId: z.cuid().nullable(),
       isCritical: z.boolean(),
-      metadata: ApplicationMetadataSchema,
-      notes: z.string().trim().min(1).max(2000),
+      metadata: ApplicationMetadataSchema.nullable(),
+      notes: z.string().trim().min(1).max(2000).nullable(),
       // License / seat tracking (#949). `.nullable()` (inside `.partial()`) so a PATCH can CLEAR a value
       // back to "untracked" (`{ seatsPurchased: null }`) as well as set it. Derived `seatsUsed` is absent
       // here → a strictObject rejects it (read-only).

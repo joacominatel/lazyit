@@ -8,6 +8,8 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -15,9 +17,11 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateSupplierSchema,
@@ -32,6 +36,8 @@ import { SuppliersService, SUPPLIER_SORT_ALLOWLIST } from './suppliers.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { ExportService } from '../common/export';
+import { SUPPLIER_EXPORT_COLUMNS } from './suppliers-export';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -55,7 +61,10 @@ class SupplierMergeResultDto extends createZodDto(SupplierMergeResultSchema) {}
 @ApiTags('suppliers')
 @Controller('suppliers')
 export class SuppliersController {
-  constructor(private readonly suppliers: SuppliersService) {}
+  constructor(
+    private readonly suppliers: SuppliersService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get()
   @RequirePermission('purchaseOrder:read')
@@ -106,6 +115,37 @@ export class SuppliersController {
     });
     assertCanListDeleted(pageQuery.deleted, user);
     return this.suppliers.findPage({ q }, pageQuery);
+  }
+
+  // STATIC route declared BEFORE `:id` so `/suppliers/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('purchaseOrder:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every supplier matching the list filters (ADR-0103): same permission, filters and rows as GET /suppliers, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered suppliers as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('q') q?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    return this.exports.exportCsv({
+      resource: 'SUPPLIERS',
+      principal,
+      response: res,
+      filters: { q, deleted: slice },
+      columns: SUPPLIER_EXPORT_COLUMNS,
+      filename: 'suppliers',
+      ...this.suppliers.exportSource({ q }, slice),
+    });
   }
 
   @Get(':id')

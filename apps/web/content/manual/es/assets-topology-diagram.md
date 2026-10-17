@@ -203,6 +203,11 @@ de que confirmes:
   queda tal cual estaba: mismos dueños, mismo historial, mismos documentos. No se archiva nada.
   **Esta solo requiere gestionar topología**: no se borra nada, así que no se cobra nada extra.
 
+Un activo respalda un solo nodo a la vez. Vincular un activo que otro nodo ya tiene vinculado se
+rechaza: desvinculalo primero de ese nodo. Si un registro anterior ya tiene dos nodos sobre un mismo
+activo, desvincular cualquiera de ellos **solo quita el vínculo**, aunque lazyit haya creado el
+activo, porque el otro nodo todavía lo usa.
+
 lazyit sabe en cuál de los dos casos estás porque marca los registros que crea él mismo, y nunca le
 pone esa marca a un registro que curaste vos. Si un nodo está desvinculado, ese mismo panel ofrece un
 buscador para vincular cualquier activo de tu inventario. No se puede cambiar de un solo paso el
@@ -287,7 +292,8 @@ mano para los nodos que gestionás vos.
 Quitar un nodo es un **borrado suave**: sale del mapa pero su historial se conserva. Usa **Quitar
 del mapa**, al final de la pestaña **General** de la ventana de detalle, y confirma. Nada se destruye
 — el nodo (y el activo detrás de él, si lo hay) puede recuperarse más tarde. lazyit nunca borra de
-forma definitiva estos datos.
+forma definitiva estos datos. Restaurar un nodo quitado se rechaza mientras su activo esté vinculado a
+otro nodo del mapa, porque un activo respalda un solo nodo a la vez: desvincúlalo primero de ese nodo.
 
 ## La ventana de detalle
 
@@ -331,7 +337,8 @@ una sola cosa.
 Algunas cosas de la pestaña **General** que vale la pena señalar:
 
 - **Responsable(s)** — tomado de las asignaciones del activo vinculado. Un responsable que dejó la
-  empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado como tal.
+  empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado como tal. Su correo aparece
+  solo si tu rol puede ver el directorio de usuarios.
 - **Referencias de secretos** — *esta superficie guarda solo identificadores, nunca los valores de los
   secretos.* Una referencia muestra una etiqueta y un control de **revelar (el ojito)**. Si sos miembro
   de la bóveda del secreto podés revelar el valor acá mismo —igual que un chip de secreto de la KB—:

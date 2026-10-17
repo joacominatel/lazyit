@@ -49,6 +49,7 @@ import { ArticleCategoriesService } from '../../article-categories/article-categ
 import { ArticlesController } from '../../articles/articles.controller';
 import { ArticlesService } from '../../articles/articles.service';
 import { ArticleImportService } from '../../articles/import/article-import.service';
+import { ExportService } from '../../common/export';
 import { AiActionLogService } from '../core/action-log.service';
 import { AiToolService } from '../core/ai-tool.service';
 import { mapToolError } from '../core/error-mapper';
@@ -543,6 +544,7 @@ const prisma = {
   articleWikiLink: {
     deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
   aiToolInvocation: {
     create: jest.fn(({ data }: { data: Record<string, unknown> }) => {
@@ -600,6 +602,9 @@ const prisma = {
       return Promise.resolve(data);
     }),
   },
+  // The folder writes' advisory lock and row lock.
+  $executeRaw: jest.fn(() => Promise.resolve(0)),
+  $queryRaw: jest.fn(() => Promise.resolve([])),
   /** The array form runs the queries (already issued); the callback form is all-or-nothing on the AI tables. */
   $transaction: jest.fn(async (arg: unknown): Promise<unknown> => {
     if (Array.isArray(arg)) return Promise.all(arg);
@@ -708,6 +713,10 @@ const VISIBLE: Record<string, string[]> = {
   'SA holding ai:use + article:read/write': [A.pub],
 };
 const ALL_ARTICLES = [A.pub, A.secret, A.team, A.draftOther, A.draftMine];
+// Foreign drafts a manager reads directly (id or slug) though no list shows them (AUD-086).
+const READ_DIRECTLY_ONLY: Record<string, string[]> = {
+  ADMIN: [A.draftOther, A.draftMine],
+};
 const TITLES: Record<string, string> = {
   [A.secret]: SECRET_TITLE,
   [A.team]: TEAM_TITLE,
@@ -755,6 +764,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         FolderAccessService,
         { provide: SearchService, useValue: search },
         { provide: ArticleImportService, useValue: {} },
+        { provide: ExportService, useValue: {} },
         {
           provide: AI_SETTINGS_READER,
           useValue: {
@@ -907,16 +917,26 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
             { article: A.missing },
             ctx(a),
           );
+          const slug = articles.get(id)!.slug;
+          if (READ_DIRECTLY_ONLY[label]?.includes(id)) {
+            expect((data(byId).article as { id: string }).id).toBe(id);
+            const bySlug = await tools.invoke(
+              'kb_get_article',
+              { article: slug },
+              ctx(a),
+            );
+            expect((data(bySlug).article as { id: string }).id).toBe(id);
+            continue;
+          }
           expect(byId).toMatchObject({
             ok: false,
             error: { code: 'NOT_FOUND', status: 404 },
           });
+          expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
           expect(missing).toMatchObject({
             ok: false,
             error: { code: 'NOT_FOUND', status: 404 },
           });
-          expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
-          const slug = articles.get(id)!.slug;
           expect(
             await tools.invoke('kb_get_article', { article: slug }, ctx(a)),
           ).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
@@ -1007,7 +1027,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         title: '<untrusted_content>VPN setup</untrusted_content>',
         status: 'PUBLISHED',
         folderId: F.public,
-        author: { firstName: 'Otto', lastName: 'User', formerMember: false },
+        author: {
+          firstName: '<untrusted_content>Otto</untrusted_content>',
+          lastName: '<untrusted_content>User</untrusted_content>',
+          formerMember: false,
+        },
         linkCount: 1,
       });
       // concise: no excerpt, never a body.
@@ -1244,7 +1268,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         { article: A.draftOther },
         ctx(actor('ADMIN')),
       );
-      expect(admin).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      // An ADMIN may read another author's draft by id (AUD-086): it is the draft, never the planted one.
+      expect((data(admin).article as { id: string }).id).toBe(A.draftOther);
       expect(JSON.stringify(admin)).not.toContain('Planted');
       const author = await tools.invoke(
         'kb_get_article',
@@ -1261,12 +1286,12 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         ['kb_update_article', { article: A.draftOther, title: 'Overwritten' }],
       ] as const) {
         const proposal = await tools.propose(name, input, chat(admin));
-        expect(proposal).toMatchObject({
-          ok: false,
-          result: { error: { code: 'NOT_FOUND' } },
+        if (!proposal.ok) throw new Error('proposal refused');
+        expect(proposal.action.preview!.target).toMatchObject({
+          id: A.draftOther,
         });
+        expect(JSON.stringify(proposal)).not.toContain('Planted');
       }
-      expect(invocations.size).toBe(0);
       expect(prisma.article.update).not.toHaveBeenCalled();
     });
 
@@ -1743,7 +1768,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(articles.get(A.pub)!.title).toBe('VPN setup');
     });
 
-    it("a raw id reaches the write handler (an admin may edit another author's draft); a slug is resolved through the reads", async () => {
+    it("an admin may edit another author's draft by raw id or by slug (resolved through the reads, AUD-086)", async () => {
       const admin = actor('ADMIN');
       const byId = await tools.invoke(
         'kb_update_article',
@@ -1757,8 +1782,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         { article: 'reorg-plan', title: 'Again' },
         mcp(admin),
       );
-      expect(bySlug).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
-      expect(articles.get(A.draftOther)!.title).toBe('Reviewed plan');
+      expect(bySlug).toMatchObject({ ok: true });
+      expect(articles.get(A.draftOther)!.title).toBe('Again');
     });
 
     it('shows the whole new body on the card, never an excerpt (visibility laundering, security.md §6.1)', async () => {
@@ -2061,7 +2086,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         await tools.invoke('kb_folder_create', blind, mcp(member)),
       ).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
       expect(prisma.articleCategory.create).not.toHaveBeenCalled();
-      // The route itself accepts it — the refusal is the tool's.
+      // The route refuses it too, with its missing-parent 400 (ADR-0060 §10).
       expect(
         await viaNetwork(member, {
           method: 'create',
@@ -2069,7 +2094,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           url: '/article-categories',
           shape: { body: { name: 'Hidden', parentId: F.admins } },
         }),
-      ).toBe('ok');
+      ).toBe(400);
     });
 
     it("a missing parent is the route's own 400 before any card", async () => {

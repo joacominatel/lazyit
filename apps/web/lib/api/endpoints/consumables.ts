@@ -56,6 +56,18 @@ export interface ConsumableListParams {
   deleted?: "only";
 }
 
+export const CONSUMABLE_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function consumableFilterParams(params: ConsumableListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.lowStock) qs.set("lowStock", "true");
+  if (params.category) qs.set("category", params.category);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 /**
  * List consumables, paged. `GET /consumables` returns a `Page<Consumable>` envelope; we
  * return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
@@ -68,17 +80,13 @@ export function getConsumables(
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<ConsumableListPage> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = consumableFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
-  if (params.lowStock) qs.set("lowStock", "true");
-  if (params.category) qs.set("category", params.category);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<ConsumableListPage>(
     search ? `${BASE}?${search}` : BASE,
@@ -86,16 +94,25 @@ export function getConsumables(
   );
 }
 
+export function consumableMovementsExportPath(consumableId: string): string {
+  return `${BASE}/${consumableId}/movements/export`;
+}
+
+/** The movement ledger's filters; the CSV export sends exactly these. */
+export function consumableMovementFilterParams(query: ConsumableMovementQuery = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.type) params.set("type", query.type);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  return params;
+}
+
 /** A consumable's stock movement ledger (newest first), optionally filtered by type / date range. */
 export function getConsumableMovements(
   consumableId: string,
   query: ConsumableMovementQuery = {},
 ): Promise<ConsumableMovement[]> {
-  const params = new URLSearchParams();
-  if (query.type) params.set("type", query.type);
-  if (query.from) params.set("from", query.from);
-  if (query.to) params.set("to", query.to);
-  const qs = params.toString();
+  const qs = consumableMovementFilterParams(query).toString();
   return apiFetch<ConsumableMovement[]>(
     qs
       ? `${BASE}/${consumableId}/movements?${qs}`
@@ -133,6 +150,20 @@ export type ConsumableDeliveryParams = Partial<
   offset?: number;
 };
 
+export const CONSUMABLE_DELIVERY_EXPORT_PATH = `${BASE}/deliveries/export`;
+
+/** The ledger's target and filters, never the page window; the CSV export sends exactly these. */
+export function consumableDeliveryFilterParams(params: ConsumableDeliveryParams): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.targetUserId) qs.set("targetUserId", params.targetUserId);
+  if (params.targetAssetId) qs.set("targetAssetId", params.targetAssetId);
+  if (params.targetLocationId) qs.set("targetLocationId", params.targetLocationId);
+  if (params.outstandingOnly) qs.set("outstandingOnly", "true");
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  return qs;
+}
+
 /**
  * The deliveries made to ONE user, asset or location, newest first (a `Page` envelope). Needs
  * `consumable:read` AND the target domain's read permission (`user:read` / `asset:read` /
@@ -142,13 +173,7 @@ export function getConsumableDeliveries(
   params: ConsumableDeliveryParams,
   signal?: AbortSignal,
 ): Promise<ConsumableDeliveryPage> {
-  const qs = new URLSearchParams();
-  if (params.targetUserId) qs.set("targetUserId", params.targetUserId);
-  if (params.targetAssetId) qs.set("targetAssetId", params.targetAssetId);
-  if (params.targetLocationId) qs.set("targetLocationId", params.targetLocationId);
-  if (params.outstandingOnly) qs.set("outstandingOnly", "true");
-  if (params.from) qs.set("from", params.from);
-  if (params.to) qs.set("to", params.to);
+  const qs = consumableDeliveryFilterParams(params);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   return apiFetch<ConsumableDeliveryPage>(`${BASE}/deliveries?${qs}`, {

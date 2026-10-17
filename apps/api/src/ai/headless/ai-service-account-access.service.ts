@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   AI_SERVICE_ACCOUNT_ACCESS_DEFAULT,
+  AI_SERVICE_ACCOUNT_ACCESS_LEVELS,
   AiServiceAccountAccessSchema,
   type AiServiceAccountSettings,
+  type Permission,
+  type Role,
 } from '@lazyit/shared';
+import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertWithinPermissionCeiling } from '../../service-accounts/permission-ceiling';
+import { resolveServiceAccountPermissions } from '../../service-accounts/service-account-permissions';
 
 /**
  * `AiConfigAuditLog.action` for a per-Service-Account AI access change. `detail` is `{ before, after }`
@@ -22,9 +28,26 @@ export const AI_SA_ACCESS_AUDIT_ACTION = 'service_account.ai_access.updated';
  * existed. Read-tolerant but restrictive, like the runtime: a stored `access` this build does not know
  * reads as `read-only`, a malformed cap as none. Only a revoked (soft-deleted) or unknown account is 404.
  */
+function widens(
+  before: AiServiceAccountSettings,
+  next: AiServiceAccountSettings,
+): boolean {
+  const rank = (a: AiServiceAccountSettings['access']) =>
+    AI_SERVICE_ACCOUNT_ACCESS_LEVELS.indexOf(a);
+  return (
+    rank(next.access) > rank(before.access) ||
+    (before.maxMutationsPerRun !== null &&
+      (next.maxMutationsPerRun === null ||
+        next.maxMutationsPerRun > before.maxMutationsPerRun))
+  );
+}
+
 @Injectable()
 export class AiServiceAccountAccessService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rolePermissions: PermissionResolverService,
+  ) {}
 
   async get(serviceAccountId: string): Promise<AiServiceAccountSettings> {
     await this.requireAccount(serviceAccountId);
@@ -39,6 +62,7 @@ export class AiServiceAccountAccessService {
     serviceAccountId: string,
     next: AiServiceAccountSettings,
     actorId: string | null,
+    actorRole?: Role,
   ): Promise<AiServiceAccountSettings> {
     await this.requireAccount(serviceAccountId);
     return this.prisma.$transaction(async (tx) => {
@@ -48,6 +72,19 @@ export class AiServiceAccountAccessService {
         before.maxMutationsPerRun === next.maxMutationsPerRun
       ) {
         return before;
+      }
+      // SEC-088: widening puts the account's verbs back to work, so they must fit the caller's own.
+      if (actorRole !== 'ADMIN' && widens(before, next)) {
+        const held: ReadonlySet<Permission> = actorRole
+          ? await this.rolePermissions.resolve(actorRole)
+          : new Set();
+        const rows = await tx.serviceAccountPermission.findMany({
+          where: { serviceAccountId },
+          select: { permission: true },
+        });
+        assertWithinPermissionCeiling(held, [
+          ...resolveServiceAccountPermissions(rows),
+        ]);
       }
       await tx.aiServiceAccountSettings.upsert({
         where: { serviceAccountId },
@@ -85,9 +122,9 @@ export class AiServiceAccountAccessService {
     });
   }
 
-  /** A live Service Account (the soft-delete extension hides revoked ones), else 404. */
+  /** A live Service Account, else 404. `findFirst`: the soft-delete extension does not filter `findUnique`. */
   private async requireAccount(serviceAccountId: string): Promise<void> {
-    const account = await this.prisma.serviceAccount.findUnique({
+    const account = await this.prisma.serviceAccount.findFirst({
       where: { id: serviceAccountId },
       select: { id: true },
     });

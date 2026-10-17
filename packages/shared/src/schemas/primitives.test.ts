@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
+  DeleteResolutionSchema,
   int4,
   INT4_MAX,
   INT4_MIN,
@@ -139,5 +140,21 @@ describe("requireAtLeastOneKey() — reject empty PATCH bodies", () => {
 
   test("still enforces the wrapped shape (a bad value fails)", () => {
     expect(Update.safeParse({ name: 123 }).success).toBe(false);
+  });
+});
+
+describe("DeleteResolutionSchema (AUD-024 / AUD-085)", () => {
+  const target = "clh1abc0000xyz0000000abcd";
+
+  test("accepts detach, and move with a target", () => {
+    expect(DeleteResolutionSchema.safeParse({ strategy: "detach" }).success).toBe(true);
+    expect(DeleteResolutionSchema.safeParse({ strategy: "move", targetId: target }).success).toBe(true);
+  });
+
+  test("refuses a move without a target, a detach with one, and an unknown strategy", () => {
+    expect(DeleteResolutionSchema.safeParse({ strategy: "move" }).success).toBe(false);
+    expect(DeleteResolutionSchema.safeParse({ strategy: "detach", targetId: target }).success).toBe(false);
+    expect(DeleteResolutionSchema.safeParse({ strategy: "create" }).success).toBe(false);
+    expect(DeleteResolutionSchema.safeParse({ strategy: "move", targetId: "not-a-cuid" }).success).toBe(false);
   });
 });

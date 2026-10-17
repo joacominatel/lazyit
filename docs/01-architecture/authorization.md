@@ -3,16 +3,17 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-03
+updated: 2026-10-16
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
 
 > **Decisions of record:** [[0046-roles-permissions-v2]] (fixed roles + configurable permissions) ·
 > [[0048-service-accounts]] (a non-human principal) · [[0097-ai-assistant-mcp-and-headless-api]] (the AI
-> channels: delegated identity, OAuth scopes, personal tokens, SA limits — §9). Authentication (who you are) is the Zitadel/OIDC
-> dossier [[auth-zitadel-sot]] / [[0043-zitadel-source-of-truth]]; **this note is authorization** (what
-> you may do). The non-negotiables are [[INVARIANTS]] (INV-1, INV-8, INV-SA-1…4, INV-AI-1…17); this note is the
+> channels: delegated identity, OAuth scopes, personal tokens, SA limits — §9). Authentication (who you
+> are) is local accounts or your own OIDC IdP — [[0086-local-authentication-mode]],
+> [[0102-remove-bundled-zitadel]], [[deployment]]; **this note is authorization** (what you may do). The
+> non-negotiables are [[INVARIANTS]] (INV-1, INV-8, INV-SA-1…4, INV-AI-1…17); this note is the
 > architecture *behind* them. Don't contradict the ADRs — align to them.
 
 ## 0. The model in one paragraph
@@ -113,7 +114,11 @@ three roles **except** two tighter tiers:
 - the **pre-tightened reads** — `accessGrant:read`, `accessRequest:read`, `user:read` and
   `purchaseOrder:read` (`VIEWER_DENIED_READS`) — seeded
   to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
-  see purchases and suppliers** (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+  see purchases and suppliers** (it gets 403). `GET /search` queries only the indexes whose own
+  `<domain>:read` the caller holds (`INDEX_READ_PERMISSION` in `search.service.ts`: `asset:read`,
+  `article:read`, `user:read`, `location:read`, `application:read`, `infra:read`, `consumable:read`, and
+  `purchaseOrder:read` for purchases and suppliers), so a caller lacking one gets no hits from that
+  index (AUD-015, PR #1570).
 - the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
   (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
   disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide
@@ -203,8 +208,8 @@ three roles **except** two tighter tiers:
 > Three decisions are made **in the service**, because a decorator cannot see them: `POST
 > /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
 > `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
-> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
-> `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
+> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` (or its export)
+> filtered by `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
 > (`403`), since the filter itself reveals which assets came from which purchase. All three resolve the
 > principal's permissions through `PermissionResolverService.principalHas` — a human by role, a service
 > account by its grants, no principal never.
@@ -227,7 +232,9 @@ read-authz gap (the old DEF-001 residual / "reads open to any authenticated user
 - `PUT /config/permissions` — replaces the **MEMBER + VIEWER** sets wholesale, validated against the
   frozen catalog (unknown → 400); the strict body accepts **only** MEMBER/VIEWER keys (ADMIN immutable →
   400 on an ADMIN/extra key). Transactional + **audited** ([[permission-audit-log]], one append-only row
-  per grant/revoke) + cache-coherent (the resolver cache is invalidated on commit).
+  per grant/revoke) + cache-coherent (the resolver cache is invalidated on commit). Saved by a human
+  ADMIN only (`AdminOnlyGuard`, **403** `ADMIN_REQUIRED`), even when `settings:manage` is delegated
+  (SEC-088); the directory connection writes and the SMTP save (`PUT /config/smtp`) follow the same rule.
 - `GET /config/my-permissions` — any authenticated user; the CALLER's effective set
   `{ role, permissions }` via the same resolver, so the web derives `can('domain:action')` without
   polluting the `User` wire shape.
@@ -248,13 +255,16 @@ is accepted by design). The only guardrails are *ADMIN-immutable* + *catalog-mem
 
 ## 6. Service accounts as a non-human principal
 
-A [[service-account]] is a SEPARATE model — not a flag on [[user]], not a Zitadel machine user (BYOI-safe;
-the IdP machine-user mirror is a deferred future ADR). It authenticates with a lazyit-native token
+A [[service-account]] is a SEPARATE model — not a flag on [[user]], not an IdP machine user (BYOI-safe;
+the deferred Zitadel machine-user mirror will not be built, [[0102-remove-bundled-zitadel]] §6). It
+authenticates with a lazyit-native token
 `lzit_sa_<id>_<secret>` (the secret is a 256-bit random, stored only as a SHA-256 hash + a non-secret
 `tokenPrefix`, shown once, constant-time-verified). It is authorized by direct
 [[service-account-permission]] grants from the same catalog, never a role, never ADMIN, FAIL-CLOSED.
 Its `/service-accounts` CRUD is `settings:manage`-gated; every mutation is audited
-([[service-account-audit-log]]). See [[0048-service-accounts]].
+([[service-account-audit-log]]). A non-ADMIN holder of a delegated `settings:manage` never gives an
+account a verb its own role lacks: create, an added verb, re-enabling, extending, rotate, restore and
+widening its AI access return **403** `PERMISSION_CEILING_EXCEEDED` past that ceiling (SEC-088). See [[0048-service-accounts]].
 
 ## 7. Honest audit attribution (the unified actor model)
 
@@ -277,7 +287,7 @@ Every former `isAdmin`/`useCanWrite` write-or-delete gate now uses `can('domain:
 backend `@RequirePermission` (write→`:write`, delete/restore→`:delete`, grants→`accessGrant:grant`, user
 admin→`user:manage`, settings/taxonomy→`settings:manage`). The `can()` infra
 (`useMyPermissions`/`useCan` over `/config/my-permissions`, **fails closed** while loading);
-`useCanWrite` was retired. The role-first editor lives at `settings/roles/permissions`; the
+`useCanWrite` was retired. The role × capability matrix lives at `settings/roles` (`settings/roles/permissions` redirects there, #1540); the
 service-accounts admin at `settings/service-accounts` (one-time secret reveal). The one deliberate
 exception is the "Show archived" toggle, kept on `isAdmin` because the API's `deleted=only` slice stays
 role-based, not a permission. See [[0046-roles-permissions-v2]] P6b/P7, [[0020-frontend-data-layer]].
@@ -360,6 +370,6 @@ temporary passwords), the AI's own configuration (`/config/ai*`) and any generic
 configuration itself is `settings:manage` + `ServicePrincipalForbiddenGuard`.
 
 Related: [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0040-rbac-roles]] ·
-[[0043-zitadel-source-of-truth]] · [[auth-zitadel-sot]] · [[INVARIANTS]] · [[shared-package]] ·
+[[0043-zitadel-source-of-truth]] · [[0102-remove-bundled-zitadel]] · [[INVARIANTS]] · [[shared-package]] ·
 [[role-permission]] · [[service-account]] · [[user]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
 [[ai-assistant/_synthesis]]

@@ -7,11 +7,18 @@ import type { Permission, PurchaseHit, SearchEntity, SupplierHit } from "@lazyit
 import type { PurchaseTitleSource } from "@/lib/purchases/display";
 
 /**
- * The extra read permission a search entity needs before the palette offers its filter chip. The API
- * already omits these entities for a caller without it (no hit, no count); hiding the chip keeps the
- * palette from offering a filter that can only ever come back empty.
+ * The read permission a search entity needs before the palette offers its filter chip — the API's
+ * `INDEX_READ_PERMISSION` (ADR-0035, AUD-015). The API omits an entity for a caller without it (no hit,
+ * no count); hiding the chip keeps the palette from offering a filter that can only ever come back empty.
  */
-const ENTITY_PERMISSION: Partial<Record<SearchEntity, Permission>> = {
+const ENTITY_PERMISSION: Record<SearchEntity, Permission> = {
+  assets: "asset:read",
+  articles: "article:read",
+  users: "user:read",
+  locations: "location:read",
+  applications: "application:read",
+  infra: "infra:read",
+  consumables: "consumable:read",
   purchases: "purchaseOrder:read",
   suppliers: "purchaseOrder:read",
 };
@@ -21,10 +28,7 @@ export function visibleSearchEntities(
   entities: readonly SearchEntity[],
   can: (permission: Permission) => boolean,
 ): SearchEntity[] {
-  return entities.filter((entity) => {
-    const permission = ENTITY_PERMISSION[entity];
-    return permission === undefined || can(permission);
-  });
+  return entities.filter((entity) => can(ENTITY_PERMISSION[entity]));
 }
 
 /** A purchase hit opens the purchase's page. */

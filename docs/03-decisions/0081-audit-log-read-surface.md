@@ -3,7 +3,7 @@ title: "ADR-0081: In-app read + CSV export for the security audit logs"
 tags: [adr, security, audit, secrets, reports, logs]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -105,10 +105,37 @@ Print buttons, and the server-side filter bar. A new **Audit log** nav item sits
 - INV-10 is preserved and pinned by a unit test (the secret read/export returns metadata only and never
   selects the ciphertext columns).
 - **Ceilings / follow-ups (deliberate v1 shortcuts):**
-  - Offset paging (like Reports v1). The export is streamed so bulk is fine; a keyset cursor is a clean
-    future upgrade (these are real tables with a stable autoincrement `id`, unlike the UNION view).
+  - Offset paging for the on-screen page read (like Reports v1). The streamed CSV export pages by a
+    keyset cursor on the autoincrement `id` instead (`id < last id`, newest first), so rows appended
+    while an export runs are neither skipped nor duplicated (AUD-033, 2026-10-14). These are real tables
+    with a stable `id`, unlike the UNION view.
   - The frontend action-chip label is a locale-neutral title-case of the enum token (no per-locale
     label map). Add `audit.action.*` i18n keys if a translated label is ever wanted.
   - The `vaultId`/`itemId`/`serviceAccountId` filters are URL/deep-link driven (surfaced as active-filter
     chips), not pickers — sufficient for the "timeline" use; a vault/item picker is a later nicety.
 - NOT #840: no streaming SIEM sink, no retention policy, no embedded per-entity widget.
+
+## Amendment (2026-10-16) — a fourth source: data exports ([[0103-data-export-streaming-path]])
+
+`DataExportLog` ([[data-export-log]]) is the fourth source, `export`, read like the other three:
+source-scoped, newest first by its autoincrement `id`, offset on screen, keyset (`id < last`) in the CSV
+export, behind the same `logs:read`. Mapping onto the unified row:
+
+- `action` is the exported resource, the uppercase `DATA_EXPORT_RESOURCES` label (`ASSETS`, `USERS`,
+  `ACCESS_GRANTS`, …). The action filter therefore filters by resource, enum-driven from
+  `AUDIT_ACTIONS_BY_SOURCE.export` like the others.
+- `actorId` / `actorName` is the human who exported; `serviceAccountId` / `serviceAccountName` the
+  service account, so the `serviceAccountId` filter is valid on this source. `vaultId` / `itemId`
+  stay secret-only.
+- `detail` is `{"rowCount":…,"filters":{…}}`, compact JSON like the service-account source's.
+
+The wire row and the audit CSV header are unchanged; only `AuditLogSource` widens. Since the audit export moved onto
+the engine (epic #1597, phase 1b), an export of any audit source, this one included, is recorded here
+too (resource `AUDIT`). That move also replaced the "one shared CSV util" above for the server path: the
+export streams its own column set (same header) through the engine's typed guard, with a BOM and no
+stamp, and keeps its `id < last` keyset. The browser "export visible" path retired in phase 1d, so
+`utils/audit-log-csv.ts` now holds only the header the API pins; the screen exports through the shared
+export button (every matching row, never the page). On screen, an `export` row's detail reads as its row
+count and filters ("1,204 rows · q: dell"), not raw JSON; a detail that is not that shape shows as stored.
+An export of the `export` source includes the row recording that export itself, since the row is written after the count and before the first read (its `rowCount` is one less
+than the file's rows; [[0103-data-export-streaming-path]] §4).

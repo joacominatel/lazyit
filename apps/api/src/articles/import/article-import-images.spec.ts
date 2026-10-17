@@ -137,6 +137,11 @@ function makePrisma(opts?: { failVersion?: boolean }) {
     },
   };
   const tx = {
+    $queryRaw: jest.fn(() => Promise.resolve([])),
+    $executeRaw: jest.fn(() => Promise.resolve(0)),
+    articleCategory: {
+      findFirst: jest.fn(() => Promise.resolve({ id: 'c1' })),
+    },
     article: {
       create: articleCreate,
       update: articleUpdate,
@@ -149,6 +154,7 @@ function makePrisma(opts?: { failVersion?: boolean }) {
     },
     articleWikiLink: {
       createMany: jest.fn(() => Promise.resolve({ count: 0 })),
+      updateMany: jest.fn(() => Promise.resolve({ count: 0 })),
     },
     attachment,
   } as unknown as ImportTx;

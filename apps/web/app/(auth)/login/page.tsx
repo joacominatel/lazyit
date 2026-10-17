@@ -28,7 +28,7 @@ import { LocalLoginForm } from "./local-login-form";
  *
  * Auth.js v5 handles the full OIDC flow (authorization code + PKCE):
  *   1. User clicks "Sign in"
- *   2. Auth.js redirects to the IdP (Zitadel by default — ADR-0037)
+ *   2. Auth.js redirects to the operator's OIDC IdP (ADR-0102)
  *   3. IdP authenticates and redirects back to /api/auth/callback/oidc
  *   4. Auth.js stores the session cookie (JWT, ADR-0039) and redirects to the app
  *
@@ -191,8 +191,8 @@ export default async function LoginPage({
             action={async () => {
               "use server";
               // Pass the active UI locale as OIDC `ui_locales` so the IdP renders its login in the
-              // same language as the app (issue #952 — the login was English-only). Zitadel ships es
-              // translations and the bootstrap allows es/en, so it honors this.
+              // same language as the app (issue #952 — the login was English-only). An IdP that does
+              // not support the requested locale ignores it.
               await signIn("oidc", { redirectTo: destination }, { ui_locales: locale });
             }}
             className="w-full"

@@ -1,12 +1,15 @@
 import type {
   CreateLocation,
+  DeleteResolution,
   Location,
+  LocationDeleteImpact,
   LocationType,
   Page,
   UpdateLocation,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Pure data-access functions for the Location resource — the ONLY place that
@@ -40,6 +43,17 @@ export interface LocationListParams {
   deleted?: "only";
 }
 
+export const LOCATION_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function locationFilterParams(params: LocationListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.type) qs.set("type", params.type);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 /**
  * List locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
  * the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
@@ -52,16 +66,13 @@ export function getLocations(
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<Page<Location>> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = locationFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
-  if (params.type) qs.set("type", params.type);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Location>>(
     search ? `${BASE}?${search}` : BASE,
@@ -71,7 +82,16 @@ export function getLocations(
 export const getLocation = locations.get;
 export const createLocation = locations.create;
 export const updateLocation = locations.update;
-export const deleteLocation = locations.remove;
+
+export function getLocationDeleteImpact(id: string): Promise<LocationDeleteImpact> {
+  return apiFetch<LocationDeleteImpact>(`${BASE}/${id}/delete-impact`);
+}
+
+export function deleteLocation(id: string, resolution?: DeleteResolution): Promise<Location> {
+  return apiFetch<Location>(`${BASE}/${id}${deleteResolutionQuery(resolution)}`, {
+    method: "DELETE",
+  });
+}
 
 /**
  * Restore one soft-deleted location (`POST /locations/:id/restore`, ADMIN). Clears `deletedAt` and

@@ -82,7 +82,7 @@ describe('ServicePrincipalForbiddenGuard (INV-SA-3 Layer 2, SEC-011)', () => {
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('the ForbiddenException message names the blocked operation for operator clarity', () => {
+  it('the ForbiddenException message is feature-neutral (the guard is reused on unrelated routes)', () => {
     const ctx = makeCtx(servicePrincipal('settings:manage'));
     let thrown: unknown;
     try {
@@ -91,8 +91,8 @@ describe('ServicePrincipalForbiddenGuard (INV-SA-3 Layer 2, SEC-011)', () => {
       thrown = e;
     }
     expect(thrown).toBeInstanceOf(ForbiddenException);
-    expect((thrown as ForbiddenException).message).toContain(
-      'Service accounts cannot manage service accounts',
+    expect((thrown as ForbiddenException).message).toBe(
+      'Service accounts cannot use this endpoint; it requires a human user.',
     );
   });
 });

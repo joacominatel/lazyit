@@ -3,7 +3,7 @@ title: "ADR-0085: Access request flow (request → approve/deny → grant)"
 tags: [adr, access, rbac, notifications, data-model]
 status: accepted
 created: 2026-07-02
-updated: 2026-07-02
+updated: 2026-10-17
 deciders: [Joaquín Minatel]
 ---
 
@@ -179,6 +179,23 @@ own request list (a targeted decision nudge is a documented follow-up).
   the **public Manual** page (`applications-access-requests`, en+es) updated from "coming" to the real flow
   **in that UI change** (it is user-facing only once the UI exists); optionally a targeted
   `access_request.decided` bell nudge to the requester.
+
+## Amendment (2026-10-17) — filing on someone else's behalf (#1645)
+
+The CEO decided that an approver may file a request for another person (the help-desk case: someone asks
+by phone or chat). This replaces "requester = the caller, never the body" in §1, §2 and §4.
+
+- `CreateAccessRequestSchema` gains an optional `requesterId`. Omitted or equal to the caller, the request
+  is self-service exactly as before.
+- Another person's id needs **`accessGrant:grant`**, the verb that already decides requests (403
+  `ACCESS_REQUEST_ON_BEHALF_FORBIDDEN`). The route stays human-only (`ServicePrincipalForbiddenGuard`).
+- The person must be live, active and have an account (400 `ACCESS_REQUEST_TARGET_UNAVAILABLE`). A
+  directory-only person is refused because the grant an approval creates refuses them as well.
+- A new nullable `filedById` (`User` FK, `@db.Uuid`, SetNull) records the caller. Existing rows stay null,
+  which means self-filed. It is on the wire shape and in the CSV export (`Filed by`).
+- The one-pending rule, approval, denial and the decision notification apply to the person the request is
+  for. The creation nudge names both people. The filer gets no decision notification.
+- The MCP tool `access_request_create` keeps asking for yourself only.
 
 Related: #948 · [[0023-access-management-design]] · [[0054-applications-workflow-engine]] ·
 [[0056-in-app-notification-bell]] · [[0046-roles-permissions-v2]] · [[0019-asset-assignment-integrity]] ·

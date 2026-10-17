@@ -1,6 +1,9 @@
 import { Test } from '@nestjs/testing';
 import { isEmailableNotificationType } from '../smtp/email.constants';
-import { ExpiryNotificationsSweeper } from './expiry-notifications.sweeper';
+import {
+  EXPIRY_NOTIFY_BATCH,
+  ExpiryNotificationsSweeper,
+} from './expiry-notifications.sweeper';
 import {
   NotificationsService,
   type EmitNotificationInput,
@@ -29,18 +32,29 @@ type Grant = {
   userId: string;
   revokedAt: Date | null;
   expiresAt: Date | null;
-  application: { id: string; name: string };
-  user: { firstName: string; lastName: string };
+  application: { id: string; name: string; deletedAt?: Date | null };
+  user: { firstName: string; lastName: string; deletedAt?: Date | null };
 };
+
+/** Mirrors the sweeper's `orderBy: [{ <expiry>: 'asc' }, { id: 'asc' }]`. */
+function byExpiryThenId<T extends { id: string }>(
+  expiry: (row: T) => Date | null,
+): (a: T, b: T) => number {
+  return (a, b) =>
+    (expiry(a)?.getTime() ?? 0) - (expiry(b)?.getTime() ?? 0) ||
+    a.id.localeCompare(b.id);
+}
 
 describe('ExpiryNotificationsSweeper', () => {
   let sweeper: ExpiryNotificationsSweeper;
+  let assets: Asset[];
+  let grants: Grant[];
   let emit: jest.Mock<Promise<string | null>, [EmitNotificationInput]>;
   let emittedKeys: Set<string>;
 
   // Assets: one inside the warranty window, one already lapsed, one far in the future, one with no
   // warranty. Only the first must produce a notification.
-  const assets: Asset[] = [
+  const baseAssets: Asset[] = [
     {
       id: 'asset-soon',
       name: 'MacBook Pro',
@@ -72,7 +86,7 @@ describe('ExpiryNotificationsSweeper', () => {
   ];
 
   // Grants: one active inside the 14-day window, one already revoked, one far out, one permanent.
-  const grants: Grant[] = [
+  const baseGrants: Grant[] = [
     {
       id: 'grant-soon',
       userId: 'user-1',
@@ -108,6 +122,8 @@ describe('ExpiryNotificationsSweeper', () => {
   ];
 
   beforeEach(async () => {
+    assets = [...baseAssets];
+    grants = [...baseGrants];
     emittedKeys = new Set<string>();
     // Simulate the real emit(): idempotent on dedupeKey. First emit for a key returns a new id; a repeat
     // of the SAME key (the daily re-scan) collapses to a no-op and returns null — exactly the
@@ -121,9 +137,11 @@ describe('ExpiryNotificationsSweeper', () => {
     const assetFindMany = jest.fn(
       (args: {
         where: { warrantyEnd: { gt: Date; lte: Date } };
+        skip?: number;
         take: number;
       }) => {
         const { gt, lte } = args.where.warrantyEnd;
+        const skip = args.skip ?? 0;
         const matched = assets
           .filter(
             (a) =>
@@ -132,7 +150,8 @@ describe('ExpiryNotificationsSweeper', () => {
               a.warrantyEnd.getTime() > gt.getTime() &&
               a.warrantyEnd.getTime() <= lte.getTime(),
           )
-          .slice(0, args.take)
+          .sort(byExpiryThenId((a) => a.warrantyEnd))
+          .slice(skip, skip + args.take)
           .map((a) => ({
             id: a.id,
             name: a.name,
@@ -145,28 +164,52 @@ describe('ExpiryNotificationsSweeper', () => {
 
     const grantFindMany = jest.fn(
       (args: {
-        where: { revokedAt: null; expiresAt: { gt: Date; lte: Date } };
+        where: {
+          revokedAt: null;
+          expiresAt: { gt: Date; lte: Date };
+          application?: { deletedAt: null };
+          user?: { deletedAt: null };
+        };
+        skip?: number;
         take: number;
       }) => {
         const { gt, lte } = args.where.expiresAt;
+        const skip = args.skip ?? 0;
+        // Honour the nested parent filters only when the query asks for them — the real soft-delete
+        // extension does not filter relations on its own.
+        const liveApp = args.where.application?.deletedAt === null;
+        const liveUser = args.where.user?.deletedAt === null;
         const matched = grants
           .filter(
             (g) =>
               g.revokedAt === null &&
               g.expiresAt !== null &&
               g.expiresAt.getTime() > gt.getTime() &&
-              g.expiresAt.getTime() <= lte.getTime(),
+              g.expiresAt.getTime() <= lte.getTime() &&
+              (!liveApp || !g.application.deletedAt) &&
+              (!liveUser || !g.user.deletedAt),
           )
-          .slice(0, args.take)
+          .sort(byExpiryThenId((g) => g.expiresAt))
+          .slice(skip, skip + args.take)
           .map((g) => ({
             id: g.id,
             userId: g.userId,
             expiresAt: g.expiresAt,
-            application: g.application,
-            user: g.user,
+            application: { id: g.application.id, name: g.application.name },
+            user: { firstName: g.user.firstName, lastName: g.user.lastName },
           }));
         return Promise.resolve(matched);
       },
+    );
+
+    // The anti-join read: which of these dedupe keys already have a row.
+    const notificationFindMany = jest.fn(
+      (args: { where: { dedupeKey: { in: string[] } } }) =>
+        Promise.resolve(
+          args.where.dedupeKey.in
+            .filter((k) => emittedKeys.has(k))
+            .map((dedupeKey) => ({ dedupeKey })),
+        ),
     );
 
     const moduleRef = await Test.createTestingModule({
@@ -177,6 +220,7 @@ describe('ExpiryNotificationsSweeper', () => {
           useValue: {
             asset: { findMany: assetFindMany },
             accessGrant: { findMany: grantFindMany },
+            notification: { findMany: notificationFindMany },
           },
         },
         { provide: NotificationsService, useValue: { emit } },
@@ -196,8 +240,8 @@ describe('ExpiryNotificationsSweeper', () => {
 
     // The dedupe key pins ONE row per item per expiry DATE — computed off the fixture dates so the match
     // is exact and deterministic (dayStamp keys off the item's expiry, not `now`).
-    const warrantyStamp = assets[0].warrantyEnd?.toISOString().slice(0, 10);
-    const grantStamp = grants[0].expiresAt?.toISOString().slice(0, 10);
+    const warrantyStamp = baseAssets[0].warrantyEnd?.toISOString().slice(0, 10);
+    const grantStamp = baseGrants[0].expiresAt?.toISOString().slice(0, 10);
 
     // The warranty nudge: deep-links to the asset. Broadcast — the emit input omits recipientUserId
     // entirely (asserted below), so the service records it in the admin feed.
@@ -231,18 +275,69 @@ describe('ExpiryNotificationsSweeper', () => {
     );
   });
 
-  it('does NOT re-emit on a second run — the dedupeKey collapses the daily re-scan to a no-op', async () => {
+  it('does NOT re-emit on a second run — already-notified items are skipped before emit', async () => {
     const first = await sweeper.sweep();
     expect(first).toBe(2);
 
-    // Second pass finds the SAME items and calls emit again with identical dedupeKeys, but every emit is
-    // swallowed (returns null) → zero NEW notifications. No once-per-day spam.
+    // Second pass finds the SAME items, but their dedupe rows exist → no emit at all, no new rows.
     const second = await sweeper.sweep();
     expect(second).toBe(0);
-
-    // emit was invoked again (4 total) but produced no new rows — the anti-spam guarantee.
-    expect(emit).toHaveBeenCalledTimes(4);
+    expect(emit).toHaveBeenCalledTimes(2);
     expect(emittedKeys.size).toBe(2);
+  });
+
+  it('drains a backlog larger than one batch across passes, soonest expiry first (AUD-008)', async () => {
+    const backlog = EXPIRY_NOTIFY_BATCH + 150;
+    // Later-expiring rows first in storage order, so an unordered read would pick the wrong ones.
+    assets = Array.from({ length: backlog }, (_, i) => ({
+      id: `bulk-${String(backlog - i).padStart(4, '0')}`,
+      name: `Laptop ${backlog - i}`,
+      assetTag: null,
+      warrantyEnd: new Date(Date.now() + DAY + (backlog - i) * 60_000),
+      deletedAt: null,
+    }));
+    grants = [];
+
+    expect(await sweeper.sweep()).toBe(EXPIRY_NOTIFY_BATCH);
+    // The first pass took the soonest-expiring items.
+    expect(
+      emittedKeys.has(
+        `warranty_expiring:bulk-0001:${assets[backlog - 1].warrantyEnd?.toISOString().slice(0, 10)}`,
+      ),
+    ).toBe(true);
+
+    expect(await sweeper.sweep()).toBe(150);
+    expect(await sweeper.sweep()).toBe(0);
+    expect(emittedKeys.size).toBe(backlog);
+  });
+
+  it('skips grants whose application or user is soft-deleted (AUD-064)', async () => {
+    grants = [
+      ...baseGrants,
+      {
+        id: 'grant-archived-app',
+        userId: 'user-5',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 3 * DAY),
+        application: { id: 'app-gone', name: 'Retired', deletedAt: new Date() },
+        user: { firstName: 'Barbara', lastName: 'Liskov' },
+      },
+      {
+        id: 'grant-deleted-user',
+        userId: 'user-6',
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 3 * DAY),
+        application: { id: 'app-1', name: 'GitHub' },
+        user: { firstName: 'Ken', lastName: 'Thompson', deletedAt: new Date() },
+      },
+    ];
+
+    await sweeper.sweep();
+
+    const grantIds = emit.mock.calls
+      .filter((c) => c[0].type === 'access_grant_expiring')
+      .map((c) => c[0].dedupeKey.split(':')[1]);
+    expect(grantIds).toEqual(['grant-soon']);
   });
 
   it('both proactive types are emailable, so the per-type email opt-out applies to them', () => {

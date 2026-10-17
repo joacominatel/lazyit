@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  DeleteResolution,
   CreateApplicationCategory,
   UpdateApplicationCategory,
 } from "@lazyit/shared";
 import {
   createApplicationCategory,
   deleteApplicationCategory,
+  getApplicationCategoryDeleteImpact,
   getApplicationCategories,
   updateApplicationCategory,
 } from "../endpoints/application-categories";
+import { applicationKeys } from "./use-applications";
 
 /** Query keys for Application categories. */
 export const applicationCategoryKeys = {
@@ -55,8 +58,20 @@ export function useUpdateApplicationCategory() {
 export function useDeleteApplicationCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteApplicationCategory(id),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: applicationCategoryKeys.all }),
+    mutationFn: ({ id, resolution }: { id: string; resolution?: DeleteResolution }) =>
+      deleteApplicationCategory(id, resolution),
+    onSuccess: (_category, { resolution }) => {
+      queryClient.invalidateQueries({ queryKey: applicationCategoryKeys.all });
+      if (resolution) queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+    },
+  });
+}
+
+export function useApplicationCategoryDeleteImpact(id: string | undefined) {
+  return useQuery({
+    queryKey: [...applicationCategoryKeys.all, "delete-impact", id ?? ""],
+    queryFn: () => getApplicationCategoryDeleteImpact(id as string),
+    enabled: Boolean(id),
+    staleTime: 0,
   });
 }

@@ -16,6 +16,8 @@ import {
 } from './workflow-run.orchestrator';
 import type { WorkflowStep } from '@lazyit/shared';
 import type { StepResult } from '../handlers/step-handler';
+import { GrantInactiveError } from './run-context';
+import { RunLineageBusyError } from './run-lineage';
 
 /** A throwaway but VALID cuid for a step's connectionId (the shared step schema enforces z.cuid()). */
 const CONN = 'cjld2cjxh0000qzrmn831i7rn';
@@ -56,9 +58,15 @@ function harness(
     stepRuns: [] as Array<Record<string, unknown>>,
     runUpdates: [] as Array<Record<string, unknown>>,
     manualTasks: [] as Array<Record<string, unknown>>,
+    // The grant the run provisions (null = a grant-less run, which skips the lineage lock).
+    accessGrantId: null as string | null,
+    // What the lineage query (AUD-007) finds: another live run of the same grant event, or none.
+    liveSibling: null as { id: string; status: string } | null,
   };
 
   const prisma = {
+    // The AUD-007 lineage advisory lock — a no-op here; tests assert it was taken.
+    $executeRaw: jest.fn(async () => 0),
     workflowRun: {
       updateMany: jest.fn(
         async ({
@@ -87,14 +95,23 @@ function harness(
           return { count: 0 };
         },
       ),
-      findFirst: jest.fn(async () => ({
-        id: 'run1',
-        status: state.runStatus,
-        trigger: 'ACCESS_GRANTED',
-        error: state.runError,
-        finishedAt: state.runFinishedAt,
-        workflowVersion: { steps },
-      })),
+      findFirst: jest.fn(async (args?: { where?: { status?: unknown } }) => {
+        if (
+          typeof args?.where?.status === 'object' &&
+          args.where.status !== null
+        ) {
+          return state.liveSibling;
+        }
+        return {
+          id: 'run1',
+          status: state.runStatus,
+          trigger: 'ACCESS_GRANTED',
+          accessGrantId: state.accessGrantId,
+          error: state.runError,
+          finishedAt: state.runFinishedAt,
+          workflowVersion: { steps },
+        };
+      }),
       // Used by emitManualTaskNotification (post-commit bell nudge) to resolve the app name.
       findUnique: jest.fn(async () => ({
         application: { name: 'App' },
@@ -154,6 +171,7 @@ function harness(
         state.manualTasks.push(t);
         return t;
       }),
+      findFirst: jest.fn(async () => state.manualTasks.at(-1) ?? null),
     },
     workflowConnection: {
       findFirst: jest.fn(async () => ({
@@ -218,7 +236,15 @@ function harness(
     trigger as never,
     notifications as never,
   );
-  return { orchestrator, prisma, state, sleeper, trigger, notifications };
+  return {
+    orchestrator,
+    prisma,
+    state,
+    sleeper,
+    trigger,
+    notifications,
+    contextBuilder,
+  };
 }
 
 const restStep = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -863,6 +889,97 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
     );
     // The run is left FAILED — never half-flipped to RUNNING with nowhere to go.
     expect(state.runStatus).toBe('FAILED');
+  });
+
+  it('AUD-007: refuses while another run of the same grant event is live — the run stays FAILED, nothing enqueued', async () => {
+    for (const status of [
+      'PENDING',
+      'RUNNING',
+      'AWAITING_INPUT',
+      'SUCCEEDED',
+    ]) {
+      const { orchestrator, state, trigger, prisma } = harness(TWO_STEP, {
+        REST: scripted('REST', [ok()]),
+      });
+      state.runStatus = 'FAILED';
+      state.runError = { stepKey: 's2', errorClass: 'step-failed' };
+      state.accessGrantId = 'g1';
+      state.liveSibling = { id: 'replay1', status };
+
+      await expect(orchestrator.retryRun('run1')).rejects.toBeInstanceOf(
+        RunLineageBusyError,
+      );
+      expect(state.runStatus).toBe('FAILED');
+      expect(trigger.enqueueRetry).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('AUD-007: takes the lineage lock and excludes itself from the live-run check before the CAS', async () => {
+    const { orchestrator, state, prisma } = harness(TWO_STEP, {
+      REST: scripted('REST', [ok()]),
+    });
+    state.runStatus = 'FAILED';
+    state.runError = { stepKey: 's2', errorClass: 'step-failed' };
+    state.accessGrantId = 'g1';
+
+    await expect(orchestrator.retryRun('run1')).resolves.toMatchObject({
+      retried: true,
+    });
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const lineageQuery = prisma.workflowRun.findFirst.mock.calls.find(
+      ([args]: [{ where?: { status?: unknown } }?]) =>
+        typeof args?.where?.status === 'object',
+    )![0];
+    expect(lineageQuery?.where).toMatchObject({
+      trigger: 'ACCESS_GRANTED',
+      accessGrantId: 'g1',
+      id: { not: 'run1' },
+    });
+    expect(state.runStatus).toBe('RUNNING');
+  });
+});
+
+describe('WorkflowRunOrchestrator — failing an escalated task keeps the run retryable (AUD-070)', () => {
+  it('a STOP_FAIL resume marks the escalated step, so retryRun resumes it instead of a 422', async () => {
+    const steps = [restStep('s1', { onFailure: 'ESCALATE_TO_MANUAL' })];
+    const { orchestrator, state, trigger } = harness(steps, {
+      REST: scripted('REST', [failPermanent(500)]),
+    });
+
+    await orchestrator.start('run1');
+    expect(state.runStatus).toBe('AWAITING_INPUT');
+
+    // The operator fails the escalated task: the manual-tasks service resumes at STOP_FAIL.
+    await orchestrator.resume('run1', 'STOP_FAIL');
+
+    expect(state.runStatus).toBe('FAILED');
+    expect(state.runError).toMatchObject({ stepKey: 's1' });
+    await expect(orchestrator.retryRun('run1')).resolves.toMatchObject({
+      retried: true,
+      resumeStepKey: 's1',
+    });
+    expect(trigger.enqueueRetry).toHaveBeenCalledWith('run1', 's1', 2, 0);
+  });
+});
+
+describe('WorkflowRunOrchestrator — a revoked grant never provisions (AUD-069)', () => {
+  it('finalizes the run FAILED with grant-inactive and executes no step', async () => {
+    const rest = scripted('REST', [ok()]);
+    const { orchestrator, state, contextBuilder } = harness([restStep('s1')], {
+      REST: rest,
+    });
+    contextBuilder.build.mockRejectedValueOnce(new GrantInactiveError('run1'));
+
+    await orchestrator.start('run1');
+
+    expect(rest.execute).not.toHaveBeenCalled();
+    expect(state.stepRuns).toHaveLength(0);
+    expect(state.runStatus).toBe('FAILED');
+    expect(state.runError).toEqual({
+      stepKey: 's1',
+      errorClass: 'grant-inactive',
+    });
   });
 });
 

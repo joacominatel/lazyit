@@ -111,13 +111,15 @@ export function projectTranscript(
   input: TranscriptInput,
 ): AiPersistedMessage[] {
   const proposals = new Map<string, AiToolInvocation>();
-  // Latest row per tool-use id wins (ordered by creation).
+  // Latest row per (run, tool-use id) wins (ordered by creation).
   for (const row of [...input.invocations].sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   )) {
-    if (row.toolUseId) proposals.set(row.toolUseId, row);
+    if (row.toolUseId) proposals.set(callKey(row.runId, row.toolUseId), row);
   }
   const slots = new Map<string, ToolSlot>();
+  // A tool message answers the step just before it, so a result goes to the latest call with its id.
+  const answering = new Map<string, ToolSlot>();
   const built: Building[] = [];
 
   const rows = [...input.rows]
@@ -162,9 +164,12 @@ export function projectTranscript(
           continue;
         }
         if (part.type === 'tool-call' && typeof part.toolCallId === 'string') {
-          const slot = toolSlot(part, proposals, input.classOf);
-          if (!slot || slots.has(slot.part.toolCallId)) continue;
-          slots.set(slot.part.toolCallId, slot);
+          const slot = toolSlot(part, row.runId, proposals, input.classOf);
+          if (!slot) continue;
+          const key = callKey(row.runId, slot.part.toolCallId);
+          if (slots.has(key)) continue;
+          slots.set(key, slot);
+          answering.set(slot.part.toolCallId, slot);
           parts.push(slot.part);
           const approval = approvalPart(slot.row);
           if (approval) parts.push(approval);
@@ -184,7 +189,7 @@ export function projectTranscript(
       for (const part of contentParts(message.content)) {
         if (part.type !== 'tool-result' || typeof part.toolCallId !== 'string')
           continue;
-        const slot = slots.get(part.toolCallId);
+        const slot = answering.get(part.toolCallId);
         if (!slot) continue;
         const result = resultSummary(part.toolCallId, part.output, slot.kind);
         if (result) {
@@ -265,14 +270,20 @@ function userText(content: unknown): string | null {
 
 // ─── Tool activity ───────────────────────────────────────────────────────────────────────────────
 
+/** Tool-use ids are unique within a run only: a provider numbering calls per response (`call_0`) reuses them. */
+function callKey(runId: string | null, toolCallId: string): string {
+  return `${runId ?? ''}\u0000${toolCallId}`;
+}
+
 function toolSlot(
   part: StoredPart,
+  runId: string | null,
   proposals: ReadonlyMap<string, AiToolInvocation>,
   classOf: (toolName: string) => AiToolClass | undefined,
 ): ToolSlot | null {
   const toolCallId = part.toolCallId as string;
   if (toolCallId.length === 0) return null;
-  const row = proposals.get(toolCallId);
+  const row = proposals.get(callKey(runId, toolCallId));
   const name = AiToolNameSchema.safeParse(row?.toolName ?? part.toolName);
   if (!name.success) return null; // a name the model invented: nothing to show
   const cls = AiToolClassSchema.safeParse(row?.toolClass ?? classOf(name.data));

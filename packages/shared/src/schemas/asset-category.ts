@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AssetSpecsDictionarySchema } from "./asset-specs-dictionary";
-import { requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, requireAtLeastOneKey } from "./primitives";
 
 /**
  * AssetCategory — classification for AssetModels (Laptop, Server, Switch, …). User-managed:
@@ -25,6 +25,10 @@ export const AssetCategorySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // How many live (non-deleted) assets whose model is filed under this category (#1540), so Settings → Taxonomies can show what is in use before an archive. A
+  // COMPUTED read aggregate, not a stored column: no migration. Only the list read populates it; it is
+  // absent from single reads, writes and an older API, so every consumer treats it as optional.
+  usageCount: z.number().int().min(0).nullish(),
 });
 
 /** Payload to create an AssetCategory. `name` is unique (enforced by the DB). */
@@ -49,6 +53,17 @@ export const UpdateAssetCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+// The delete re-points only the models; their live assets are listed because their category follows the model.
+export const AssetCategoryDeleteImpactSchema = z.object({
+  assetModels: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), manufacturer: z.string() }),
+  ),
+  assets: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), assetTag: z.string().nullable() }),
+  ),
+});
+
 export type AssetCategory = z.infer<typeof AssetCategorySchema>;
 export type CreateAssetCategory = z.infer<typeof CreateAssetCategorySchema>;
 export type UpdateAssetCategory = z.infer<typeof UpdateAssetCategorySchema>;
+export type AssetCategoryDeleteImpact = z.infer<typeof AssetCategoryDeleteImpactSchema>;

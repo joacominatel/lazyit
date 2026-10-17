@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-09
 ---
 
 # Runbook — backups & disaster recovery
@@ -12,44 +12,42 @@ How to back up **everything lazyit needs to survive disk loss**, and how to rest
 right order. lazyit holds sensitive inventory/access data on a single host
 ([[0015-deployment-model]]); a working, tested restore is mandatory before real use.
 
-> [!danger] The #1 DR mistake: backing up only the app DB
-> The prod stack now runs **two** Postgres databases — the app DB **and** Zitadel's own DB
-> ([[0037-idp-choice-zitadel-byoi]]) — plus secrets in `.env.prod`. **Restoring only the app DB leaves
-> every user locked out**: Zitadel's accounts, the OIDC client, and its `ZITADEL_MASTERKEY`-encrypted
-> store are gone. And a Zitadel DB restored **without the matching `ZITADEL_MASTERKEY`** is
-> unreadable. "I restored the backup and nobody can log in" is the worst DR outcome — this runbook
-> exists to prevent it.
+> [!danger] The #1 DR mistake: a dump without its `.env.prod`
+> The prod stack runs **one** Postgres database — the app DB — plus secrets in `.env.prod`. A dump
+> restored **without the matching `.env.prod`** comes back with the wrong database password and, worse,
+> without the `WORKFLOW_SECRET_KEY` that decrypts every stored connector credential. Back up the two
+> together, and restore them together. Under OIDC (BYOI) the identities live in **your** IdP, which you
+> back up by its own procedure (item #3). "I restored the backup and nothing works" is the worst DR
+> outcome — this runbook exists to prevent it.
+>
+> lazyit no longer ships an IdP ([[0102-remove-bundled-zitadel]]). An install that still runs the
+> bundled Zitadel follows [[migrate-off-bundled-zitadel]], which covers its database and master key.
 
 ## What to back up (DR inventory)
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` (all optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password and `WORKFLOW_SECRET_KEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` (all optional and low-DR — see below), the OIDC client secret (BYOI), and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
-| 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
+| 3 | **Your OIDC IdP** (BYOI only) | outside lazyit — the provider you run or subscribe to | Yes, by **the IdP's own** procedure — lazyit does not back it up | Restore it with its users intact. lazyit binds each person to the IdP's subject (`sub`); an IdP rebuilt with new `sub`s does not map onto the existing people ([[auth-bootstrap]] §5). |
 | 4 | Meilisearch index | `meili_data_v1_53_2` volume (named per server version) | No (rebuildable) | Nothing to do: on boot the API rebuilds any empty/missing index from the database; `reindex:all` forces a full rebuild ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
 | 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
 | 7 | **File attachments (blobs)** | `attachments_data` volume (asset documents, **purchase documents** — invoices, orders, delivery notes — and KB inline images, [[0082-attachments-storage]]) | ⚠ **NOT covered by any backup yet** — deferred to v1.1 **by decision** (see ADR-0082 "Deferred"); the backup is tracked in #1467 | **Not recoverable today.** `pg_dump` captures only the `attachments` metadata rows (item #2), never the bytes. Until the sidecar tars the volume, copy it off-host manually if you care: `docker run --rm -v lazyit_attachments_data:/a -v "$PWD/backups":/b alpine tar czf /b/attachments-$(date +%F).tgz -C /a .` |
 
-> [!warning] `ZITADEL_MASTERKEY` is unrotatable and irreplaceable
-> It decrypts Zitadel's store. Losing it = losing all logins, even with a perfect DB dump. Keep a
-> sealed copy off-host (see [[auth-bootstrap]]). It lives in item #1 (`.env.prod`) — so backing up
-> `.env.prod` covers it, but never let that file be your *only* copy of the masterkey.
-
-> [!warning] `WORKFLOW_SECRET_KEY` is the *third* unrotatable linchpin (ADR-0054)
+> [!warning] `WORKFLOW_SECRET_KEY` is an unrotatable linchpin (ADR-0054)
 > The Applications Workflow Engine encrypts every stored connector credential (`WorkflowSecret`,
 > AES-256-GCM) with this key. A DB restore **without the matching `WORKFLOW_SECRET_KEY`** yields
 > **undecryptable connector credentials** — the workflow data restores fine, but the engine can no
-> longer read any saved secret (recoverable only by re-entering them by hand). Exactly like
-> `ZITADEL_MASTERKEY`: it is unrotatable, lives in item #1 (`.env.prod`), and must be backed up
-> off-host with the *matching* DB dump. Never generate a fresh one on a restore.
+> longer read any saved secret (recoverable only by re-entering them by hand). It is unrotatable,
+> lives in item #1 (`.env.prod`), and must be backed up off-host with the *matching* DB dump. Never
+> generate a fresh one on a restore, and never let `.env.prod` be your *only* copy of it.
 
 > [!warning] `SMTP_SECRET_KEY` is a *fourth* server-held master key — but OPTIONAL and trivially recoverable (ADR-0079)
 > The instance SMTP password (Settings → Email) is encrypted at rest (`SmtpSettings`,
 > AES-256-GCM) under `SMTP_SECRET_KEY` — its own key axis, SEPARATE from `WORKFLOW_SECRET_KEY` ("one key
 > per subsystem"). A DB restore **without the matching `SMTP_SECRET_KEY`** yields an **undecryptable SMTP
-> password**: outbound email stops until an admin re-enters the password in the UI. Unlike the three
+> password**: outbound email stops until an admin re-enters the password in the UI. Unlike the
 > linchpins above, this key is **OPTIONAL** (unset ⇒ the app boots fine and email is simply unavailable)
 > and the loss is **cheap to recover** (one field, re-typed by an admin) — so it is a "nice to back up
 > alongside `.env.prod`", not a DR linchpin. Keep it with the same off-host copy of `.env.prod` for
@@ -130,22 +128,20 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > `SESSION_SIGNING_SECRET`. It is **required at boot** (≥32 chars, fail-loud like `WORKFLOW_SECRET_KEY`)
 > but it is **NOT a DR linchpin**: it encrypts/authenticates nothing at rest. Losing or rotating it only
 > **invalidates live sessions** — every user simply logs in again with their existing password (the
-> `passwordHash` lives in the app DB, item #2). So it is *not* the `ZITADEL_MASTERKEY`/`WORKFLOW_SECRET_KEY`
+> `passwordHash` lives in the app DB, item #2). So it is *not* the `WORKFLOW_SECRET_KEY`
 > severity class — a restored app DB is fully usable with a **fresh** signing secret. Keep it in `.env.prod`
 > (item #1) for zero-touch restores, but its loss costs one re-login, not any data. Unused in OIDC mode.
 
-> [!info] Automation: the opt-in backup sidecar (see below) — mode-aware (ADR-0086)
-> Items #2 (and #3 **in OIDC mode**) can be automated by the `backup` profile service in the canonical
-> `compose.yaml` (cron + `pg_dump` to a host-mounted `./backups`, with retention). The cron is
-> **mode-aware**: it dumps the Zitadel DB only when `AUTH_MODE=oidc`; in **local-auth mode** it dumps the
-> app DB alone (which carries the password hashes) and skips the absent `zitadel_db` — otherwise every
-> nightly run would report FAILED. Item #1 is **your responsibility** — `.env.prod` must be copied
-> off-host manually and access-controlled.
+> [!info] Automation: the opt-in backup sidecar (see below)
+> Item #2 can be automated by the `backup` profile service in the canonical `compose.yaml` (cron +
+> `pg_dump` to a host-mounted `./backups`, with retention). It dumps the app DB in every auth mode.
+> Item #1 is **your responsibility** — `.env.prod` must be copied off-host manually and
+> access-controlled — and so is item #3.
 
 > [!warning] The Secret Manager BREAKS the "restore DB + matching env key ⇒ everything readable" model
 > Everything above assumes the recovery rule "**a DB dump + the matching `.env.prod` key makes the data
-> readable again**" — true for the app DB, for Zitadel (`ZITADEL_MASTERKEY`), and for the workflow engine's
-> connector secrets (`WORKFLOW_SECRET_KEY`). The **Secret Manager** ([[0061-secret-manager-zero-knowledge]])
+> readable again**" — true for the app DB and for the workflow engine's connector secrets
+> (`WORKFLOW_SECRET_KEY`). The **Secret Manager** ([[0061-secret-manager-zero-knowledge]])
 > is the deliberate exception: it is **zero-knowledge** (**INV-10**), so its decryption keys are
 > **USER-held — a member's vault passphrase plus their one-time recovery key — and are NEVER in `.env.prod`** (no
 > server-side master key exists over secret *values*). Consequences for DR:
@@ -155,7 +151,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 >   DEK with their vault passphrase) **or** a surviving member redeems **their own** recovery key (which
 >   unlocks **their** private key → the vault DEK).
 > - The **recovery key is the user's personal, off-host, shown-once DR artifact** — the Secret-Manager
->   analogue of `ZITADEL_MASTERKEY`, but **per user, not in any backup the operator controls**. It is shown
+>   analogue of `WORKFLOW_SECRET_KEY`, but **per user, not in any backup the operator controls**. It is shown
 >   once at keypair creation, never logged, never persisted in clear ([[0031-logging-strategy]]); the
 >   operator cannot back it up *for* the user. Document the "store your recovery key off-host" duty as part
 >   of onboarding, not as an operator backup item.
@@ -177,23 +173,19 @@ published to the host ([[0028-secrets-and-config]]), so backups run *inside* the
 ```sh
 DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod"
 PG="$DC exec -T db"          # app DB
-ZPG="$DC exec -T zitadel_db" # Zitadel DB
 ```
 
-## Manual backup — both databases
+## Manual backup
 
 ```sh
-# 1) App DB. POSTGRES_USER/DB come from the container env (.env.prod). Custom format (-Fc) is
-#    compressed and supports selective restore.
+# App DB. POSTGRES_USER/DB come from the container env (.env.prod). Custom format (-Fc) is
+# compressed and supports selective restore.
 $PG sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "app-$(date +%Y%m%d-%H%M%S).dump"
-
-# 2) Zitadel DB. It uses its OWN credentials (ZITADEL_DB_USER/ZITADEL_DB_NAME from .env.prod).
-$ZPG sh -c 'pg_dump -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -Fc' > "zitadel-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
-This writes timestamped `app-*.dump` and `zitadel-*.dump` to the current directory. **Copy them
-off the host** to a secure, access-controlled location, **together with `infra/env/.env.prod`**
-(the dumps are unreadable for DR purposes without the masterkey it holds).
+This writes a timestamped `app-*.dump` to the current directory. **Copy it off the host** to a
+secure, access-controlled location, **together with `infra/env/.env.prod`** (the connector
+credentials in the dump are unreadable without the `WORKFLOW_SECRET_KEY` it holds).
 
 > [!tip] Plain SQL alternative
 > Drop `-Fc` and redirect to `*.sql` for a human-readable dump; restore it with `psql` instead of
@@ -206,7 +198,7 @@ off the host** to a secure, access-controlled location, **together with `infra/e
 
 ## Automated backup — the opt-in sidecar
 
-A `backup` profile service (off by default) runs cron + `pg_dump` for **both** DBs on a schedule,
+A `backup` profile service (off by default) runs cron + `pg_dump` of the app DB on a schedule,
 writes timestamped dumps to the host-mounted `./backups` directory, and prunes old ones. Enable it:
 
 ```sh
@@ -231,7 +223,7 @@ BACKUP_OFFSITE_CMD=
 BACKUP_ON_FAILURE_CMD=
 ```
 
-The sidecar writes `app-<ts>.dump` and `zitadel-<ts>.dump` into `./backups` (repo root). **It does
+The sidecar writes `app-<ts>.dump` into `./backups` (repo root). **It does
 NOT back up `.env.prod`** — copy that off-host yourself. Offsite is OFF by default (respects the
 "no mandatory cloud" stance, [[0028-secrets-and-config]]); wire `BACKUP_OFFSITE_CMD` only if you
 want it.
@@ -240,7 +232,7 @@ want it.
 
 Each dump is written to a `*.partial` temp file, then verified **non-empty and restorable**
 (`pg_restore -l` reads the `-Fc` archive's table of contents — this fails on a truncated archive)
-and only then **atomically renamed** onto the final `app-<ts>.dump` / `zitadel-<ts>.dump` path. So:
+and only then **atomically renamed** onto the final `app-<ts>.dump` path. So:
 
 - **A failing `pg_dump` (DB down, disk full, OOM, network blip) never leaves a file matching the
   final glob.** The half-written `*.partial` is removed; your **last good dump stays untouched**.
@@ -280,14 +272,13 @@ ls -lh backups/                                        # only verified, restorab
 ### Restore order (full DR — host rebuilt from scratch)
 
 1. **`.env.prod` first** — put your backed-up `infra/env/.env.prod` back (it must contain the
-   **same `ZITADEL_MASTERKEY`** as when the Zitadel DB was dumped, **and the same `WORKFLOW_SECRET_KEY`**
-   as when the app DB was dumped — or the engine's stored connector credentials are undecryptable).
-   `chmod 600 infra/env/.env.prod`.
-2. **Zitadel DB** — restore `zitadel-*.dump` (subsection below).
-3. **App DB** — restore `app-*.dump` (subsection below).
-4. **Bring the stack up** — `$DC --env-file infra/env/.env.prod up -d`.
-5. **Reindex Meilisearch** — `$DC --env-file infra/env/.env.prod run --rm migrate bun run reindex:all`
+   **same `WORKFLOW_SECRET_KEY`** as when the app DB was dumped — or the engine's stored connector
+   credentials are undecryptable). `chmod 600 infra/env/.env.prod`.
+2. **App DB** — restore `app-*.dump` (subsection below).
+3. **Bring the stack up** — `$DC --env-file infra/env/.env.prod up -d`.
+4. **Reindex Meilisearch** — `$DC --env-file infra/env/.env.prod run --rm migrate bun run reindex:all`
    (the index is rebuildable; see [[deploy-self-hosted]] §2a).
+5. **BYOI only** — confirm your IdP is reachable at the same issuer with the same users (item #3).
 
 ### Restore the app DB
 
@@ -306,35 +297,11 @@ $DC --env-file infra/env/.env.prod up -d
 ```
 
 > [!danger] NEVER use `down -v` to reset just the app DB
-> `down -v` removes **ALL** named volumes in the project — including `zitadel_db_data` (the entire
-> IdP: users, OIDC client, masterkey-encrypted store), `zitadel_secrets` (the bootstrap key + the
-> exported OIDC client id/secret + the runtime SA key), `meili_data`, `caddy_data`, and
-> `caddy_config`. Resetting the app DB with `down -v` silently **wipes your Zitadel IdP** and turns a
-> routine restore into a compound outage. Use the targeted `docker volume rm lazyit-prod_db_data`
-> shown above (the `lazyit-prod_` prefix is the compose project `name:`).
-
-### Restore Zitadel
-
-Same shape as the app DB, but against `zitadel_db` with Zitadel's own credentials — and the
-**same `ZITADEL_MASTERKEY`** must already be in `.env.prod` (step 1 above) or the restored store
-is undecryptable.
-
-```sh
-# Into the EXISTING Zitadel database:
-cat zitadel-20260530-120000.dump | $ZPG sh -c 'pg_restore -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" --clean --if-exists'
-
-# Cleanest: reset ONLY the Zitadel DB volume, then restore.
-$DC down
-docker volume rm lazyit-prod_zitadel_db_data                       # remove ONLY the Zitadel DB volume
-$DC --env-file infra/env/.env.prod up -d zitadel_db               # fresh, empty zitadel db
-# wait until healthy, then load the dump:
-cat zitadel-20260530-120000.dump | $ZPG sh -c 'pg_restore -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" --no-owner'
-$DC --env-file infra/env/.env.prod up -d                          # bring up the rest
-```
-
-If you are restoring onto a **brand-new** Zitadel (no prior dump), do not restore — instead re-run
-the zero-touch bootstrap in [[auth-bootstrap]] §0 (also remove the `zitadel_secrets` volume for a
-clean re-provision); you will get a new instance and the sidecar re-registers the OIDC client.
+> `down -v` removes **ALL** named volumes in the project — `meili_data_v1_53_2`, `valkey_data`,
+> `attachments_data` (every uploaded file, which no backup covers yet — item #7), `caddy_data` and
+> `caddy_config`. Resetting the app DB with `down -v` turns a routine restore into a compound outage.
+> Use the targeted `docker volume rm lazyit-prod_db_data` shown above (the `lazyit-prod_` prefix is
+> the compose project `name:`).
 
 ## Verify a restore
 
@@ -342,10 +309,7 @@ clean re-provision); you will get a new instance and the sidecar re-registers th
 # App DB: row count.
 $PG psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select count(*) from users;"
 
-# Zitadel DB: the schema came back.
-$ZPG psql -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -c "\dn"
-
-# End to end: log in via the web UI (this is the real proof both DBs + the masterkey line up).
+# End to end: sign in via the web UI (the real proof the dump and .env.prod line up).
 ```
 
 ## What's NOT covered here
@@ -356,4 +320,4 @@ $ZPG psql -U "$ZITADEL_DB_USER" -d "$ZITADEL_DB_NAME" -c "\dn"
   migrations mean rollback = restore the pre-upgrade dump + redeploy the previous image).
 
 Related: [[deploy-self-hosted]] · [[docker-prod-like-first-boot]] · [[prisma-migrations]] ·
-[[auth-bootstrap]] · [[0028-secrets-and-config]] · [[0015-deployment-model]] · [[0037-idp-choice-zitadel-byoi]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]]
+[[auth-bootstrap]] · [[migrate-off-bundled-zitadel]] · [[0028-secrets-and-config]] · [[0015-deployment-model]] · [[0102-remove-bundled-zitadel]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]]

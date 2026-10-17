@@ -22,9 +22,9 @@ const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplicati
 
 /**
  * Server-side params for the application list (#104). `q` matches name/vendor/url/description;
- * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). Category and
- * criticality are NOT server params — the Access screen applies them client-side over the page (it
- * already joins category + grants client-side). `limit`/`offset` thread the pagination window.
+ * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). `categoryId`
+ * is an exact category match and `isCritical` keeps critical (`true`) or non-critical (`false`)
+ * applications (#1631). `limit`/`offset` thread the pagination window.
  * `deleted: "only"` is the ADMIN-only archived view.
  */
 export interface ApplicationListParams {
@@ -34,6 +34,20 @@ export interface ApplicationListParams {
   limit?: number;
   offset?: number;
   deleted?: "only";
+  categoryId?: string;
+  isCritical?: boolean;
+}
+
+export const APPLICATION_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function applicationFilterParams(params: ApplicationListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  if (params.categoryId) qs.set("categoryId", params.categoryId);
+  if (params.isCritical !== undefined) qs.set("isCritical", String(params.isCritical));
+  return qs;
 }
 
 /**
@@ -48,15 +62,13 @@ export function getApplications(
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<Page<Application>> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = applicationFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Application>>(
     search ? `${BASE}?${search}` : BASE,
@@ -83,16 +95,28 @@ export interface ApplicationGrantsOptions {
   includeExpired?: boolean;
 }
 
-/** One application's access grants (raw — `userId` only; resolve the user client-side). */
-export function getApplicationGrants(
-  applicationId: string,
-  { activeOnly, includeExpired }: ApplicationGrantsOptions = {},
-): Promise<AccessGrant[]> {
+export function applicationGrantsExportPath(applicationId: string): string {
+  return `${BASE}/${applicationId}/access-grants/export`;
+}
+
+/** The per-application grant list's filters; the CSV export sends exactly these. */
+export function applicationGrantFilterParams({
+  activeOnly,
+  includeExpired,
+}: ApplicationGrantsOptions = {}): URLSearchParams {
   const params = new URLSearchParams();
   if (activeOnly !== undefined) params.set("activeOnly", String(activeOnly));
   if (includeExpired !== undefined)
     params.set("includeExpired", String(includeExpired));
-  const qs = params.toString();
+  return params;
+}
+
+/** One application's access grants (raw — `userId` only; resolve the user client-side). */
+export function getApplicationGrants(
+  applicationId: string,
+  options: ApplicationGrantsOptions = {},
+): Promise<AccessGrant[]> {
+  const qs = applicationGrantFilterParams(options).toString();
   return apiFetch<AccessGrant[]>(
     qs
       ? `${BASE}/${applicationId}/access-grants?${qs}`

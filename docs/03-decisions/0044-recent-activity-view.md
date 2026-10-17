@@ -3,7 +3,7 @@ title: "ADR-0044: Dashboard recent-activity feed backed by a unified DB view"
 tags: [adr, api, dashboard, database]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -79,6 +79,24 @@ rendered on the web). We want one merged stream, newest first, paginated.
 - **Residual:** the view re-derives soft-delete filtering in SQL (it can't reuse the Prisma
   extension) — a documented duplication to keep in step if the soft-delete columns ever move.
   Offset pagination's deep-page cost is accepted at this scale ([[0030-list-pagination-contract]]).
+
+## Amendment (2026-10-16) — a `sourceKey` column for keyset paging ([[0103-data-export-streaming-path]])
+
+The view has no row id, so the activity export pages with LIMIT/OFFSET and a row inserted mid-export
+shifts later batches (AUD-032 fixed the ordering, not the shift). Decision: an additive
+`CREATE OR REPLACE VIEW` appends a trailing `sourceKey` text column, `'<table>:<id>[:<action>]'` (an
+assignment or a grant yields two events, so the action disambiguates them). The export orders by
+`(occurredAt DESC, sourceKey DESC)` and pages with `(occurredAt, sourceKey) < ($t, $k)`. No table
+changes and no data is touched; the read, the count and the existing columns are unchanged.
+
+Landed with the activity export's move onto the engine (epic #1597, phase 1b) as migration
+`20261016150000_activity_view_source_key`. The plan was checked on an embedded Postgres (PGlite) with
+every migration applied and a small seed, not on a production-sized database: the row predicate is
+pushed into each `UNION ALL` branch as a filter on its source table's scan, with no index on the key, so
+a deep page costs a scan of each source rather than an index seek. At this product's scale that is
+accepted, as offset paging's cost is above. Every `occurredAt` source is `TIMESTAMP(3)`, so the cursor
+round-trips through a JS `Date` without losing precision; `recent-activity-source-key.spec.ts` fails if
+one of them changes.
 
 ## References
 

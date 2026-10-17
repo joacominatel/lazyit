@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-09
 ---
 
 # Runbooks — Map of Content
@@ -27,8 +27,8 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 - **[[docker-prod-like-first-boot]]** — run the whole containerized stack locally (Postgres +
   migrate + API + web + Caddy) with local HTTPS; verify it; routine ops.
 - **[[deploy-self-hosted]]** — install on a single host on a real domain: the guided `infra/start.sh`
-  bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates, the
-  bundled-Zitadel vs BYOI fork. Also covers **LAN / bare-IP deploys** (§1a): `default_sni` (issue
+  bootstrap ([[0047-guided-first-deploy-bootstrap]]), env/secrets, Let's Encrypt, bring-up, updates,
+  built-in accounts vs your own IdP. Also covers **LAN / bare-IP deploys** (§1a): `default_sni` (issue
   #1010) makes bare-IP HTTPS work, and trusting Caddy's internal CA on each reporting-agent host via
   `infra/trust-local-ca.sh` before running the agent installer. §7 covers the optional **AI assistant and
   MCP**: the unprefixed agent routes, SSE through Caddy, `AI_SECRET_KEY` / `AI_WORKER_CONCURRENCY`,
@@ -42,26 +42,29 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 - **[[releasing]]** — cut a version: release = a `dev → master` promotion (auto-tagged by
   `release.yml`), the one-time signed `v1.0.0` seed, support/deprecation policy, and the guided
   host update. [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]].
-- **[[auth-bootstrap]]** — bring up the bundled Zitadel IdP for the prod stack: the zero-touch
-  bootstrap sidecar (project / OIDC app / roles / service account, no console access), the BYOI
-  path, and the manual console fallback. [[0037-idp-choice-zitadel-byoi]] · [[0043-zitadel-source-of-truth]].
+- **[[auth-bootstrap]]** — sign in with your own OIDC IdP (BYOI): what the IdP must provide, client
+  registration and redirect URI, the web and API env, `AUTH_INTERNAL_ISSUER` for a co-located IdP, the
+  first admin, people under OIDC, troubleshooting. [[0102-remove-bundled-zitadel]].
+- **[[migrate-off-bundled-zitadel]]** — an install still running the removed bundled Zitadel: how the
+  refusal looks, and the options — stay on the previous release, keep that Zitadel as your own IdP, or
+  move (no tooling) — plus print-only cleanup. [[0102-remove-bundled-zitadel]].
 - **[[managing-service-accounts]]** — create / rotate / revoke a [[service-account]] (the lazyit-native
   non-human API credential): the token is shown **once**, scoping by direct permission grants, rotation
   and revocation. [[0048-service-accounts]].
-- **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + Zitadel DB +
-  `.env.prod`/masterkey, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` / `DIRECTORY_SECRET_KEY` alongside; Meili/Caddy
-  rebuildable), the opt-in backup sidecar (cron + `pg_dump` for
-  both DBs, retention, optional offsite), and the correct restore order (env → zitadel → app → up →
-  reindex) with targeted volume removal instead of the destructive `down -v`.
+- **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + `.env.prod` with its
+  `WORKFLOW_SECRET_KEY`, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` / `DIRECTORY_SECRET_KEY`
+  alongside; Meili/Caddy rebuildable; under BYOI, your IdP), the opt-in backup sidecar (cron + `pg_dump`,
+  retention, optional offsite), and the correct restore order (env → app → up → reindex) with targeted
+  volume removal instead of the destructive `down -v`.
 - **[[docker-build-troubleshooting]]** — symptoms & fixes for building/booting the images.
 
 ## Planned runbooks (write when real)
 
 - **Scheduled/offsite backup automation** — shipped: the opt-in `backup` profile sidecar in the
-  canonical `compose.yaml` (cron + `pg_dump` for both DBs + retention + optional offsite hook),
+  canonical `compose.yaml` (cron + `pg_dump` + retention + optional offsite hook),
   documented in [[backups]]. Promote to a standalone runbook only if it grows beyond that.
 - **Secrets rotation** — per-secret steps (DB password needs `ALTER USER`, not just an env edit;
-  `AUTH_SECRET` logs everyone out; `ZITADEL_MASTERKEY` is unrotatable-in-place). Sketched in
+  `AUTH_SECRET` logs everyone out; `WORKFLOW_SECRET_KEY` is unrotatable-in-place). Sketched in
   [[deploy-self-hosted]]; write the full runbook when rotation cadence is set.
 - **Local DB reset** — covered for now by [[prisma-migrations]] §4 (`migrate reset`); promote to
   its own runbook if reset needs more than a dev wipe.

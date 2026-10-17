@@ -31,8 +31,9 @@ export const ImportJobAcceptedSchema = z.object({
  * - `"created"` — an Article was created from a `.md`/`.txt` entry under `slug`.
  * - `"renamed"` — created, but its derived slug collided so it was auto-suffixed (`nextAvailableSlug`,
  *   §3); `slug` is the FINAL slug, `requestedSlug` the one originally derived. Nothing is swallowed.
- * - `"skipped"` — the entry was ignored (an image, a binary, a nested `.docx` in v1, a dotfile, an
- *   empty/no-text file, …); `reason` is a short, human label. A skip is NEVER an error.
+ * - `"skipped"` — the entry was not imported: ignored (an image, a binary, a nested `.docx` in v1, a
+ *   dotfile, an empty/no-text file, …) or its own create failed (`failed`, `storage-full`); `reason` is
+ *   a short label. A skip never fails the batch: the other entries still import.
  * `path` is the entry's path inside the archive (the audit key). `articleId`/`slug` are non-null only
  * for created/renamed items; `requestedSlug` only for a rename; `reason` only for a skip.
  */

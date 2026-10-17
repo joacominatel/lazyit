@@ -42,7 +42,7 @@ import { IMPORT_COMMIT_QUEUE } from './import-commit.constants';
     AssetCategoriesModule,
     LocationsModule,
     // ADR-0069 REDESIGN §4.5/§4.6 (Etapa 2): the commit engine creates directory-only persons through
-    // UsersService (skipIdpWriteBack) and opens AssetAssignments through AssetAssignmentsService.
+    // UsersService (directoryOnly) and opens AssetAssignments through AssetAssignmentsService.
     UsersModule,
     AssetAssignmentsModule,
     BullModule.registerQueue({

@@ -30,6 +30,7 @@ import {
 import { ApiError } from "@/lib/api/client";
 import { useResetUserPassword } from "@/lib/api/hooks/use-user-mutations";
 import { cn } from "@/lib/utils";
+import { userMutationErrorKind } from "./role-ceiling";
 import { TemporaryPasswordReveal } from "./temporary-password-reveal";
 
 /**
@@ -89,6 +90,7 @@ export function LocalPasswordResetDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations("users.passwordReset.local");
+  const tUsers = useTranslations("users");
   const tc = useTranslations("common");
   const resetPassword = useResetUserPassword();
   const revokeSessionsId = useId();
@@ -141,6 +143,7 @@ export function LocalPasswordResetDialog({
   /** Map the honest non-success statuses to real copy; anything else keeps the server's own message. */
   function messageForError(err: unknown): string {
     if (!(err instanceof ApiError)) return t("errors.generic");
+    if (userMutationErrorKind(err) === "roleCeiling") return tUsers("errors.roleCeiling");
     switch (err.status) {
       case 409: {
         const reason = emailUnavailableReasonOf(err);

@@ -11,11 +11,14 @@
 #   - is idempotent (a second run writes nothing and takes no second backup),
 #   - PRESERVES an already-present key verbatim, whatever its encoding,
 #   - NEVER generates a non-allowlisted key (WORKFLOW_SECRET_KEY, MEILI_MASTER_KEY, …) — only reports it,
-#   - works for a bundled-Zitadel OIDC install without touching ZITADEL_MASTERKEY,
+#   - REFUSES an install still wired to the removed bundled Zitadel (ADR-0102 §7) on any of its signals,
+#     writing nothing and running no docker command beyond the read-only probes — while a BYOI or a
+#     local install next to a leftover Zitadel volume is NOT refused,
 #   - writes nothing under --dry-run.
 #
 # Fully OFFLINE, via start.sh's test seams (NEVER set in a real deploy): LAZYIT_ENV_FILE,
-# LAZYIT_SKIP_DOCKER, LAZYIT_SKIP_BRINGUP. Needs openssl, like start.sh itself.
+# LAZYIT_SKIP_DOCKER, LAZYIT_SKIP_BRINGUP. The volume-signal scenarios run without LAZYIT_SKIP_DOCKER
+# against a fake `docker` on PATH that logs every call. Needs openssl, like start.sh itself.
 #
 # Run from anywhere:  sh infra/test/start-adds-missing-keys.sh
 # =============================================================================
@@ -43,6 +46,29 @@ run_start() {
   _f=$1; _log=$2; shift 2
   LAZYIT_ENV_FILE="$_f" LAZYIT_SKIP_DOCKER=1 LAZYIT_SKIP_BRINGUP=1 \
     sh infra/start.sh --yes "$@" >"$_log" 2>&1
+}
+# run_start_fake_docker <envfile> <logfile> <volumes> — the same run, through the fake docker below.
+run_start_fake_docker() {
+  _f=$1; _log=$2; _vols=$3
+  : >"$WORK/docker.calls"
+  PATH="$WORK/bin:$PATH" FAKE_DOCKER_VOLUMES="$_vols" FAKE_DOCKER_LOG="$WORK/docker.calls" \
+    LAZYIT_ENV_FILE="$_f" LAZYIT_SKIP_BRINGUP=1 \
+    sh infra/start.sh --yes >"$_log" 2>&1
+}
+mkdir -p "$WORK/bin"
+cat >"$WORK/bin/docker" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "volume ls")      for _v in $FAKE_DOCKER_VOLUMES; do printf '%s\n' "$_v"; done ;;
+  "volume inspect") exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$WORK/bin/docker"
+# Only the read-only probes start.sh makes before bring-up may reach docker.
+docker_calls_read_only() {
+  ! grep -vxE 'info|compose version|volume ls -q|volume inspect .*' "$WORK/docker.calls" >/dev/null
 }
 val() { grep -E "^$2=" "$1" | head -n1 | cut -d= -f2- || true; }
 count() { grep -cE "^$2=" "$1" || true; }
@@ -127,9 +153,20 @@ run_start "$E3" "$WORK/run3.log" || flunk "start.sh (present SMTP key) exited no
 is_hex64 "$(val "$E3" AI_SECRET_KEY)" || flunk "AI_SECRET_KEY was not added next to a present SMTP key"
 
 # ---------------------------------------------------------------------------
-# Scenario 4 — a bundled-Zitadel OIDC install (which --reconfigure refuses): the key is added, and the
-# unrotatable ZITADEL_MASTERKEY and every other secret are untouched.
+# Scenario 4 — installs still wired to the removed bundled Zitadel (ADR-0102 §7) are REFUSED before
+# anything is written: non-zero exit, the runbook named, the file byte-identical, no backup.
 # ---------------------------------------------------------------------------
+# assert_refused <name> <envfile> <logfile>
+assert_refused() {
+  grep -q 'ADR-0102' "$3" || flunk "$1: the refusal does not name ADR-0102"
+  grep -q 'docs/05-runbooks/migrate-off-bundled-zitadel.md' "$3" || flunk "$1: the refusal does not point at the migration runbook"
+  grep -q 'nothing was changed' "$3" || flunk "$1: the refusal does not say nothing was changed"
+  cmp -s "$2" "$WORK/$1.orig" || flunk "$1: .env.prod was modified by a refused run"
+  [ "$(backups "$2")" -eq 0 ] || flunk "$1: a refused run took a backup"
+  [ "$(count "$2" SMTP_SECRET_KEY)" -eq 0 ] || flunk "$1: a refused run appended keys"
+}
+
+# 4a — AUTH_MODE=oidc with an active ZITADEL_MASTERKEY.
 E4="$WORK/oidc/.env.prod"; mkdir -p "$WORK/oidc"
 (umask 077; cat >"$E4" <<EOF
 AUTH_MODE=oidc
@@ -140,15 +177,44 @@ ZITADEL_EXTERNALDOMAIN=auth.localhost
 WEB_ORIGIN=https://localhost:8443
 EOF
 )
-cp "$E4" "$WORK/e4.orig"
-run_start "$E4" "$WORK/run4.log" || { cat "$WORK/run4.log"; flunk "start.sh (OIDC install) exited non-zero"; }
-[ "$(val "$E4" ZITADEL_MASTERKEY)" = "$S_MASTER" ] || flunk "ZITADEL_MASTERKEY changed on an OIDC install"
-[ "$(count "$E4" ZITADEL_MASTERKEY)" -eq 1 ] || flunk "ZITADEL_MASTERKEY duplicated on an OIDC install"
-is_hex64 "$(val "$E4" SMTP_SECRET_KEY)" || flunk "SMTP_SECRET_KEY was not added on an OIDC install"
-is_hex64 "$(val "$E4" DIRECTORY_SECRET_KEY)" || flunk "DIRECTORY_SECRET_KEY was not added on an OIDC install"
-head -c "$(wc -c <"$WORK/e4.orig" | tr -d ' ')" "$E4" | cmp -s - "$WORK/e4.orig" \
-  || flunk "existing lines of an OIDC .env.prod were modified"
-grep -q 'bundled' "$WORK/run4.log" || flunk "the OIDC install was not detected as bundled Zitadel"
+cp "$E4" "$WORK/s4a.orig"
+if run_start "$E4" "$WORK/run4a.log"; then flunk "4a: a bundled install (active ZITADEL_MASTERKEY) was not refused"; fi
+assert_refused s4a "$E4" "$WORK/run4a.log"
+
+# 4b — no master key, but the internal JWKS URL still points at the bundled container.
+E4B="$WORK/oidc-jwks/.env.prod"; mkdir -p "$WORK/oidc-jwks"
+(umask 077; printf 'AUTH_MODE=oidc\nWORKFLOW_SECRET_KEY=%s\nOIDC_ISSUER=https://auth.example.com\nOIDC_JWKS_URI=http://zitadel:8080/oauth/v2/keys\n' \
+  "$S_WORKFLOW" >"$E4B")
+cp "$E4B" "$WORK/s4b.orig"
+if run_start "$E4B" "$WORK/run4b.log"; then flunk "4b: a bundled install (OIDC_JWKS_URI at zitadel:8080) was not refused"; fi
+assert_refused s4b "$E4B" "$WORK/run4b.log"
+
+# 4c — only the leftover Zitadel DB volume and no OIDC_CLIENT_ID (the sidecar used to supply it).
+E4C="$WORK/oidc-vol/.env.prod"; mkdir -p "$WORK/oidc-vol"
+(umask 077; printf 'AUTH_MODE=oidc\nWORKFLOW_SECRET_KEY=%s\nOIDC_ISSUER=https://auth.example.com\n' "$S_WORKFLOW" >"$E4C")
+cp "$E4C" "$WORK/s4c.orig"
+if run_start_fake_docker "$E4C" "$WORK/run4c.log" "lazyit-prod_db_data lazyit-prod_zitadel_db_data lazyit-prod_zitadel_secrets"; then
+  flunk "4c: a bundled install (zitadel_db_data volume, no OIDC_CLIENT_ID) was not refused"
+fi
+assert_refused s4c "$E4C" "$WORK/run4c.log"
+docker_calls_read_only || flunk "4c: a refused run invoked docker beyond the read-only probes: $(tr '\n' ';' <"$WORK/docker.calls")"
+
+# 4d — a BYOI install next to the same leftover volume is NOT refused (it has its own client).
+E4D="$WORK/byoi/.env.prod"; mkdir -p "$WORK/byoi"
+(umask 077; printf 'AUTH_MODE=oidc\nWORKFLOW_SECRET_KEY=%s\nOIDC_ISSUER=https://login.example.com\nOIDC_JWKS_URI=https://login.example.com/keys\nOIDC_CLIENT_ID=lazyit\nWEB_ORIGIN=https://lazyit.example.com\n' \
+  "$S_WORKFLOW" >"$E4D")
+run_start_fake_docker "$E4D" "$WORK/run4d.log" "lazyit-prod_db_data lazyit-prod_zitadel_db_data" \
+  || { cat "$WORK/run4d.log"; flunk "4d: a BYOI install was refused"; }
+is_hex64 "$(val "$E4D" SMTP_SECRET_KEY)" || flunk "4d: SMTP_SECRET_KEY was not added on a BYOI install"
+grep -q 'existing deploy auth mode: byoi' "$WORK/run4d.log" || flunk "4d: the install was not detected as BYOI"
+docker_calls_read_only || flunk "4d: start.sh invoked docker beyond the read-only probes: $(tr '\n' ';' <"$WORK/docker.calls")"
+
+# 4e — a local-auth install never used the IdP: a stray Zitadel volume does not refuse it.
+E4E="$WORK/local-vol/.env.prod"; mkdir -p "$WORK/local-vol"
+(umask 077; printf 'AUTH_MODE=local\nWORKFLOW_SECRET_KEY=%s\nSESSION_SIGNING_SECRET=%s\nWEB_ORIGIN=https://localhost:8443\n' \
+  "$S_WORKFLOW" "$S_SESSION" >"$E4E")
+run_start_fake_docker "$E4E" "$WORK/run4e.log" "lazyit-prod_db_data lazyit-prod_zitadel_db_data" \
+  || { cat "$WORK/run4e.log"; flunk "4e: a local install with a leftover Zitadel volume was refused"; }
 
 # ---------------------------------------------------------------------------
 # Scenario 5 — --dry-run writes nothing (and takes no backup), but names what it would add.
@@ -163,4 +229,4 @@ grep -q 'would append' "$WORK/run5.log" || flunk "--dry-run did not say what it 
 grep 'would append' "$WORK/run5.log" | grep -q 'DIRECTORY_SECRET_KEY' || flunk "--dry-run did not name DIRECTORY_SECRET_KEY"
 
 [ "$fail" -eq 0 ] || { echo "start-adds-missing-keys: FAILED"; exit 1; }
-echo "start-adds-missing-keys: OK — missing allowlisted keys appended once (backup, 600, names only), existing keys and lines untouched, non-allowlisted keys never generated, idempotent, dry-run writes nothing"
+echo "start-adds-missing-keys: OK — missing allowlisted keys appended once (backup, 600, names only), existing keys and lines untouched, non-allowlisted keys never generated, bundled-Zitadel leftovers refused with nothing changed, idempotent, dry-run writes nothing"

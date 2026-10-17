@@ -4,7 +4,7 @@ import { ArrowPathIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outl
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   ChangePasswordRequestSchema,
-  ZitadelPasswordSchema,
+  PasswordPolicySchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
@@ -20,17 +20,18 @@ import { useChangePassword } from "@/lib/api/hooks/use-password-lifecycle";
 import { notifyError } from "@/lib/api/notify-error";
 import { isSessionRevoked } from "@/lib/api/session-revoked";
 import { setSessionToken } from "@/lib/api/session-token";
+import { stepUpLockoutMessage } from "@/lib/api/step-up-lockout";
 import { toast } from "sonner";
 
 /**
  * Form schema (local to the web): the shared change-password contract plus a form-only `confirmPassword`
- * validated against the SAME shared `ZitadelPasswordSchema` the API enforces, so the strength rules and
+ * validated against the SAME shared `PasswordPolicySchema` the API enforces, so the strength rules and
  * copy never drift (apps/web composes shared schemas — it never imports `zod` directly). Two refines
  * mirror the backend: the confirmation must match, and the new password must differ from the current one
  * (the API also rejects `new===current` — surfaced below if it slips past this client check).
  */
 const ChangePasswordFormSchema = ChangePasswordRequestSchema.extend({
-  confirmPassword: ZitadelPasswordSchema,
+  confirmPassword: PasswordPolicySchema,
 })
   .refine((data) => data.confirmPassword === data.newPassword, {
     message: "Passwords don't match.",
@@ -70,6 +71,7 @@ export function ChangePasswordForm({
   onSuccess?: () => void;
 }) {
   const t = useTranslations("auth.changePassword");
+  const tStepUp = useTranslations("ai.approval.errors");
   const { update } = useSession();
   const change = useChangePassword();
 
@@ -106,6 +108,11 @@ export function ChangePasswordForm({
           if (isSessionRevoked(error)) {
             toast.error(t("sessionRevoked"));
             handleAuthExpiry(error);
+            return;
+          }
+          const lockout = stepUpLockoutMessage(error, tStepUp);
+          if (lockout) {
+            form.setError("currentPassword", { message: lockout });
             return;
           }
           if (error instanceof ApiError && error.status === 401) {

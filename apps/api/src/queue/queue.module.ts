@@ -13,9 +13,9 @@ import { buildRedisConnection } from './redis-connection';
  * (parse) failure must never roll back unrelated local state.
  *
  * Connection ROBUSTNESS (issue #257) lives in {@link buildRedisConnection} (./redis-connection.ts):
- * the resolved URL is logged redacted at boot, reconnection is bounded (no infinite ECONNREFUSED
- * loop), error logs are throttled (no flood), and `enableOfflineQueue: false` makes producer
- * enqueues fail fast (a 503 on the import POST instead of a hung 202) when Valkey is unreachable.
+ * the resolved URL is logged redacted at boot, reconnection backs off to a cap and never gives up (the
+ * queues recover after a Valkey restart), error logs are throttled (no flood), and
+ * `enableOfflineQueue: false` makes producer enqueues fail fast (a 503 on the import POST instead of a hung 202) when Valkey is unreachable.
  */
 
 @Global()

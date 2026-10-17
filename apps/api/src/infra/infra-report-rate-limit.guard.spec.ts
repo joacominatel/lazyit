@@ -3,6 +3,7 @@ import {
   InfraReportRateLimitGuard,
   INFRA_REPORT_MAX_PER_WINDOW_DEFAULT,
 } from './infra-report-rate-limit.guard';
+import { RATE_LIMIT_MAX_KEYS } from '../oauth/oauth.constants';
 
 /**
  * Build an ExecutionContext whose HTTP request carries the given SERVICE principal (the agent's SA)
@@ -159,6 +160,19 @@ describe('InfraReportRateLimitGuard', () => {
     const guard = new InfraReportRateLimitGuard();
     expect(guard.canActivate(contextFor(null, '10.0.0.9'))).toBe(true);
     expect(guard.canActivate(contextFor('10.0.0.9', '10.0.0.9'))).toBe(true);
+  });
+
+  it('keeps its key map bounded: past the shared cap the oldest window is evicted, not scanned', () => {
+    // The shared FixedWindowRateLimiter (AUD-005): constant work per hit, whatever the number of keys.
+    process.env.INFRA_REPORT_MAX_PER_WINDOW = '1';
+    const guard = new InfraReportRateLimitGuard();
+    const first = contextFor('sa-first');
+    expect(guard.canActivate(first)).toBe(true);
+    expect(attempt(guard, first)).toBeInstanceOf(HttpException);
+    for (let i = 0; i < RATE_LIMIT_MAX_KEYS; i++) {
+      guard.canActivate(contextFor(`sa-${i}`));
+    }
+    expect(guard.canActivate(first)).toBe(true);
   });
 
   it('ignores a non-numeric / non-positive env override and keeps the default', () => {

@@ -118,8 +118,9 @@ function quickViewReducer(
  * Locations → /locations (list); Applications → /applications/[id] is forward-compatible (the route
  * lands with the Access screen, sub-issue 2).
  *
- * Purchases and suppliers (#1499) come back only for a viewer holding `purchaseOrder:read` — the API
- * omits both otherwise — and their filter chips are hidden without it.
+ * Each entity comes back only for a viewer holding its domain read (`asset:read`, … `purchaseOrder:read`
+ * for purchases and suppliers — ADR-0035, AUD-015); the API omits it otherwise, and its filter chip is
+ * hidden without it.
  */
 export function GlobalSearch() {
   const t = useTranslations("shared");

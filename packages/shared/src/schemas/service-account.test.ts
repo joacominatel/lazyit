@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   CreateServiceAccountSchema,
+  SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS,
   SERVICE_ACCOUNT_TOKEN_PREFIX,
   ServiceAccountSchema,
   ServiceAccountWithSecretSchema,
@@ -14,6 +15,12 @@ import {
 describe("SERVICE_ACCOUNT_TOKEN_PREFIX", () => {
   test("is the stable lzit_sa_ marker the guard matches before the OIDC branch", () => {
     expect(SERVICE_ACCOUNT_TOKEN_PREFIX).toBe("lzit_sa_");
+  });
+});
+
+describe("SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS", () => {
+  test("exempts infra:report alone from the SEC-088 manager ceiling (CEO decision)", () => {
+    expect([...SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS]).toEqual(["infra:report"]);
   });
 });
 

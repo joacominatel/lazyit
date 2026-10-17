@@ -35,6 +35,7 @@ export class RunContextBuilder {
                 legajo: true,
                 username: true,
                 managerName: true,
+                deletedAt: true,
                 // The linked manager is loaded as a NESTED relation: the soft-delete read filter
                 // (ADR-0032) only scopes the TOP-LEVEL operation, so a soft-deleted (offboarded) manager
                 // is still returned here — we read its `deletedAt` to flag `isOffboarded` and BLANK the
@@ -62,6 +63,13 @@ export class RunContextBuilder {
       throw new Error(
         `WorkflowRun ${runId} has no access grant / grantee — cannot build a mapping context`,
       );
+    }
+    // AUD-069: a provision must never run for a grant that was revoked or a grantee who was offboarded.
+    if (
+      run.trigger === 'ACCESS_GRANTED' &&
+      (grant.revokedAt !== null || grant.user.deletedAt !== null)
+    ) {
+      throw new GrantInactiveError(runId);
     }
 
     // Prior MANUAL step outputs in THIS run (keyed by step key) — completed tasks only.
@@ -92,5 +100,14 @@ export class RunContextBuilder {
       steps,
     };
     return freezeMappingContext(ctx);
+  }
+}
+
+export class GrantInactiveError extends Error {
+  constructor(runId: string) {
+    super(
+      `WorkflowRun ${runId} provisions a grant that is revoked or whose grantee is offboarded`,
+    );
+    this.name = 'GrantInactiveError';
   }
 }

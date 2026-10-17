@@ -58,4 +58,20 @@ describe('AssetHistoryService — aiInvocationId stamp', () => {
     await service.record(client, EVENT);
     expect(writtenData(client)).not.toHaveProperty('aiInvocationId');
   });
+
+  it('recordMany stamps every row of its one insert', async () => {
+    const client = {
+      assetHistory: { createMany: jest.fn().mockResolvedValue({}) },
+    };
+    await runInAiInvocation({ invocationId: 'inv-3', channel: 'CHAT' }, () =>
+      service.recordMany(client, [EVENT, { ...EVENT, assetId: 'a2' }]),
+    );
+    const calls = client.assetHistory.createMany.mock.calls as Array<
+      [{ data: Record<string, unknown>[] }]
+    >;
+    expect(calls[0][0].data.map((row) => row.aiInvocationId)).toEqual([
+      'inv-3',
+      'inv-3',
+    ]);
+  });
 });

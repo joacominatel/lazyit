@@ -34,7 +34,6 @@ export function buildOwnProfilePatch(
 export type OwnProfileErrorKind =
   | "managedByDirectory"
   | "serviceAccount"
-  | "identityProviderUnavailable"
   | "invalid"
   | "generic";
 
@@ -48,7 +47,6 @@ export function ownProfileErrorKind(error: unknown): OwnProfileErrorKind {
   if (error.status === 403 && code === "SERVICE_ACCOUNT_NOT_ALLOWED") {
     return "serviceAccount";
   }
-  if (error.status === 503) return "identityProviderUnavailable";
   if (error.status === 400) return "invalid";
   return "generic";
 }

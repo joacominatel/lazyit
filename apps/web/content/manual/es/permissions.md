@@ -36,9 +36,9 @@ escribir mal ni inventar. Lo que **sí** puedes cambiar es qué permisos tienen 
 **Lector**. **El administrador siempre tiene todos los permisos y no se puede editar** — esto
 mantiene la instancia segura de operar (siempre hay un administrador con plena capacidad).
 
-Los administradores ajustan a Miembro y Lector desde la pantalla de configuración de
-roles y permisos, eligiendo entre capacidades en lenguaje sencillo agrupadas por área, con ajustes
-predefinidos de un clic como punto de partida.
+Los administradores ajustan a Miembro y Lector desde **Configuración → Roles y permisos** — una sola
+matriz de capacidades en lenguaje sencillo agrupadas por área, con un ajuste predefinido por rol como
+punto de partida. Consulta [Configuración de permisos](/help/users-permissions-permission-configuration).
 
 ## Quién puede hacer qué (valores por defecto)
 
@@ -86,6 +86,19 @@ Cuando le das a Miembro o a Lector una capacidad de nivel administrador —como 
 registros o conceder acceso a aplicaciones— lazyit lo marca con claridad y te pide confirmación,
 porque es una delegación importante. No te lo impide: dar a un Miembro de confianza la capacidad de
 eliminar es una decisión legítima. El Administrador, en cambio, nunca es editable.
+
+Delegar **Gestionar usuarios** tiene un techo: un Miembro o Lector que la tenga solo puede otorgar su
+propio rol o uno inferior, y solo puede actuar sobre usuarios con un rol igual o inferior al suyo. Solo
+un administrador gestiona administradores. Consulta
+[Roles](/help/users-permissions-roles#reglas-de-seguridad-incorporadas).
+
+Delegar **Cambiar la configuración de la instancia** no cubre tres cosas: editar esta matriz de permisos,
+guardar o sincronizar la conexión del [directorio AD / LDAP](/help/configuration-directory-sync) y guardar
+la configuración de [correo (SMTP)](/help/configuration-smtp-email). Las tres quedan en manos de los
+administradores, porque cada una decide quién puede hacer qué o quién recibe un enlace de
+restablecimiento de contraseña. Un Miembro o Lector con esa capacidad todavía puede verlas. Sí le
+permite gestionar [cuentas de servicio](/help/users-permissions-service-accounts), pero solo con
+permisos que tiene su propio rol.
 
 > Los permisos son por **área**, no por registro individual. lazyit no tiene control de acceso por
 > registro como función general — si un rol puede leer activos, puede leer todos los activos. (Las

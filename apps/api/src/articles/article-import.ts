@@ -51,6 +51,15 @@ export function maxImportBytes(): number {
   return Math.floor(maxImportMb() * 1024 * 1024);
 }
 
+/** The `FileInterceptor` options for `POST /articles/import` (memory storage: the worker reads the buffer). */
+export function importUploadOptions() {
+  return {
+    limits: { fileSize: maxImportBytes() },
+    // Browsers send the filename as raw UTF-8, and the imported title comes from it; multer defaults to latin1.
+    defParamCharset: 'utf8',
+  };
+}
+
 /** Lowercased file extension without the dot ("" if none). */
 export function extensionOf(filename: string): string {
   const dot = filename.lastIndexOf('.');

@@ -23,7 +23,7 @@ jest.mock('../../generated/prisma/client', () => ({
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
-        public meta?: { target?: string | string[] },
+        public meta?: Record<string, unknown>,
       ) {
         super(`prisma-${code}`);
       }
@@ -35,19 +35,24 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import { Prisma } from '../../generated/prisma/client';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 // The P2002 factory the collision-retry tests throw — a genuine instance of the mocked known-error
-// class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry). `meta.target`
-// carries the offending index so the TARGET-AWARE guard is exercised for real: only an assetTag
-// collision advances-and-retries; a serial collision must propagate without burning counter values.
+// class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry). Its meta
+// names the offending index the way adapter-pg does, so the TARGET-AWARE guard is exercised for real:
+// only an assetTag collision advances-and-retries; a serial collision must propagate without burning
+// counter values.
 const FakePrismaKnownError =
   Prisma.PrismaClientKnownRequestError as unknown as new (
     code: string,
-    meta?: { target?: string | string[] },
-  ) => Error & { code: string; meta?: { target?: string | string[] } };
-// The raw partial-unique index names (migration 20260601130000). adapter-pg surfaces these by NAME on
-// a P2002 (the indexes are raw SQL, unknown to Prisma's schema), so that is the real meta.target shape.
-const ASSET_TAG_INDEX = 'assets_assetTag_active_key';
-const SERIAL_INDEX = 'assets_serial_active_key';
+    meta?: Record<string, unknown>,
+  ) => Error & { code: string; meta?: Record<string, unknown> };
+// The raw partial-unique index names (migration 20260601130000).
+const ASSET_TAG_VIOLATION = adapterPgUniqueViolationMeta({
+  index: 'assets_assetTag_active_key',
+});
+const SERIAL_VIOLATION = adapterPgUniqueViolationMeta({
+  index: 'assets_serial_active_key',
+});
 
 type PrismaAssetMock = {
   findMany: jest.Mock;
@@ -62,6 +67,9 @@ type PrismaAssetMock = {
 type TxAssetMock = {
   create: jest.Mock;
   update: jest.Mock;
+  // update() and batchSetStatus() re-read the locked rows inside the transaction (AUD-044).
+  findFirst: jest.Mock;
+  findMany: jest.Mock;
 };
 
 type TxAssetModelMock = {
@@ -266,13 +274,21 @@ describe('AssetsService', () => {
       count: jest.fn(),
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
-    tx = { create: jest.fn(), update: jest.fn() };
+    tx = {
+      create: jest.fn(),
+      update: jest.fn(),
+      findFirst: asset.findFirst,
+      findMany: asset.findMany,
+    };
     txAssetModel = { findFirst: jest.fn() };
     txClient = { asset: tx } as TxClientMock;
     // keep existing transaction assertions focused on the asset delegate
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
     location = { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) };
     Object.defineProperty(txClient, 'location', { value: location });
+    Object.defineProperty(txClient, '$queryRaw', {
+      value: jest.fn().mockResolvedValue([]),
+    });
     // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
     prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
@@ -529,7 +545,7 @@ describe('AssetsService', () => {
       .mockResolvedValueOnce('LAZY-00043');
     tx.create
       .mockRejectedValueOnce(
-        new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+        new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
       )
       .mockResolvedValueOnce({ id: 'a1', assetTag: 'LAZY-00043', ...dto });
 
@@ -551,7 +567,7 @@ describe('AssetsService', () => {
     };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042');
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: SERIAL_INDEX }),
+      new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -571,7 +587,7 @@ describe('AssetsService', () => {
     // An explicit tag took a value already in use → P2002 on the assetTag index, but it must still
     // propagate (the retry-only-on-auto-tag guard in create() short-circuits before the predicate).
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -585,7 +601,7 @@ describe('AssetsService', () => {
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042'); // always renders a colliding tag
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     ); // always collides on the assetTag index
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
@@ -681,7 +697,7 @@ describe('AssetsService', () => {
         call++;
         if (call === 2) {
           return Promise.reject(
-            new FakePrismaKnownError('P2002', { target: SERIAL_INDEX }),
+            new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
           );
         }
         return Promise.resolve({ id: `a${call}`, ...data });
@@ -1265,15 +1281,7 @@ describe('AssetsService', () => {
     expect(countArgs.includeSoftDeleted).toBe(true);
   });
 
-  // --- streamInventoryCsvRows (filtered CSV export, issue #872) ------------
-  // Collect the whole async generator into one string (the API pipes it to a StreamableFile).
-  const collect = async (gen: AsyncGenerator<string>): Promise<string> => {
-    let out = '';
-    for await (const chunk of gen) out += chunk;
-    return out;
-  };
-  const CSV_HEADER =
-    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt,purchaseCost,purchaseCurrency';
+  // --- inventoryExport (the engine's pieces for GET /assets/export, ADR-0103) ----
   // The export's projection for a caller WITHOUT purchaseOrder:read: the lean list select plus the cost
   // columns — the linked purchase is not even read (#1473).
   const EXPECTED_EXPORT_SELECT = {
@@ -1281,84 +1289,98 @@ describe('AssetsService', () => {
     purchaseCost: true,
     purchaseCurrency: true,
   };
+  type ExportArgs = {
+    where: unknown;
+    orderBy: unknown;
+    take: number;
+    select: unknown;
+    includeSoftDeleted?: boolean;
+  };
+  const exportArgs = (call = 0) =>
+    (asset.findMany.mock.calls as Array<[ExportArgs]>)[call][0];
 
-  it('streamInventoryCsvRows yields the header first, then batches over the lean select and terminates', async () => {
-    // A FULL batch then a short (empty) one → proves the OFFSET loop terminates without an extra call.
-    asset.findMany
-      .mockResolvedValueOnce(
-        Array.from({ length: AssetsService.EXPORT_BATCH_SIZE }, () =>
-          leanRow(),
-        ),
-      )
-      .mockResolvedValueOnce([]);
-
-    const csv = await collect(service.streamInventoryCsvRows({}, 'active'));
-
-    expect(asset.findMany).toHaveBeenCalledTimes(2);
-    // Provenance stamp (#909) then the header.
-    expect(csv.startsWith('# lazyit ')).toBe(true);
-    expect(csv).toContain(`\n${CSV_HEADER}\n`);
-    // The lean select (no specs) is reused, with a stable total order + the batch size as `take`.
-    const args = (
-      asset.findMany.mock.calls as Array<
-        [{ where: unknown; orderBy: unknown; take: number; select: unknown }]
-      >
-    )[0][0];
-    expect(args.select).toEqual(EXPECTED_EXPORT_SELECT);
-    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
-    expect(args.take).toBe(AssetsService.EXPORT_BATCH_SIZE);
-    expect(args.where).toEqual({ deletedAt: null });
-    // One data line per row of the full batch, plus the provenance stamp + header lines (#909).
-    const lines = csv.split('\n').filter((l) => l.length > 0);
-    expect(lines).toHaveLength(AssetsService.EXPORT_BATCH_SIZE + 2);
-  });
-
-  it('streamInventoryCsvRows reuses buildWhere so the export can never drift from the list', async () => {
-    asset.findMany.mockResolvedValueOnce([]);
-
-    await collect(
-      service.streamInventoryCsvRows(
-        { company: 'Acme', status: 'RETIRED', locationId: 'l1' },
-        'active',
-      ),
+  it('inventoryExport reads the lean select newest first by (createdAt, id), then from the cursor', async () => {
+    asset.findMany.mockResolvedValue([]);
+    const { fetchBatch } = await service.inventoryExport(
+      {},
+      'active',
+      HUMAN_PRINCIPAL,
     );
+    const cursor = {
+      createdAt: new Date('2026-10-16T10:00:00.000Z'),
+      id: 'a9',
+    };
 
-    const args = (
-      asset.findMany.mock.calls as Array<[{ where: unknown }]>
-    )[0][0];
-    expect(args.where).toEqual({
-      company: 'Acme',
-      status: 'RETIRED',
-      locationId: 'l1',
-      deletedAt: null,
+    await fetchBatch(null, 1000);
+    await fetchBatch(cursor, 1000);
+
+    expect(exportArgs(0)).toEqual({
+      where: { deletedAt: null },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 1000,
+      select: EXPECTED_EXPORT_SELECT,
+    });
+    expect(exportArgs(1).where).toEqual({
+      AND: [
+        { deletedAt: null },
+        {
+          OR: [
+            { createdAt: { lt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { lt: 'a9' } },
+          ],
+        },
+      ],
     });
   });
 
-  it('streamInventoryCsvRows deleted=only scopes to archived rows via the includeSoftDeleted escape hatch', async () => {
-    asset.findMany.mockResolvedValueOnce([]);
+  it('inventoryExport counts and reads the exact where the list builds for the same filters', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+    const filters = {
+      company: 'Acme',
+      status: 'RETIRED' as const,
+      locationId: 'l1',
+      q: 'dell',
+      assetTags: ['LZ-1'],
+    };
 
-    await collect(service.streamInventoryCsvRows({}, 'only'));
+    await service.findPage(filters, {
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    });
+    const listWhere = exportArgs(0).where;
+    const { count, fetchBatch } = await service.inventoryExport(
+      filters,
+      'active',
+      HUMAN_PRINCIPAL,
+    );
+    await count();
+    await fetchBatch(null, 1000);
 
-    const args = (
-      asset.findMany.mock.calls as Array<
-        [{ where: unknown; includeSoftDeleted?: boolean }]
-      >
-    )[0][0];
-    expect(args.where).toEqual({ deletedAt: { not: null } });
-    expect(args.includeSoftDeleted).toBe(true);
+    expect(exportArgs(1).where).toEqual(listWhere);
+    expect(
+      (asset.count.mock.calls as Array<[{ where: unknown }]>)[1][0].where,
+    ).toEqual(listWhere);
   });
 
-  it('streamInventoryCsvRows defuses a spreadsheet formula-injection in a resolved cell', async () => {
-    asset.findMany
-      .mockResolvedValueOnce([leanRow({ company: '=cmd|/c calc' })])
-      .mockResolvedValueOnce([]);
+  it('inventoryExport deleted=only scopes the count and the batches to archived rows via the escape hatch', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+    const { count, fetchBatch } = await service.inventoryExport(
+      {},
+      'only',
+      HUMAN_PRINCIPAL,
+    );
+    await count();
+    await fetchBatch(null, 1000);
 
-    const csv = await collect(service.streamInventoryCsvRows({}, 'active'));
-
-    // Leading '=' neutralized with a single quote (the shared guard, reused — not reimplemented).
-    expect(csv).toContain("'=cmd|/c calc");
-    // No specs column can ever appear (the lean projection has none).
-    expect(csv).not.toContain('specs');
+    expect(exportArgs(0).where).toEqual({ deletedAt: { not: null } });
+    expect(exportArgs(0).includeSoftDeleted).toBe(true);
+    expect(asset.count).toHaveBeenCalledWith({
+      where: { deletedAt: { not: null } },
+      includeSoftDeleted: true,
+    });
   });
 
   // --- findPage server-side sort (ADR-0030 amendment) ---------------------
@@ -1656,8 +1678,9 @@ describe('AssetsService', () => {
 
     await service.update('a1', { status: 'RETIRED' });
 
+    // The snapshot is read inside the transaction, after locking the row (AUD-044).
     expect(asset.findFirst).toHaveBeenCalledWith({
-      where: { id: 'a1' },
+      where: { id: 'a1', deletedAt: null },
       select: {
         id: true,
         status: true,
@@ -1705,14 +1728,14 @@ describe('AssetsService', () => {
     });
   });
 
-  it('update throws NotFound (and never opens a transaction) when the asset is missing', async () => {
+  it('update throws NotFound (and writes nothing) when the asset is missing', async () => {
     asset.findFirst.mockResolvedValue(null);
 
     await expect(
       service.update('missing', { status: 'RETIRED' }),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.update).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
   });
 
   it('update resolves a HUMAN principal and stamps userId onto every change event', async () => {

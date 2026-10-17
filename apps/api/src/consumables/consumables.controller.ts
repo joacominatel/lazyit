@@ -8,14 +8,18 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ConsumableDeliveryPageSchema,
@@ -37,6 +41,12 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { ExportService } from '../common/export';
+import {
+  CONSUMABLE_EXPORT_COLUMNS,
+  DELIVERY_EXPORT_COLUMNS,
+  MOVEMENT_EXPORT_COLUMNS,
+} from './consumables-export';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -55,10 +65,33 @@ class CreateConsumableMovementDto extends createZodDto(
   CreateConsumableMovementSchema,
 ) {}
 
+function parseDeliveryQuery(query: Record<string, string | undefined>) {
+  const parsed = ConsumableDeliveryQuerySchema.safeParse(query);
+  if (!parsed.success) {
+    throw new BadRequestException(
+      'Invalid delivery filters: exactly one of targetUserId (uuid), targetAssetId (cuid) or targetLocationId (cuid); from/to (ISO datetime, from <= to)',
+    );
+  }
+  return parsed.data;
+}
+
+function parseMovementQuery(query: Record<string, string | undefined>) {
+  const parsed = ConsumableMovementQuerySchema.safeParse(query);
+  if (!parsed.success) {
+    throw new BadRequestException(
+      'Invalid movement filters: type (IN|OUT|ADJUSTMENT) and from/to (ISO datetime)',
+    );
+  }
+  return parsed.data;
+}
+
 @ApiTags('consumables')
 @Controller('consumables')
 export class ConsumablesController {
-  constructor(private readonly consumables: ConsumablesService) {}
+  constructor(
+    private readonly consumables: ConsumablesService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get()
   @RequirePermission('consumable:read')
@@ -156,6 +189,46 @@ export class ConsumablesController {
     );
   }
 
+  // STATIC route declared BEFORE `:id` so `/consumables/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('consumable:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every consumable matching the list filters (ADR-0103): same permission, filters and rows as GET /consumables, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'lowStock', required: false, type: Boolean })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'category', required: false })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered consumables as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('lowStock') lowStock?: string,
+    @Query('q') q?: string,
+    @Query('category') category?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    const filters = {
+      lowStock: parseBooleanQuery(lowStock),
+      q,
+      categoryId: parseCuidQuery(category, 'category'),
+    };
+    return this.exports.exportCsv({
+      resource: 'CONSUMABLES',
+      principal,
+      response: res,
+      filters: { ...filters, deleted: slice },
+      columns: CONSUMABLE_EXPORT_COLUMNS,
+      filename: 'consumables',
+      ...this.consumables.exportSource(filters, slice),
+    });
+  }
+
   // Declared BEFORE `:id` so `deliveries` is never captured as a consumable id. Gated on
   // `consumable:read`; the service ALSO requires the target domain's read permission (`user:read` for a
   // person — a VIEWER lacks it, the ADR-0046 P3 directory-relational rule — `asset:read`,
@@ -234,7 +307,45 @@ export class ConsumablesController {
     @Query('page') page?: string,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    const parsed = ConsumableDeliveryQuerySchema.safeParse({
+    return this.consumables.findDeliveries(
+      parseDeliveryQuery({
+        targetUserId,
+        targetAssetId,
+        targetLocationId,
+        outstandingOnly,
+        from,
+        to,
+      }),
+      parsePageQuery({ limit, offset, page }),
+      principal,
+    );
+  }
+
+  @Get('deliveries/export')
+  @RequirePermission('consumable:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of the deliveries made to ONE user, asset or location (ADR-0103): same permission, per-kind gate (403), filters, rows and target redaction as GET /consumables/deliveries, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited.',
+  })
+  @ApiQuery({ name: 'targetUserId', required: false })
+  @ApiQuery({ name: 'targetAssetId', required: false })
+  @ApiQuery({ name: 'targetLocationId', required: false })
+  @ApiQuery({ name: 'outstandingOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiOkResponse({ description: 'The filtered deliveries as CSV (text/csv).' })
+  async exportDeliveries(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('targetUserId') targetUserId?: string,
+    @Query('targetAssetId') targetAssetId?: string,
+    @Query('targetLocationId') targetLocationId?: string,
+    @Query('outstandingOnly') outstandingOnly?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<StreamableFile> {
+    const filters = parseDeliveryQuery({
       targetUserId,
       targetAssetId,
       targetLocationId,
@@ -242,16 +353,15 @@ export class ConsumablesController {
       from,
       to,
     });
-    if (!parsed.success) {
-      throw new BadRequestException(
-        'Invalid delivery filters: exactly one of targetUserId (uuid), targetAssetId (cuid) or targetLocationId (cuid); from/to (ISO datetime, from <= to)',
-      );
-    }
-    return this.consumables.findDeliveries(
-      parsed.data,
-      parsePageQuery({ limit, offset, page }),
+    return this.exports.exportCsv({
+      resource: 'CONSUMABLE_DELIVERIES',
       principal,
-    );
+      response: res,
+      filters: { ...filters },
+      columns: DELIVERY_EXPORT_COLUMNS,
+      filename: 'consumable-deliveries',
+      ...(await this.consumables.deliveriesExportSource(filters, principal)),
+    });
   }
 
   @Get(':id')
@@ -294,13 +404,46 @@ export class ConsumablesController {
     @Query('to') to?: string,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    const parsed = ConsumableMovementQuerySchema.safeParse({ type, from, to });
-    if (!parsed.success) {
-      throw new BadRequestException(
-        'Invalid movement filters: type (IN|OUT|ADJUSTMENT) and from/to (ISO datetime)',
-      );
-    }
-    return this.consumables.listMovements(id, parsed.data, principal);
+    return this.consumables.listMovements(
+      id,
+      parseMovementQuery({ type, from, to }),
+      principal,
+    );
+  }
+
+  @Get(':id/movements/export')
+  @RequirePermission('consumable:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      "CSV export of a consumable's stock movements (ADR-0103): same permission, filters, rows and target redaction as GET /consumables/:id/movements, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited.",
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: [...ConsumableMovementTypeSchema.options],
+  })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiOkResponse({ description: 'The filtered movements as CSV (text/csv).' })
+  async exportMovements(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('type') type?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<StreamableFile> {
+    const filters = parseMovementQuery({ type, from, to });
+    return this.exports.exportCsv({
+      resource: 'CONSUMABLE_MOVEMENTS',
+      principal,
+      response: res,
+      filters: { consumableId: id, ...filters },
+      columns: MOVEMENT_EXPORT_COLUMNS,
+      filename: 'consumable-movements',
+      ...(await this.consumables.movementsExportSource(id, filters, principal)),
+    });
   }
 
   @Post()

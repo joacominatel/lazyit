@@ -58,22 +58,30 @@ export interface PurchaseOrderListParams {
   deleted?: "only";
 }
 
-export function getPurchaseOrders(
-  params: PurchaseOrderListParams = {},
-  signal?: AbortSignal,
-): Promise<PurchaseOrderListPage> {
+export const PURCHASE_ORDER_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function purchaseOrderFilterParams(params: PurchaseOrderListParams = {}): URLSearchParams {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.status && params.status.length > 0) qs.set("status", params.status.join(","));
   if (params.supplierId) qs.set("supplierId", params.supplierId);
   if (params.receipt) qs.set("receipt", params.receipt);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
+export function getPurchaseOrders(
+  params: PurchaseOrderListParams = {},
+  signal?: AbortSignal,
+): Promise<PurchaseOrderListPage> {
+  const qs = purchaseOrderFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<PurchaseOrderListPage>(search ? `${BASE}?${search}` : BASE, { signal });
 }
@@ -238,6 +246,15 @@ export function cancelRemainingUnits(
   });
 }
 
+export const PENDING_LINE_EXPORT_PATH = `${BASE}/pending-lines/export`;
+
+/** The pending-units list's filters, never the page window; the CSV export sends exactly these. */
+export function pendingLineFilterParams({ supplierId }: { supplierId?: string } = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (supplierId) qs.set("supplierId", supplierId);
+  return qs;
+}
+
 /**
  * The *Pending units* list: countable lines with units still pending on live purchases that are neither
  * draft nor cancelled, oldest purchase first, each with its purchase header.
@@ -246,8 +263,7 @@ export function getPendingLines(
   { supplierId, limit, offset }: { supplierId?: string; limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<PendingPurchaseLinePage> {
-  const qs = new URLSearchParams();
-  if (supplierId) qs.set("supplierId", supplierId);
+  const qs = pendingLineFilterParams({ supplierId });
   if (limit !== undefined) qs.set("limit", String(limit));
   if (offset !== undefined) qs.set("offset", String(offset));
   const search = qs.toString();

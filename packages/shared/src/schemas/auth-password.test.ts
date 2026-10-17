@@ -8,8 +8,8 @@ import {
 } from "./auth-password";
 
 // ADR-0086 §F4 (F4a) — the local-mode password-lifecycle wire contracts. The *new* password on both
-// change + reset must satisfy the SAME Zitadel-default strength as `/setup` (delegated to
-// ZitadelPasswordSchema); a *current* password is only length-bounded.
+// change + reset must satisfy the SAME strength as `/setup` (delegated to PasswordPolicySchema); a
+// *current* password is only length-bounded.
 describe("auth-password schemas (ADR-0086 §F4)", () => {
   test("PASSWORD_CHANGE_REQUIRED_CODE is the stable gate code", () => {
     expect(PASSWORD_CHANGE_REQUIRED_CODE).toBe("PASSWORD_CHANGE_REQUIRED");

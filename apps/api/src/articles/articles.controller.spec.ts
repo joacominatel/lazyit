@@ -1,10 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, INestApplication } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  INestApplication,
+} from '@nestjs/common';
 import request from 'supertest';
 import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
 import { ArticleImportService } from './import/article-import.service';
 import { maxImportBytes } from './article-import';
+import { ExportService } from '../common/export';
 
 // Mock the generated Prisma client so importing ArticlesService (the DI token) never loads the
 // real one (no DB). The service itself is replaced by a mock below.
@@ -36,6 +41,7 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
       providers: [
         { provide: ArticlesService, useValue: {} },
         { provide: ArticleImportService, useValue: { enqueue } },
+        { provide: ExportService, useValue: {} },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -86,13 +92,15 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
  * method directly) — no guard/DB wiring.
  *
  * `findAll` positional args:
- * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, …).
+ * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, offset,
+ * page, principal, sort, includeSubfolders, deleted).
  */
 describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
   const controller = new ArticlesController(
     { findPage } as unknown as ArticlesService,
     {} as unknown as ArticleImportService,
+    {} as unknown as ExportService,
   );
 
   beforeEach(() => findPage.mockClear());
@@ -152,12 +160,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
   });
 
   it('parses multi-value status into an array (#198)', () => {
-    void controller.findAll(
-      undefined,
-      undefined,
-      undefined,
-      'DRAFT,PUBLISHED',
-    );
+    void controller.findAll(undefined, undefined, undefined, 'DRAFT,PUBLISHED');
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
@@ -167,12 +170,10 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
   });
 
   it('accepts repeated params (string[]) for status (#198)', () => {
-    void controller.findAll(
-      undefined,
-      undefined,
-      undefined,
-      ['DRAFT', 'PUBLISHED'],
-    );
+    void controller.findAll(undefined, undefined, undefined, [
+      'DRAFT',
+      'PUBLISHED',
+    ]);
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
@@ -339,5 +340,151 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       undefined,
       undefined,
     );
+  });
+  // --- browse order + subfolder widening (#1539) ----------------------------
+
+  // `sort` / `includeSubfolders` sit after the principal in the positional list; this names them.
+  const listWith = (params: {
+    categoryId?: string;
+    sort?: string;
+    includeSubfolders?: string;
+  }) =>
+    controller.findAll(
+      undefined,
+      params.categoryId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      params.sort,
+      params.includeSubfolders,
+    );
+
+  it.each(['updated', 'title', 'created'])(
+    'forwards a valid sort=%s to the service (#1539)',
+    (sort) => {
+      void listWith({ sort });
+      expect(findPage).toHaveBeenCalledWith(
+        expect.objectContaining({ sort }),
+        expect.anything(),
+        undefined,
+        undefined,
+      );
+    },
+  );
+
+  it('leaves sort undefined when omitted, so the service keeps its default order (#1539)', () => {
+    void listWith({});
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: undefined, includeSubfolders: false }),
+      expect.anything(),
+      undefined,
+      undefined,
+    );
+  });
+
+  it.each(['newest', 'TITLE', 'updatedAt', ''])(
+    'rejects an unknown sort=%p with 400 (never reaches the service, #1539)',
+    (sort) => {
+      expect(() => listWith({ sort })).toThrow(BadRequestException);
+      expect(findPage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a repeated sort param (an array) with 400 (#1539)', () => {
+    expect(() =>
+      listWith({ sort: ['title', 'created'] as unknown as string }),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('forwards includeSubfolders=true with the categoryId filter (#1539)', () => {
+    void listWith({ categoryId: CUID_A, includeSubfolders: 'true' });
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryId: [CUID_A],
+        includeSubfolders: true,
+      }),
+      expect.anything(),
+      undefined,
+      undefined,
+    );
+  });
+
+  it.each(['false', '1', 'yes', 'TRUE', ''])(
+    'rejects an unknown includeSubfolders=%p with 400 (#1539)',
+    (includeSubfolders) => {
+      expect(() => listWith({ categoryId: CUID_A, includeSubfolders })).toThrow(
+        BadRequestException,
+      );
+      expect(findPage).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('ArticlesController GET /articles?deleted= (the archived slice, #1647)', () => {
+  const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
+  const controller = new ArticlesController(
+    { findPage } as unknown as ArticlesService,
+    {} as unknown as ArticleImportService,
+    {} as unknown as ExportService,
+  );
+  const ADMIN = { id: 'a1', role: 'ADMIN' } as never;
+  const MEMBER = { id: 'm1', role: 'MEMBER' } as never;
+  const listWith = (user: unknown, deleted?: string) =>
+    controller.findAll(
+      user as never,
+      undefined, // categoryId
+      undefined, // authorId
+      undefined, // status
+      undefined, // q
+      undefined, // linked
+      undefined, // linkedTo
+      undefined, // assetId
+      undefined, // applicationId
+      undefined, // limit
+      undefined, // offset
+      undefined, // page
+      undefined, // principal
+      undefined, // sort
+      undefined, // includeSubfolders
+      deleted,
+    );
+
+  beforeEach(() => findPage.mockClear());
+
+  it('lets an ADMIN list the archived slice', async () => {
+    await listWith(ADMIN, 'only');
+    expect(findPage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ deleted: 'only' }),
+      ADMIN,
+      undefined,
+    );
+  });
+
+  it('refuses the archived slice to a non-admin (403) without reaching the service', () => {
+    expect(() => listWith(MEMBER, 'only')).toThrow(ForbiddenException);
+    expect(() => listWith(undefined, 'only')).toThrow(ForbiddenException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('defaults to the live slice for everyone, and accepts deleted=active explicitly', async () => {
+    await listWith(MEMBER);
+    await listWith(MEMBER, 'active');
+    for (const call of findPage.mock.calls as Array<[unknown, unknown]>) {
+      expect(call[1]).toEqual(expect.objectContaining({ deleted: 'active' }));
+    }
+  });
+
+  it('rejects an unknown slice with 400', () => {
+    expect(() => listWith(ADMIN, 'all')).toThrow(BadRequestException);
   });
 });

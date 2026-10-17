@@ -40,10 +40,10 @@ export const DashboardAssetsSchema = z.object({
 
 /** Access pillar — active grants, the soon-to-expire subset, and grants on critical apps. */
 export const DashboardAccessSchema = z.object({
-  // Active grants: `revokedAt = null`. `expiresAt` never affects activeness (ADR-0023).
+  // Active grants: `revokedAt = null`. A grant past `expiresAt` stays active until the expiry sweeper revokes it (ADR-0023, amended).
   activeGrants: z.number().int().nonnegative(),
   // Active grants whose `expiresAt` falls within the next `expiringWithinDays` window
-  // (now < expiresAt <= now + N days). Informative only — nothing auto-revokes (ADR-0023).
+  // (now < expiresAt <= now + N days). The expiry sweeper revokes each one once it passes (ADR-0023, amended).
   expiringSoon: z.number().int().nonnegative(),
   // The look-ahead window (in days) used to compute `expiringSoon`. Echoed so the UI can label it.
   expiringWithinDays: z.number().int().positive(),

@@ -111,3 +111,35 @@ describe('stepsNeedingConnection', () => {
     expect(refs).toEqual([{ index: 0, connectionId: CONN, kind: 'REST' }]);
   });
 });
+
+describe('unknown template filters are rejected at author time (AUD-068)', () => {
+  it('passes the closed filter set', () => {
+    const steps = WorkflowStepsSchema.parse([
+      rest('s1', {
+        path: '/users/{{ grantee.id | lower }}',
+        dataMapping: { name: '{{ grantee.legajo | default:"n|a" }}' },
+      }),
+    ]);
+    expect(() => assertAllStepsReachable(steps)).not.toThrow();
+  });
+
+  it('throws a field-addressable error naming the step and the filter', () => {
+    const steps = WorkflowStepsSchema.parse([
+      rest('s1', { dataMapping: { name: '{{ grantee.email | slugify }}' } }),
+      manual('m1', { prompt: 'Team for {{ grantee.email | shout }}' }),
+    ]);
+    try {
+      assertAllStepsReachable(steps);
+      throw new Error('expected to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      const body = (err as BadRequestException).getResponse() as {
+        unknownTemplateFilters: { key: string; filter: string }[];
+      };
+      expect(body.unknownTemplateFilters).toEqual([
+        { index: 0, key: 's1', filter: 'slugify' },
+        { index: 1, key: 'm1', filter: 'shout' },
+      ]);
+    }
+  });
+});

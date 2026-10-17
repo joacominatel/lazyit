@@ -60,7 +60,8 @@ querés agruparlos de forma previsible.
 ## Buscar y filtrar
 
 - La **búsqueda** coincide con el **nombre**, la **IP**, el **nombre del activo** vinculado y el
-  **responsable** (nombre o correo) a medida que escribís. La búsqueda recorre **todo tu parque**, no
+  **responsable** (nombre, o correo si tu rol puede ver el directorio de usuarios) a medida que
+  escribís. La búsqueda recorre **todo tu parque**, no
   solo la página que estás mirando: una máquina que está en la página cuatro se encuentra desde la
   página uno, y "sin resultados" significa de verdad que no hay resultados.
 - Los desplegables **Tipo**, **Estado** y **Estado de ciclo** acotan la lista. *Estado de ciclo*
@@ -70,6 +71,9 @@ querés agruparlos de forma previsible.
 
 Los filtros activos aparecen como chips removibles debajo de la barra de herramientas, y una acción
 **Limpiar** los restablece todos.
+
+**Exportar CSV**, al final de la barra de filtros, descarga todos los nodos que coinciden con la búsqueda
+y los filtros, no solo la página — mira [Exportar datos](/help/notifications-activity-data-export).
 
 ## Recorrer la lista por páginas
 
