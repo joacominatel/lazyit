@@ -1,0 +1,20 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": "\\.db\\.spec\\.ts$",
+  "setupFiles": ["<rootDir>/jest.env-setup.ts"],
+  "moduleNameMapper": { "^(\\.{1,2}/.*)\\.js$": "$1" },
+  "transform": {
+    "^.+\\.ts$": "ts-jest",
+    "^.+\\.js$": [
+      "@swc/jest",
+      {
+        "sourceMaps": true,
+        "module": { "type": "commonjs" },
+        "jsc": { "target": "es2023", "parser": { "syntax": "ecmascript" } }
+      }
+    ]
+  },
+  "transformIgnorePatterns": ["/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|(?:.*/)?ai/)"]
+}

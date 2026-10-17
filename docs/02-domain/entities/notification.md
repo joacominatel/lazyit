@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-10-15
+updated: 2026-10-17
 ---
 
 # Notification
@@ -153,6 +153,27 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 The feed and its `total` exclude the caller's dismissed rows; the unread count excludes them by
 construction (a dismissed row always has a read join).
 
+### Grouped feed (#1649)
+
+A bulk operation (an import, a seed, a mass grant) can emit hundreds of one type in a day, so the bell
+reads groups instead of the flat feed ([[0056-in-app-notification-bell]] amendment 2026-10-17):
+
+- `GET /notifications/groups?tz=&limit=&offset=` — the caller's notifications grouped by **(type,
+  calendar day in `tz`)** → `Page<NotificationGroup>`: `{ type, day, count, unread, latestAt, latest }`,
+  where `latest` is the newest `NOTIFICATION_GROUP_PREVIEW_SIZE` (3) items as full `Notification` rows.
+  Ordered `latestAt` desc, `day` desc, `type` asc (a total order); `total` counts groups.
+- `GET /notifications/groups/items?type=&day=&tz=&limit=&offset=` — one group's items, newest first,
+  `id` desc as the tiebreaker → `Page<Notification>`.
+- `PATCH /notifications/read-group` with body `{ type, day, tz? }` — marks the whole group read for the
+  caller in one `INSERT … SELECT … ON CONFLICT DO NOTHING` → `{ marked, unread }`. Idempotent.
+
+`tz` is an IANA name, default `UTC`; the web sends the instance display zone
+(`NEXT_PUBLIC_DEFAULT_TIME_ZONE`, [[i18n]]). The API has no zone of its own, so the client must send the
+same `tz` to all three. All three apply the same visibility scope and dismissed-row exclusion as the flat
+feed; the grouping runs in SQL (`GROUP BY`, a `LATERAL` preview per group over the `(type, createdAt)`
+index), never by loading rows. The unread count is unchanged and exact — the UI caps the badge, not the
+API.
+
 **Read-path authZ ([[0056-in-app-notification-bell]] amendment 2026-06-14, #453).** v1 gated all four
 endpoints by `@RequirePermission('notification:read')` (ADMIN-only) — a non-admin was 403'd and could
 never see the bell. Targeted notifications change that: the routes are **relaxed to any authenticated
@@ -185,8 +206,11 @@ amendment, #453; the `/secrets` banner was dropped). Each row carries a per-user
 "Clear all" action that removes the rows currently shown, both optimistic, with no confirmation and no
 undo — a CEO decision of 2026-09-23 ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
 
+The panel lists groups from the grouped feed, expandable to their items and markable read per group,
+with the badge capped at `99+` (#1649).
+
 ## Related
 
 [[0056-in-app-notification-bell]] · [[recent-activity]] · [[manual-task]] · [[access-grant]] ·
 [[consumable-movement]] · [[user-keypair]] · [[0061-secret-manager-zero-knowledge]] (INV-10) ·
-[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453 · issue #1309
+[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453 · issue #1309 · issue #1649
