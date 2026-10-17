@@ -185,10 +185,12 @@ Legend:
 | locations | create | location:write | W | v1 `location_create` (built, W2-5) |
 | locations | update | location:write | W | v1 `location_update` (built, #1390) |
 | locations | delete / restore | location:delete | D | v1 `location_archive` / `location_restore` (built, #1390) |
+| locations | export CSV | location:read | R | EXCL (bulk file; use search) |
 | applications | list / get | application:read | R | v1 |
 | applications | `:id/access-grants`, `:id/articles` | accessGrant:read, article:read | R | v1 facets |
 | applications | create / update | application:write | W | v1 |
 | applications | delete / restore | application:delete | D | v1.1 |
+| applications | export CSV | application:read | R | EXCL (bulk file; use search) |
 | workflows | list (headers only) | workflow:read | R | facet of the grant / revoke / approve previews (W2-6: whether an automatic (de)provisioning workflow runs); never a tool |
 | access-grants | list / get | accessGrant:read | R | v1 `access_grant_list` |
 | access-grants | `mine` | self | R | v1 (`session_context`) |
@@ -210,6 +212,7 @@ Legend:
 | articles | create / update / publish / unpublish | article:write | W | v1 (SA create → 403, [R25]) |
 | articles | version restore, links / aliases writes | article:write | W | v1.1 |
 | articles | import (multipart) | article:write | W | EXCL (binary) |
+| articles | export CSV | article:read | R | EXCL (bulk file; use search) |
 | articles | delete / restore | article:delete | D | v1.1 |
 | users | list, get, `:id/assignments` | user:read | R | v1 `user_search`, `user_get` (built, W2-9) |
 | users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
@@ -849,7 +852,8 @@ leak through a tool would be a leak in the test.
   the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
-  transfer (no file tools); folder delete (a cascading one included) and restore (v1.1, declared in
+  transfer (no file tools), the article-index CSV export (a bulk file,
+  [[0103-data-export-streaming-path]]); folder delete (a cascading one included) and restore (v1.1, declared in
   `reference.tools.ts`), a folder move, and folder access rules (`elevated`, after v1).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
   - entity-ref labels (article titles) are not wrapped as untrusted;
@@ -1064,7 +1068,7 @@ Accounts holding the route's permission.
     ADMIN role for its lookup.
 - **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1; the batch create is
   `asset_create_batch` over the single create route, and the batch update — status included — is
-  `asset_update_batch` over the single update route), the CSV export, the
+  `asset_update_batch` over the single update route), the asset and location CSV exports, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
   folder delete and restore (v1.1; create and rename are `kb_folder_create` / `kb_folder_rename`, #1378),
@@ -1373,8 +1377,8 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
   - `access_request_create` — `write`, human-only (a Service Account is refused and never listed);
     `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
     target + precondition the application); neither accepts `metadata`.
-- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1); the grant and
-  access-request CSV exports (bulk files, [[0103-data-export-streaming-path]]).
+- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1); the grant,
+  access-request and application list CSV exports (bulk files, [[0103-data-export-streaming-path]]).
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
@@ -1493,7 +1497,7 @@ payloads, document names and labels, the document draft — is wrapped as untrus
 - **Unexposed**: archive / restore of purchases and suppliers (ADMIN lifecycle actions, done from the pages),
   `unlinkAssets` (a correction, done from the pages), `extractionStatus` (the web's probe; the tool answers the
   same refusals), document upload / download (no file tools), label edit / delete (human-only routes) and the
-  CSV export (a bulk file, [[0103-data-export-streaming-path]]).
+  CSV exports of purchases, suppliers and pending units (bulk files, [[0103-data-export-streaming-path]]).
 - **Labels**: the sentences are `purchase_*.action` / `.summary` and `supplier_*.action` / `.summary` in
   `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
   `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,

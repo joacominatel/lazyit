@@ -143,6 +143,14 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 - A line can be removed (soft delete) only while nothing was received on it — no linked asset, no stock
   moved in, no seat applied (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
+- **Export** (`GET /purchase-orders/pending-lines/export?supplierId=`, #1597,
+  [[0103-data-export-streaming-path]]): a CSV of every line the *Pending units* list would return for the
+  same `supplierId`, under the same `purchaseOrder:read` (VIEWER denied by default), one row per line,
+  newest line first. Columns: `lineId, purchaseId, purchaseReference, supplier, purchaseStatus, orderDate,
+  expectedDate, kind, description, manufacturer, model, quantityOrdered, quantityCancelled,
+  quantityReceived, quantityPending` — the received and pending counts are the list's derived ones. The
+  list's purchase header has no delivery location, so neither has the file; prices are not exported. Every
+  export is audited ([[data-export-log]]).
 - `manufacturerText` / `modelText` / `description` feed smart entry (`GET /suggestions/manufacturer`,
   `/lineModel`, `/lineDescription` — the last since #1473), from live lines of live purchases.
 

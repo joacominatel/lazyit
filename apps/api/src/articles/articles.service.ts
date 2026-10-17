@@ -42,6 +42,12 @@ import {
 } from '../article-categories/folder-access.service';
 import { expandFolderSubtrees } from '../article-categories/folder-tree';
 import { claimableWikiLinksWhere } from './wiki-link-claim';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import { visibleFolderPath, type ArticleExportRow } from './article-export';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -204,15 +210,7 @@ export class ArticlesService {
     currentUser?: User,
     principal?: Principal,
   ) {
-    // Folder access (ADR-0060 §4): pin the list to the folders the caller may see, so a folder-hidden
-    // article never even appears in the list (existence-hiding). ADMIN ('ALL') gets no folder pin.
-    const visible = await this.folderAccess.visibleFolderIds(principal);
-    const categoryId = await this.expandCategoryFilter(filters);
-    const where = this.buildWhere(
-      { ...filters, categoryId },
-      currentUser,
-      visible,
-    );
+    const { where } = await this.listScope(filters, currentUser, principal);
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
@@ -232,6 +230,82 @@ export class ArticlesService {
       linkCount: _count.links,
     }));
     return pageOf(items, total, page);
+  }
+
+  /**
+   * The list's `where` for this caller, shared by {@link findPage} and {@link exportSource}: the folder
+   * pin (ADR-0060 §4, existence-hiding; ADMIN 'ALL' gets none), the draft rule (ADR-0022: PUBLISHED, plus
+   * the caller's own DRAFTs) and the filters. `visible` is returned so the export names only these folders.
+   */
+  private async listScope(
+    filters: ArticleListFilters,
+    currentUser?: User,
+    principal?: Principal,
+  ): Promise<{ where: Prisma.ArticleWhereInput; visible: VisibleFolders }> {
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const categoryId = await this.expandCategoryFilter(filters);
+    const where = this.buildWhere(
+      { ...filters, categoryId },
+      currentUser,
+      visible,
+    );
+    return { where, visible };
+  }
+
+  /** The list's own `where` and lean rows for `GET /articles/export`, walked by keyset (ADR-0103). */
+  async exportSource(
+    filters: ArticleListFilters,
+    currentUser?: User,
+    principal?: Principal,
+  ) {
+    const { where, visible } = await this.listScope(
+      filters,
+      currentUser,
+      principal,
+    );
+    const folderOf = await this.exportFolderNames(visible, principal);
+    return {
+      count: () => this.prisma.article.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<string> | null,
+        take: number,
+      ): Promise<ArticleExportRow[]> => {
+        const rows = await this.prisma.article.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          select: ARTICLE_LIST_SELECT,
+        });
+        return rows.map(({ _count, ...row }) => ({
+          ...row,
+          linkCount: _count.links,
+          folder: folderOf(row.categoryId),
+        }));
+      },
+    };
+  }
+
+  // Folder names follow the folder list's `category:read`; without it the cell keeps the id the list returns.
+  private async exportFolderNames(
+    visible: VisibleFolders,
+    principal?: Principal,
+  ): Promise<(categoryId: string) => string> {
+    if (!(await this.permissions.principalHas(principal, 'category:read'))) {
+      return (categoryId) => categoryId;
+    }
+    const folders = await this.prisma.articleCategory.findMany({
+      select: { id: true, parentId: true, name: true },
+    });
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const paths = new Map<string, string>();
+    return (categoryId) => {
+      let path = paths.get(categoryId);
+      if (path === undefined) {
+        path = visibleFolderPath(categoryId, byId, visible) || categoryId;
+        paths.set(categoryId, path);
+      }
+      return path;
+    };
   }
 
   /**

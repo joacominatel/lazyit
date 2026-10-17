@@ -8,6 +8,7 @@ import {
 import type {
   CreateLocation,
   DeleteResolution,
+  DeletedFilter,
   LocationBreadcrumb,
   LocationDeleteImpact,
   LocationType,
@@ -22,6 +23,11 @@ import { projectLocation } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { deleteResolutionRequired } from '../common/delete-resolution';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
@@ -116,6 +122,27 @@ export class LocationsService {
       this.prisma.location.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where`, walked newest first by keyset. */
+  exportSource(filters: LocationFilters, deleted: DeletedFilter) {
+    const where: Prisma.LocationWhereInput = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.location.count({ where, ...escapeHatch }),
+      fetchBatch: (after: KeysetCursor<string> | null, take: number) =>
+        this.prisma.location.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          ...escapeHatch,
+        }),
+    };
   }
 
   /** The shared `where` for the location list — used identically by findPage and its count. */
