@@ -271,6 +271,58 @@ export type DismissAllNotificationsQuery = z.infer<
   typeof DismissAllNotificationsQuerySchema
 >;
 
+// Grouped bell (#1649): a bulk operation can emit hundreds of one type a day, so the bell lists (type, day) groups.
+export const NOTIFICATION_GROUP_PREVIEW_SIZE = 3;
+
+const isKnownTimeZone = (tz: string): boolean => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// IANA names only: a raw offset like "+03:00" is read by Postgres with the POSIX (inverted) sign.
+export const NotificationTimeZoneSchema = z
+  .string()
+  .max(64)
+  .regex(/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/)
+  .refine(isKnownTimeZone, { message: "Unknown time zone" });
+
+export const NotificationGroupsQuerySchema = z.object({
+  tz: NotificationTimeZoneSchema.default("UTC"),
+});
+export type NotificationGroupsQuery = z.infer<
+  typeof NotificationGroupsQuerySchema
+>;
+
+// The day boundaries depend on tz, so send the same tz the groups were listed with.
+export const NotificationGroupKeySchema = z.object({
+  type: NotificationTypeSchema,
+  day: z.iso.date(),
+  tz: NotificationTimeZoneSchema.default("UTC"),
+});
+export type NotificationGroupKey = z.infer<typeof NotificationGroupKeySchema>;
+
+export const MarkNotificationGroupReadSchema = NotificationGroupKeySchema;
+export type MarkNotificationGroupRead = z.infer<
+  typeof MarkNotificationGroupReadSchema
+>;
+
+export const NotificationGroupSchema = z.object({
+  type: NotificationTypeSchema,
+  day: z.iso.date(),
+  count: z.number().int().min(1),
+  unread: z.number().int().min(0),
+  latestAt: z.iso.datetime(),
+  latest: z.array(NotificationSchema).max(NOTIFICATION_GROUP_PREVIEW_SIZE),
+});
+export type NotificationGroup = z.infer<typeof NotificationGroupSchema>;
+
+export const NotificationGroupPageSchema = pageSchema(NotificationGroupSchema);
+export type NotificationGroupPage = z.infer<typeof NotificationGroupPageSchema>;
+
 /**
  * Per-user, per-type EMAIL notification preferences (issue #879). A user can opt OUT of receiving
  * specific notification types BY EMAIL — the in-app bell is UNAFFECTED (this is an email-channel filter
