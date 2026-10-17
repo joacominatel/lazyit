@@ -3,7 +3,7 @@ title: "ADR-0027: CI on GitHub Actions; CD deferred"
 tags: [adr, infra, ci]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -57,6 +57,12 @@ Repo facts that shape the pipeline:
   image build. The `require.main === module` guard in `main.ts` means `require()` does **not** call
   `bootstrap()`: no port bind, no Postgres/Valkey/Meilisearch connection (~1s). Run with `node`
   (not `bun`) to match the Node runtime `nest start` uses.
+- **Module-graph compile (#1628).** The smoke never runs Nest's dependency resolution, and unit specs
+  list their providers by hand, so a controller injecting a provider its module does not import used to
+  pass CI and crash at real boot ("Nest can't resolve dependencies of …"). `apps/api/src/app.module.spec.ts`
+  compiles the whole `AppModule` in the api Jest step (~2s). Only external I/O is mocked (the generated
+  Prisma client and its pg adapter, ioredis, BullMQ, Meilisearch, `jose`); every app-owned provider
+  resolves from its real module, so a removed module import fails CI.
 - **Lint is two-tier (#591).** Full-repo `eslint .` per app is **report-only**
   (`continue-on-error: true`) because the codebase is not yet eslint-clean — it keeps the legacy
   backlog visible without failing CI. A separate **blocking** "Lint changed files" step lints
