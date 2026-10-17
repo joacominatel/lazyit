@@ -16,6 +16,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateUserSchema, UpdateUserSchema } from "@lazyit/shared";
 import {
   directoryProfileInput,
+  directoryProfilePatch,
   isProfileManagedByDirectory,
   newDirectoryProfile,
   toResolverInput,
@@ -223,11 +224,22 @@ describe("department and job title", () => {
     expect(directoryProfileInput({ jobTitle: "SRE", department: "" }, null)).toEqual({ jobTitle: "SRE" });
   });
 
+  test("a directory-synced person's edit never carries either key, even an untrimmed stored value", () => {
+    const user = { directorySource: "ad", directoryAttrs: { department: "Engineering " } };
+    expect(directoryProfileInput({ jobTitle: "", department: "Engineering " }, user.directoryAttrs)).toEqual({});
+    expect(directoryProfilePatch({ jobTitle: "Boss", department: "Sales" }, user)).toEqual({});
+    const payload = toResolverInput(
+      { ...BASE, jobTitle: "Boss", department: "Sales", manager: { kind: "none" } },
+      user,
+    );
+    expect("jobTitle" in payload || "department" in payload).toBe(false);
+  });
+
   test("an untouched legacy value the schema would now reject is not sent", () => {
     const legacy = { department: "x".repeat(250) };
     const payload = toResolverInput(
       { ...BASE, department: legacy.department, manager: { kind: "none" } },
-      legacy,
+      { directorySource: null, directoryAttrs: legacy },
     );
     expect("department" in payload).toBe(false);
     expect(UpdateUserSchema.safeParse(payload).success).toBe(true);

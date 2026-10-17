@@ -42,7 +42,7 @@ import { notifyUserError } from "./role-ceiling";
 import { ManagerField } from "./manager-field";
 import { DirectoryProfileFields } from "./directory-profile-fields";
 import {
-  directoryProfileInput,
+  directoryProfilePatch,
   directoryProfileValues,
   isProfileManagedByDirectory,
   newDirectoryProfile,
@@ -124,7 +124,7 @@ export function UserFormDialog({
   // exactly once instead of re-serializing the resolver's already-wire output.
   const resolver = wireShapeResolver<UserFormValues>(
     zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema),
-    (values) => toResolverInput(values, user?.directoryAttrs),
+    (values) => toResolverInput(values, user),
   );
 
   const form = useForm<UserFormValues>({
@@ -158,7 +158,7 @@ export function UserFormDialog({
             legajo: legajo === "" ? null : legajo,
             username: username === "" ? null : username,
             manager,
-            ...directoryProfileInput(values, user.directoryAttrs),
+            ...directoryProfilePatch(values, user),
           },
         },
         {

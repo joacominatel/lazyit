@@ -91,16 +91,24 @@ export function directoryProfileInput(
  *   `{ managerId }`; a free-text name → `{ managerName }`.
  * - `isActive` is forwarded when present (edit mode only).
  */
+// An edit of a directory-synced person never carries the two keys, so an unrelated save cannot 409.
+export function directoryProfilePatch(
+  values: Partial<DirectoryProfileValues>,
+  user: Pick<User, "directorySource" | "directoryAttrs">,
+): DirectoryProfileInput {
+  return isProfileManagedByDirectory(user) ? {} : directoryProfileInput(values, user.directoryAttrs);
+}
+
 export function toResolverInput(
   values: UserFormValues,
-  storedAttrs?: User["directoryAttrs"],
+  editing?: Pick<User, "directorySource" | "directoryAttrs">,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {
     email: values.email,
     firstName: values.firstName,
     lastName: values.lastName,
     manager: toManagerInput(values.manager),
-    ...directoryProfileInput(values, storedAttrs),
+    ...(editing ? directoryProfilePatch(values, editing) : newDirectoryProfile(values)),
   };
   // Empty optional directory fields are simply absent (not "" — which would fail min(1)).
   if (values.legajo.trim() !== "") out.legajo = values.legajo;
