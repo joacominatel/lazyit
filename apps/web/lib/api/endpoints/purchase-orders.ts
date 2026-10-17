@@ -246,6 +246,15 @@ export function cancelRemainingUnits(
   });
 }
 
+export const PENDING_LINE_EXPORT_PATH = `${BASE}/pending-lines/export`;
+
+/** The pending-units list's filters, never the page window; the CSV export sends exactly these. */
+export function pendingLineFilterParams({ supplierId }: { supplierId?: string } = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (supplierId) qs.set("supplierId", supplierId);
+  return qs;
+}
+
 /**
  * The *Pending units* list: countable lines with units still pending on live purchases that are neither
  * draft nor cancelled, oldest purchase first, each with its purchase header.
@@ -254,8 +263,7 @@ export function getPendingLines(
   { supplierId, limit, offset }: { supplierId?: string; limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<PendingPurchaseLinePage> {
-  const qs = new URLSearchParams();
-  if (supplierId) qs.set("supplierId", supplierId);
+  const qs = pendingLineFilterParams({ supplierId });
   if (limit !== undefined) qs.set("limit", String(limit));
   if (offset !== undefined) qs.set("offset", String(offset));
   const search = qs.toString();

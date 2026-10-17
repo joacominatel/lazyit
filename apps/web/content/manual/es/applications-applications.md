@@ -66,6 +66,10 @@ aplicación — y, cuando registras el licenciamiento, una celda de **Licencia**
 con una advertencia de sobreasignación y la próxima fecha de renovación), para que veas de un
 vistazo qué sistemas están en uso.
 
+**Exportar CSV** descarga todas las aplicaciones que coinciden con la búsqueda actual. Los filtros de
+categoría y criticidad acotan solo la página en pantalla, así que el botón queda deshabilitado mientras
+alguno esté puesto; quítalos para exportar. Mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Licencia y asientos
 
 lazyit puede registrar el licenciamiento detrás de una aplicación, para que veas de un vistazo

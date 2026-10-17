@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type {
   ConsumableMovement,
+  ConsumableMovementQuery,
   ConsumableMovementType,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -18,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +36,10 @@ import {
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useCan } from "@/lib/hooks/use-permissions";
+import {
+  consumableMovementFilterParams,
+  consumableMovementsExportPath,
+} from "@/lib/api/endpoints/consumables";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import {
@@ -53,6 +59,9 @@ import { STOCK_STATUS_TONE, stockTone } from "../../_components/stock-badge";
 import { StockMovementDialog } from "../../_components/stock-movement-dialog";
 
 /** Stock tone → its i18n key under `consumables.detail` for the display label. */
+/** The Movements panel lists the whole ledger, and its export takes the same query. */
+const MOVEMENT_QUERY: ConsumableMovementQuery = {};
+
 const STATUS_LABEL_KEY = {
   ok: "statusInStock",
   low: "statusLowStock",
@@ -127,7 +136,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
 
   const { data: consumable, isLoading, isError, error, refetch } =
     useConsumable(id);
-  const { data: movements } = useConsumableMovements(id);
+  const { data: movements } = useConsumableMovements(id, MOVEMENT_QUERY);
   const { data: categories } = useConsumableCategories();
   const deleteConsumable = useDeleteConsumable();
 
@@ -345,7 +354,19 @@ export function ConsumableDetailView({ id }: { id: string }) {
         )}
       </DetailPanel>
 
-      <DetailPanel title={t("detail.movementsSection")}>
+      <DetailPanel
+        title={t("detail.movementsSection")}
+        actions={
+          <ExportButton
+            path={consumableMovementsExportPath(id)}
+            params={consumableMovementFilterParams(MOVEMENT_QUERY)}
+            total={movements?.length}
+            filename="consumable-movements"
+            permission="consumable:read"
+            size="sm"
+          />
+        }
+      >
         {(movements?.length ?? 0) === 0 ? (
           <p className="text-sm text-muted-foreground">
             {t("detail.movementsEmpty")}

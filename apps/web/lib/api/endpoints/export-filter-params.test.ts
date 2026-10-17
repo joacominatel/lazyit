@@ -22,7 +22,20 @@ const { deriveUserParams } = await import("@/app/(app)/users/_components/users-l
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
 const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
 const { consumableFilterParams, getConsumables } = await import("./consumables");
-const { getPurchaseOrders, purchaseOrderFilterParams } = await import("./purchase-orders");
+const { getPendingLines, getPurchaseOrders, pendingLineFilterParams, purchaseOrderFilterParams } =
+  await import("./purchase-orders");
+const { applicationFilterParams, getApplications } = await import("./applications");
+const { getLocations, locationFilterParams } = await import("./locations");
+const { getSuppliers, supplierFilterParams } = await import("./suppliers");
+const { accessRequestFilterParams, getAccessRequests } = await import("./access-requests");
+const { getInfraNodes, infraNodeFilterParams } = await import("./infra");
+const {
+  consumableDeliveryFilterParams,
+  consumableMovementFilterParams,
+  getConsumableDeliveries,
+  getConsumableMovements,
+} = await import("./consumables");
+const { articleFilterParams, getArticles } = await import("./articles");
 
 const WINDOW_KEYS = ["limit", "offset", "sort", "dir"];
 const CUID = "ck0000000000000000000000a1";
@@ -42,9 +55,13 @@ function entries(params: URLSearchParams): string[][] {
 }
 
 /** The export sends what the list sends, minus paging and sort, and that is never nothing. */
-async function expectSameFilters(call: () => Promise<unknown>, exportParams: URLSearchParams) {
+async function expectSameFilters(
+  call: () => Promise<unknown>,
+  exportParams: URLSearchParams,
+  minFilters = 2,
+) {
   const exported = entries(exportParams);
-  expect(exported.length).toBeGreaterThan(1);
+  expect(exported.length).toBeGreaterThanOrEqual(minFilters);
   expect(exported.map(([key]) => key)).not.toContainAnyValues(WINDOW_KEYS);
   expect(await listFilters(call)).toEqual(exported);
 }
@@ -172,6 +189,108 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
     await expectSameFilters(
       () => getPurchaseOrders({ ...filters, ...window }),
       purchaseOrderFilterParams(filters),
+    );
+  });
+});
+
+describe("phase 2: each list and its CSV export send identical filter params (ADR-0103)", () => {
+  test("applications", async () => {
+    const filters = { q: "jira", deleted: "only" as const };
+    await expectSameFilters(
+      () => getApplications({ ...filters, ...window }),
+      applicationFilterParams(filters),
+    );
+  });
+
+  test("locations", async () => {
+    const filters = { q: "colo", type: "DATACENTER" as const, deleted: "only" as const };
+    await expectSameFilters(
+      () => getLocations({ ...filters, ...window }),
+      locationFilterParams(filters),
+    );
+  });
+
+  test("suppliers", async () => {
+    const filters = { q: "dell", deleted: "only" as const };
+    await expectSameFilters(
+      () => getSuppliers({ ...filters, ...window }),
+      supplierFilterParams(filters),
+    );
+  });
+
+  test("pending units, whose only filter is the supplier", async () => {
+    await expectSameFilters(
+      () => getPendingLines({ supplierId: CUID, limit: 25, offset: 50 }),
+      pendingLineFilterParams({ supplierId: CUID }),
+      1,
+    );
+  });
+
+  test("access requests (the managers' list)", async () => {
+    const filters = { status: "PENDING" as const, applicationId: CUID, requesterId: UUID };
+    await expectSameFilters(
+      () => getAccessRequests({ ...filters, limit: 25, offset: 50 }),
+      accessRequestFilterParams(filters),
+    );
+  });
+
+  test("servers", async () => {
+    const filters = {
+      kind: "VM" as const,
+      status: "ONLINE" as const,
+      state: "CONFIRMED" as const,
+      source: "AGENT" as const,
+      role: "HOST" as const,
+      ids: [CUID],
+      assetIds: [CUID],
+      q: "web",
+    };
+    await expectSameFilters(
+      () => getInfraNodes({ ...filters, ...window }),
+      infraNodeFilterParams(filters),
+    );
+  });
+
+  test("a consumable's movements", async () => {
+    const query = {
+      type: "OUT" as const,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-10-16T00:00:00.000Z",
+    };
+    await expectSameFilters(
+      () => getConsumableMovements(CUID, query),
+      consumableMovementFilterParams(query),
+    );
+  });
+
+  test("the deliveries to one target", async () => {
+    const params = {
+      targetUserId: UUID,
+      outstandingOnly: true,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-10-16T00:00:00.000Z",
+    };
+    await expectSameFilters(
+      () => getConsumableDeliveries({ ...params, limit: 25, offset: 50 }),
+      consumableDeliveryFilterParams(params),
+    );
+  });
+
+  test("the KB article index", async () => {
+    const filters = {
+      categoryId: [CUID],
+      includeSubfolders: true,
+      authorId: UUID,
+      status: ["DRAFT" as const, "PUBLISHED" as const],
+      q: "vpn",
+      linked: "only" as const,
+      linkedTo: ["asset" as const],
+      assetId: [CUID],
+      applicationId: [CUID],
+    };
+    await expectSameFilters(
+      () => getArticles({ ...filters, sort: "title", limit: 25, offset: 50 }),
+      articleFilterParams(filters),
     );
   });
 });

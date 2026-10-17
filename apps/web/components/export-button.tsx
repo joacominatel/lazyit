@@ -24,6 +24,8 @@ export interface ExportButtonProps {
   /** The list's read permission; without it the button is not rendered. */
   permission: Permission;
   size?: "default" | "sm";
+  /** Set when the screen narrows rows the export cannot: the button is disabled and says why. */
+  disabledReason?: string;
 }
 
 export function ExportButton({
@@ -33,10 +35,18 @@ export function ExportButton({
   filename,
   permission,
   size,
+  disabledReason,
 }: ExportButtonProps) {
   const canRead = useCan(permission);
   return canRead ? (
-    <ExportButtonView path={path} params={params} total={total} filename={filename} size={size} />
+    <ExportButtonView
+      path={path}
+      params={params}
+      total={total}
+      filename={filename}
+      size={size}
+      disabledReason={disabledReason}
+    />
   ) : null;
 }
 
@@ -47,6 +57,7 @@ export function ExportButtonView({
   total,
   filename,
   size,
+  disabledReason,
 }: Omit<ExportButtonProps, "permission">) {
   const t = useTranslations("export");
   const [busy, setBusy] = useState(false);
@@ -69,16 +80,18 @@ export function ExportButtonView({
     }
   }
 
-  return (
+  const button = (
     <Button
       variant="outline"
       size={size}
       onClick={handleClick}
-      disabled={busy || block === "empty"}
-      title={t("title")}
+      disabled={busy || block === "empty" || disabledReason !== undefined}
+      title={disabledReason ?? t("title")}
     >
       <ArrowDownTrayIcon />
       {busy ? t("busy") : t("button")}
     </Button>
   );
+  // A disabled button gets no pointer events, so the wrapper carries the hover hint.
+  return disabledReason ? <span title={disabledReason}>{button}</span> : button;
 }

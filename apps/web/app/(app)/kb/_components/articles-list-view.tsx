@@ -22,6 +22,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ApplicationMultiSelect } from "@/components/application-multi-select";
 import { AssetMultiSelect } from "@/components/asset-multi-select";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import {
   MultiSelectFilter,
   type MultiSelectOption,
@@ -37,7 +38,11 @@ import {
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { useApplication } from "@/lib/api/hooks/use-applications";
-import type { ArticleFilters } from "@/lib/api/endpoints/articles";
+import {
+  ARTICLE_EXPORT_PATH,
+  type ArticleFilters,
+  articleFilterParams,
+} from "@/lib/api/endpoints/articles";
 import {
   useArticles,
   useArticleStatusCounts,
@@ -222,6 +227,11 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     ...linkedScope,
   };
 
+  const articleFilters = {
+    q: fallbackActive ? q || undefined : undefined,
+    status: statusValues.length > 0 ? statusValues : undefined,
+    ...scope,
+  };
   // The browse list AND the degraded fallback both ride this read. With no URL params its key is
   // byte-identical to the one `kb/page.tsx` prefetches (every inactive filter is `undefined`).
   const {
@@ -232,9 +242,7 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     error,
     refetch,
   } = useArticles({
-    q: fallbackActive ? q || undefined : undefined,
-    status: statusValues.length > 0 ? statusValues : undefined,
-    ...scope,
+    ...articleFilters,
     sort: kbSortParam(sort),
     limit,
     offset,
@@ -462,6 +470,14 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
                   }
                 />
                 {filterPopover}
+                <ExportButton
+                  path={ARTICLE_EXPORT_PATH}
+                  params={articleFilterParams(articleFilters)}
+                  total={page?.total}
+                  filename="articles"
+                  permission="article:read"
+                  size="sm"
+                />
               </>
             )}
           </div>

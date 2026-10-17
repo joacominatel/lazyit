@@ -78,20 +78,10 @@ export interface ArticleFilters {
   offset?: number;
 }
 
-/**
- * List articles the caller may see (lean), with optional server-side filters and
- * paging. `GET /articles` returns a paginated `Page<ArticleListItem>` envelope
- * (ADR-0030; `content` omitted); we return the whole envelope (`items` +
- * `total`/`limit`/`offset`) so the list can render pagination controls.
- */
-export function getArticles(
-  filters: ArticleFilters = {},
-  signal?: AbortSignal,
-  // Optional Bearer override for SSR server-prefetch (ADR-0067): a Server Component passes
-  // `session.accessToken` from `await auth()`, since the client-side token store is browser-only.
-  // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
-  token?: string,
-): Promise<ArticleListPage> {
+export const ARTICLE_EXPORT_PATH = `${BASE}/export`;
+
+/** The index's filters, never paging or sort; the CSV export sends exactly these. */
+export function articleFilterParams(filters: ArticleFilters = {}): URLSearchParams {
   const params = new URLSearchParams();
   // Multi-select filters (#198): comma-encode each non-empty array into its one query param.
   if (filters.categoryId?.length)
@@ -106,8 +96,26 @@ export function getArticles(
   if (filters.assetId?.length) params.set("assetId", filters.assetId.join(","));
   if (filters.applicationId?.length)
     params.set("applicationId", filters.applicationId.join(","));
-  if (filters.sort) params.set("sort", filters.sort);
   if (filters.includeSubfolders) params.set("includeSubfolders", "true");
+  return params;
+}
+
+/**
+ * List articles the caller may see (lean), with optional server-side filters and
+ * paging. `GET /articles` returns a paginated `Page<ArticleListItem>` envelope
+ * (ADR-0030; `content` omitted); we return the whole envelope (`items` +
+ * `total`/`limit`/`offset`) so the list can render pagination controls.
+ */
+export function getArticles(
+  filters: ArticleFilters = {},
+  signal?: AbortSignal,
+  // Optional Bearer override for SSR server-prefetch (ADR-0067): a Server Component passes
+  // `session.accessToken` from `await auth()`, since the client-side token store is browser-only.
+  // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
+  token?: string,
+): Promise<ArticleListPage> {
+  const params = articleFilterParams(filters);
+  if (filters.sort) params.set("sort", filters.sort);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

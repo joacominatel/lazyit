@@ -181,7 +181,10 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
 > - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an
->   **Export CSV** button next to assets, activity and audit. Update any script that reads these files.
+>   **Export CSV** button next to assets, activity and audit. So do applications, locations, suppliers,
+>   pending units, the access-request queue, the servers table, a consumable's movements, the
+>   consumables-delivered panels and the KB article index (metadata only, never article text). Update
+>   any script that reads these files.
 >   - Every export file now starts with a UTF-8 BOM and ends its lines in CRLF.
 >   - Activity and audit files no longer start with the `# lazyit` stamp line, so the header is the
 >     first line. The asset file keeps it, because the importer reads it.
