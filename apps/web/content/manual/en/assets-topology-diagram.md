@@ -315,7 +315,8 @@ scrolling past everything to reach one thing.
 A few things on the **General** tab worth calling out:
 
 - **Owner(s)** — pulled from the linked asset's assignments. An owner who has left the company but
-  was never released is still shown, marked as such.
+  was never released is still shown, marked as such. Their email appears only if your role can view
+  the user directory.
 - **Secret references** — *this surface stores handles only, never the secret values themselves.* A
   reference shows a label and a **reveal (eye)** control. If you're a member of the secret's vault you
   can reveal the value right here — the same as a KB secret chip: click the eye, unlock if prompted,

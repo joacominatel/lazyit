@@ -60,7 +60,8 @@ querés agruparlos de forma previsible.
 ## Buscar y filtrar
 
 - La **búsqueda** coincide con el **nombre**, la **IP**, el **nombre del activo** vinculado y el
-  **responsable** (nombre o correo) a medida que escribís. La búsqueda recorre **todo tu parque**, no
+  **responsable** (nombre, o correo si tu rol puede ver el directorio de usuarios) a medida que
+  escribís. La búsqueda recorre **todo tu parque**, no
   solo la página que estás mirando: una máquina que está en la página cuatro se encuentra desde la
   página uno, y "sin resultados" significa de verdad que no hay resultados.
 - Los desplegables **Tipo**, **Estado** y **Estado de ciclo** acotan la lista. *Estado de ciclo*

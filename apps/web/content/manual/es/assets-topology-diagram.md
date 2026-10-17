@@ -337,7 +337,8 @@ una sola cosa.
 Algunas cosas de la pestaña **General** que vale la pena señalar:
 
 - **Responsable(s)** — tomado de las asignaciones del activo vinculado. Un responsable que dejó la
-  empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado como tal.
+  empresa pero cuya asignación nunca se liberó sigue mostrándose, marcado como tal. Su correo aparece
+  solo si tu rol puede ver el directorio de usuarios.
 - **Referencias de secretos** — *esta superficie guarda solo identificadores, nunca los valores de los
   secretos.* Una referencia muestra una etiqueta y un control de **revelar (el ojito)**. Si sos miembro
   de la bóveda del secreto podés revelar el valor acá mismo —igual que un chip de secreto de la KB—:

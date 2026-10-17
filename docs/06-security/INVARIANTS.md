@@ -297,6 +297,11 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   write sites now carry `@RequirePermission` with the EXACT same effective role-set (parity-tested), and
   the legacy `@Roles` path is retired — `@RequirePermission` is the single enforcement primitive. The
   matrix is now ADMIN-editable for MEMBER/VIEWER (audited, cache-coherent), ADMIN immutable (P5).
+- **2026-10-16 (#1627):** `user:read` also gates the owner emails embedded in the infra node reads.
+  `GET /infra/nodes`, `/infra/nodes/page` and `/infra/nodes/:id` (and the writes that return it) are
+  `infra:read`, which VIEWER holds, so a caller without `user:read` now gets owner names with
+  `email: null`, and their `q` no longer matches owner emails (page and export). Covered by
+  `apps/api/src/infra/infra.export.spec.ts` and `apps/api/src/infra/infra.service.spec.ts`.
 
 ## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
 

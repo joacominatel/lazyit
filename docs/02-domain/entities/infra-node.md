@@ -243,6 +243,11 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
     `owners`, joined in ONE query and flattened (#750) — a soft-deleted asset yields
     `assetName: null` and `owners: []`; neither hidden value can match `q`. A departed user on a live
     Asset remains projected with `deletedAt` so historical ownership context is preserved.
+    **Owner emails need `user:read`** (#1627): `infra:read` is VIEWER-default but the user directory
+    is not, so for a caller without `user:read` each owner keeps `userId` and its names and carries
+    `email: null`. The same gate applies to the deprecated `GET /infra/nodes` array, the drill-in
+    below (and every write route that returns it), and therefore to the AI infra tools, which read
+    through these routes as the caller.
     **Minus `specs`** (#1135): a lean `select` projection omits the blob, because on an agent-reported
     host it is the whole inventory (installed-software list included) and this endpoint is polled —
     every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`
@@ -255,8 +260,9 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
     backing those Assets) — the batch-resolver shape `GET /users?ids=` set (ADR-0030 §6, #961), each
     capped at **200** with over-cap a 400 rather than a silent trim; an unknown id matches nothing.
     `q` is a **server-side**, case-insensitive substring over `label` / `ipAddress` / the linked
-    **live** Asset's `name` / each active owner's `firstName`, `lastName` and `email`; an archived
-    linked Asset is neither projected nor searchable by name or owners.
+    **live** Asset's `name` / each active owner's `firstName`, `lastName` and — for a `user:read`
+    caller only, so the search is never an oracle for a withheld email — `email`; an archived linked
+    Asset is neither projected nor searchable by name or owners.
   - **Sort allowlist:** `label`, `kind`, `status`, `state`, `ipAddress`, `lastReportedAt`,
     `createdAt`, `updatedAt`; anything else → 400. `assetName` and `owners` are **not** sortable —
     joined relations, deliberately off the allowlist.
@@ -278,7 +284,8 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   [[0103-data-export-streaming-path]]). The filter keys are the page's minus paging and sort; any other
   key is a 400. Columns, from the page row: `Label, Kind, Status, State, Source, IP address, Chassis,
   Asset, Owners, Agent version, Last reported at, Created at, Updated at, Asset ID, Node ID`. `Asset` and
-  `Owners` (names, `; `-separated) are blank for an archived Asset, as on screen. Never `specs`,
+  `Owners` (names, `; `-separated) are blank for an archived Asset, as on screen; `q` matches owner
+  emails only for a `user:read` caller, exactly as on the page. Never `specs`,
   `externalId`, `reportingSource`, `shortcuts` or the canvas position. Newest first by
   `(createdAt, id)`. Every export is audited ([[data-export-log]]).
 - `GET /infra/graph/nodes` — **the topology canvas's own read** (#1152, same `infra:read` gate).
@@ -301,7 +308,8 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   the graph-node read this makes the canvas data contract a constant **two bounded requests** regardless of node
   count. The per-node edge route below remains the detail/history surface.
 - `GET /infra/nodes/:id` — the enriched **drill-in** (`InfraNodeDetail`): the node plus its
-  asset-backed payoff — `assetName`, active `owners`, published `articleLinks`, `secretRefs`
+  asset-backed payoff — `assetName`, active `owners` (emails only for a `user:read` caller, as on
+  the page), published `articleLinks`, `secretRefs`
   (HANDLES only, never values — INV-10, [[0061-secret-manager-zero-knowledge]]; resolved from the
   node's secret links, dangling refs dropped — [[0073-infra-node-secret-linkage]], #801),
   `shortcuts`, IP, `children` (active inverse RUNS_ON), and `ipConflict` (a display-only soft signal:
