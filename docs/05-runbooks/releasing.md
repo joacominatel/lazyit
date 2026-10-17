@@ -180,6 +180,12 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >     agents.
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
+> - **Server owners' emails need `user:read`** (#1627). The servers table, a server's detail and the
+>   servers export show owner names to anyone with `infra:read`, but emails only to roles that can read
+>   the user directory (VIEWER cannot by default), and the servers search no longer matches an owner's
+>   email for them. A VIEWER tab left open across the update errors on the servers list until reloaded.
+> - **Applications filter by category and criticality on the server** (#1631). The list, its total and
+>   its export now follow both filters; before, they narrowed only the page on screen.
 > - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an
 >   **Export CSV** button next to assets, activity and audit. So do applications, locations, suppliers,
 >   pending units, the access-request queue, the servers table, a consumable's movements, the
