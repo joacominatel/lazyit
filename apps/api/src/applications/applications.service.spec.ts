@@ -115,6 +115,31 @@ describe('ApplicationsService', () => {
     });
   });
 
+  it('findPage narrows by category and criticality alongside q, keeping isCritical=false', async () => {
+    application.findMany.mockResolvedValue([]);
+    application.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { q: 'jira', categoryId: 'clcat0000000000000000001', isCritical: false },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const calls = application.findMany.mock.calls as FindManyCall[];
+    const countCalls = application.count.mock.calls as FindManyCall[];
+    expect(calls[0][0].where).toEqual({
+      OR: [
+        { name: { contains: 'jira', mode: 'insensitive' } },
+        { vendor: { contains: 'jira', mode: 'insensitive' } },
+        { url: { contains: 'jira', mode: 'insensitive' } },
+        { description: { contains: 'jira', mode: 'insensitive' } },
+      ],
+      categoryId: 'clcat0000000000000000001',
+      isCritical: false,
+      deletedAt: null,
+    });
+    expect(countCalls[0][0].where).toEqual(calls[0][0].where);
+  });
+
   it('findPage honors an allowlisted sort field + dir', async () => {
     application.findMany.mockResolvedValue([]);
     application.count.mockResolvedValue(0);

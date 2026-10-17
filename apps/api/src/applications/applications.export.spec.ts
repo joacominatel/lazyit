@@ -60,23 +60,38 @@ function application(over: Record<string, unknown>) {
   };
 }
 
+const CAT_A = 'clcata0000000000000000001';
+const CAT_B = 'clcatb0000000000000000001';
+
 const APPS = [
   application({
     name: 'Slack',
     vendor: 'Salesforce',
     url: 'https://slack.com',
+    categoryId: CAT_A,
     isCritical: true,
     seatsPurchased: 20,
     costPerSeat: 1250n,
     renewalDate: new Date(Date.UTC(2027, 0, 1)),
   }),
-  application({ name: 'Jira', vendor: 'Atlassian' }),
-  application({ name: 'Confluence', vendor: 'Atlassian', notes: '=HYPERLINK' }),
-  application({ name: 'Old CRM', deletedAt: new Date(Date.UTC(2026, 5, 1)) }),
+  application({ name: 'Jira', vendor: 'Atlassian', categoryId: CAT_A }),
+  application({
+    name: 'Confluence',
+    vendor: 'Atlassian',
+    categoryId: CAT_B,
+    notes: '=HYPERLINK',
+  }),
+  application({
+    name: 'Old CRM',
+    categoryId: CAT_A,
+    isCritical: true,
+    deletedAt: new Date(Date.UTC(2026, 5, 1)),
+  }),
   application({ name: 'VPN', description: 'slack-adjacent remote access' }),
   application({
     name: 'Legacy Wiki',
     vendor: 'Atlassian',
+    categoryId: CAT_B,
     deletedAt: new Date(Date.UTC(2026, 6, 1)),
   }),
 ];
@@ -206,7 +221,15 @@ describe('GET /applications/export (ADR-0103)', () => {
     ['ADMIN', 'q=slack'],
     ['ADMIN', 'deleted=only'],
     ['ADMIN', 'deleted=only&q=wiki'],
+    ['ADMIN', `categoryId=${CAT_A}`],
+    ['ADMIN', 'isCritical=true'],
+    ['ADMIN', 'isCritical=false'],
+    ['ADMIN', `categoryId=${CAT_A}&isCritical=false`],
+    ['ADMIN', `q=atlassian&categoryId=${CAT_B}`],
+    ['ADMIN', `deleted=only&categoryId=${CAT_A}`],
+    ['ADMIN', 'deleted=only&isCritical=true'],
     ['MEMBER', 'q=atlassian'],
+    ['MEMBER', 'q=slack&isCritical=true'],
     ['VIEWER', ''],
   ] as const)(
     '%s with "%s": the export holds exactly the ids the list returns',
@@ -218,6 +241,49 @@ describe('GET /applications/export (ADR-0103)', () => {
       const exported = csvRows(res.text).map((cells) => cells[0]);
       expect(new Set(exported)).toEqual(new Set(listed));
       expect(exported).toHaveLength(listed.length);
+    },
+  );
+
+  it.each([
+    [`categoryId=${CAT_A}`, ['Slack', 'Jira']],
+    ['isCritical=true', ['Slack']],
+    ['isCritical=false', ['Jira', 'Confluence', 'VPN']],
+    [`categoryId=${CAT_A}&isCritical=false`, ['Jira']],
+    [`q=atlassian&categoryId=${CAT_B}`, ['Confluence']],
+    [`deleted=only&categoryId=${CAT_B}`, ['Legacy Wiki']],
+    ['deleted=only&isCritical=false', ['Legacy Wiki']],
+    ['categoryId=clcatz0000000000000000001', []],
+  ] as const)(
+    'the list filters "%s" on the server, total included',
+    async (query, names) => {
+      const res = await http()
+        .get(`/applications?limit=1&${query}`)
+        .set('X-Test-Role', 'ADMIN');
+      expect(res.status).toBe(200);
+      expect((res.body as { total: number }).total).toBe(names.length);
+      const ids = await listIds('ADMIN', query);
+      const expected = APPS.filter((a) =>
+        (names as readonly string[]).includes(a.name),
+      ).map((a) => a.id);
+      expect(new Set(ids)).toEqual(new Set(expected));
+    },
+  );
+
+  it.each([
+    ['categoryId=not-a-cuid'],
+    ['isCritical=yes'],
+    ['isCritical=1'],
+    ['isCritical='],
+  ] as const)(
+    '400 on "%s" for the list and the export, before any read or audit row',
+    async (query) => {
+      expect(
+        (await http().get(`/applications?${query}`).set('X-Test-Role', 'ADMIN'))
+          .status,
+      ).toBe(400);
+      expect((await exportAs('ADMIN', query)).status).toBe(400);
+      expect(applicationDelegate.count).not.toHaveBeenCalled();
+      expect(auditCreate).not.toHaveBeenCalled();
     },
   );
 
@@ -275,6 +341,16 @@ describe('GET /applications/export (ADR-0103)', () => {
         resource: 'APPLICATIONS',
         filters: { q: 'atlassian', deleted: 'active' },
         rowCount: 2,
+      }) as unknown,
+    });
+  });
+
+  it('audits the category and criticality filters, false included', async () => {
+    await exportAs('MEMBER', `categoryId=${CAT_A}&isCritical=false`);
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        filters: { categoryId: CAT_A, isCritical: false, deleted: 'active' },
+        rowCount: 1,
       }) as unknown,
     });
   });

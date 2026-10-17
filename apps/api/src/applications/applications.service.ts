@@ -27,6 +27,9 @@ import {
 export interface ApplicationFilters {
   /** Case-insensitive substring over name / vendor / url / description (OR). */
   q?: string;
+  /** Exact category; an archived category still matches the applications filed under it. */
+  categoryId?: string;
+  isCritical?: boolean;
 }
 
 /**
@@ -151,17 +154,25 @@ export class ApplicationsService {
   }
 
   /** The shared `where` for the application list — used identically by findPage and its count. */
-  private buildWhere({ q }: ApplicationFilters): Prisma.ApplicationWhereInput {
-    return q
-      ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { vendor: { contains: q, mode: 'insensitive' } },
-            { url: { contains: q, mode: 'insensitive' } },
-            { description: { contains: q, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  private buildWhere({
+    q,
+    categoryId,
+    isCritical,
+  }: ApplicationFilters): Prisma.ApplicationWhereInput {
+    return {
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: 'insensitive' } },
+              { vendor: { contains: q, mode: 'insensitive' } },
+              { url: { contains: q, mode: 'insensitive' } },
+              { description: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      ...(categoryId !== undefined ? { categoryId } : {}),
+      ...(isCritical !== undefined ? { isCritical } : {}),
+    };
   }
 
   /**
