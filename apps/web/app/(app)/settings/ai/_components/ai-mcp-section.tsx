@@ -161,7 +161,7 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
         <AiErrorNotice error={save.error} />
 
         {/* The shared install panel (W3-9), for the admin too — only while MCP is usable by this caller. */}
-        {status.data?.mcp?.available ? <McpInstallPanel auth={status.data.mcp.auth} /> : null}
+        {status.data?.mcp?.available ? <McpInstallPanel auth={status.data.mcp.auth} tokenLocation="profile" /> : null}
       </SettingsSection>
 
       <AiMcpAllowlistEditor settings={settings} />

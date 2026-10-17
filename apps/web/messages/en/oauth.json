@@ -74,6 +74,7 @@
         "tryOnce": "To try it for one session without installing, run <code>{command}</code> instead.",
         "stepSignInOauth": "Start Claude Code and run <code>/mcp</code> to sign in.",
         "stepToken": "Create a personal token below. Claude Code asks for it when you enable the plugin and keeps it in your system's keychain — it is never stored in the plugin files.",
+        "stepTokenProfile": "Create a personal token in <link>your profile → AI & connected apps</link>. Claude Code asks for it when you enable the plugin and keeps it in your system's keychain — it is never stored in the plugin files.",
         "errors": {
           "originUnknown": "The instance doesn't know its own address, so the plugin can't be built. An administrator needs to set the instance's public address (WEB_ORIGIN).",
           "unavailable": "The plugin isn't available: connections for AI apps were turned off.",
@@ -85,6 +86,7 @@
       "title": "Other MCP clients",
       "descriptionOauth": "Connect any MCP client that supports remote servers over HTTP. It signs in through your browser the first time.",
       "descriptionToken": "Connect any MCP client that supports remote servers over HTTP. Replace <code>{placeholder}</code> with a personal token you create below.",
+      "descriptionTokenProfile": "Connect any MCP client that supports remote servers over HTTP. Replace <code>{placeholder}</code> with a personal token you create in <link>your profile → AI & connected apps</link>.",
       "endpoint": "MCP server address",
       "copyEndpoint": "Copy the MCP server address",
       "tabs": {
