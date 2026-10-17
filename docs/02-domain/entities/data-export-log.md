@@ -38,7 +38,9 @@ and it is the fourth source of Reports › Audit ([[0081-audit-log-read-surface]
   arrays at 50 items, nested objects and empty values dropped. It holds list filter values, never a
   secret.
 - **`resource` is text, not an enum.** It holds a `DATA_EXPORT_RESOURCES` label from `@lazyit/shared`
-  (`ASSETS`, `ACTIVITY`, `AUDIT`, `USERS`, `ACCESS_GRANTS`, `CONSUMABLES`, `PURCHASE_ORDERS`). The write
+  (`ASSETS`, `ACTIVITY`, `AUDIT`, `USERS`, `ACCESS_GRANTS`, `CONSUMABLES`, `PURCHASE_ORDERS`,
+  `APPLICATIONS`, `LOCATIONS`, `SUPPLIERS`, `PENDING_UNITS`, `ACCESS_REQUESTS`, `INFRA_NODES`,
+  `CONSUMABLE_MOVEMENTS`, `CONSUMABLE_DELIVERIES`, `ARTICLES`). The write
   site is typed against that list; the read is tolerant of any value, so a resource added later needs no
   migration and an older build still reads the row.
 
