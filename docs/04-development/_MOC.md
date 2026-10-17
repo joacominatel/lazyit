@@ -3,7 +3,7 @@ title: Development — MOC
 tags: [moc, development]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-10-17
 ---
 
 # Development — Map of Content
@@ -17,6 +17,8 @@ Everything a developer needs to work on lazyit.
   services and ports, Docker without systemd, the three env files, the `OIDC_ISSUER` boot
   gotcha, Prisma first boot, shim auth and the smoke test.
 - [[workflows]] — day-to-day: dev servers, migrations, building, linting.
+- [[demo-data]] — **fill an instance with high-volume mock data** through the REST API, to test a
+  release on a realistic database (`scripts/demo-data/seed.ts`).
 - [[code-conventions]] — language, structure, testing, and the Bun-first boundary.
 - [[i18n]] — **how to translate a section** (next-intl, cookie-mode, en + es). The operating
   manual for the per-section translation fan-out. Decision: [[0051-i18n-next-intl]].
