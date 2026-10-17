@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   ErrorState,
@@ -42,6 +43,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useAccessGrants } from "@/lib/api/hooks/use-access-grants";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
+import {
+  APPLICATION_EXPORT_PATH,
+  applicationFilterParams,
+} from "@/lib/api/endpoints/applications";
 import { useApplicationList } from "@/lib/api/hooks/use-applications";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import { useUserNames } from "@/lib/api/hooks/use-users";
@@ -101,8 +106,9 @@ export function ApplicationsListView() {
 
   // `deriveApplicationParams` is the SAME URL→query mapping the server prefetch uses, so this hook's
   // key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
+  const listParams = deriveApplicationParams({ q, sort, dir, offset, limit });
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useApplicationList(deriveApplicationParams({ q, sort, dir, offset, limit }));
+    useApplicationList(listParams);
   const { data: categories } = useApplicationCategories();
   // All active grants across apps + the full user directory — joined client-side for the
   // counts/avatars (ADR-0020). The counts must see every active grant, so we request the hard-max
@@ -343,14 +349,23 @@ export function ApplicationsListView() {
         icon={KeyIcon}
         subtitle={t("list.subtitle")}
         actions={
-          canWrite ? (
-            <Button asChild>
-              <Link href="/applications/new">
-                <PlusIcon />
-                {t("list.newApplication")}
-              </Link>
-            </Button>
-          ) : null
+          <>
+            <ExportButton
+              path={APPLICATION_EXPORT_PATH}
+              params={applicationFilterParams(listParams)}
+              total={page?.total}
+              filename="applications"
+              permission="application:read"
+            />
+            {canWrite ? (
+              <Button asChild>
+                <Link href="/applications/new">
+                  <PlusIcon />
+                  {t("list.newApplication")}
+                </Link>
+              </Button>
+            ) : null}
+          </>
         }
       />
 

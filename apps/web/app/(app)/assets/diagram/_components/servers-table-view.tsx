@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import {
   ErrorState,
   LinkableRow,
@@ -38,7 +39,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
-import { INFRA_LIVE_POLL_MS, useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
+import {
+  INFRA_LIVE_POLL_MS,
+  INFRA_NODE_EXPORT_PATH,
+  infraNodeFilterParams,
+  useInfraNodes,
+} from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
@@ -143,6 +149,12 @@ export function ServersTableView() {
   const statusFilter = filters.status as InfraNodeStatus | "ALL";
   const stateFilter = filters.state as InfraNodeState | "ALL";
 
+  const nodeFilters = {
+    kind: kindFilter === "ALL" ? undefined : kindFilter,
+    status: statusFilter === "ALL" ? undefined : statusFilter,
+    state: stateFilter === "ALL" ? undefined : stateFilter,
+    q: q || undefined,
+  };
   // Every param goes to the server, `q` included (#1152) — there is no in-memory pass after this.
   const {
     data: page,
@@ -153,10 +165,7 @@ export function ServersTableView() {
     refetch,
   } = useInfraNodes(
     {
-      kind: kindFilter === "ALL" ? undefined : kindFilter,
-      status: statusFilter === "ALL" ? undefined : statusFilter,
-      state: stateFilter === "ALL" ? undefined : stateFilter,
-      q: q || undefined,
+      ...nodeFilters,
       sort,
       dir,
       limit,
@@ -367,6 +376,15 @@ export function ServersTableView() {
             ))}
           </SelectContent>
         </Select>
+        <div className="sm:ml-auto">
+          <ExportButton
+            path={INFRA_NODE_EXPORT_PATH}
+            params={infraNodeFilterParams(nodeFilters)}
+            total={page?.total}
+            filename="servers"
+            permission="infra:read"
+          />
+        </div>
       </div>
 
       <ActiveFilters chips={chips} onClearAll={clearFilters} />

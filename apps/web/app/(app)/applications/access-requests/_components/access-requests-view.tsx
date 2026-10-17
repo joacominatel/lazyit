@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { PermissionGate } from "@/components/permission-gate";
 import { ErrorState, Pagination } from "@/components/resource-table";
@@ -15,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
 import { toast } from "sonner";
+import {
+  ACCESS_REQUEST_EXPORT_PATH,
+  accessRequestFilterParams,
+} from "@/lib/api/endpoints/access-requests";
 import { notifyError } from "@/lib/api/notify-error";
 import {
   useAccessRequests,
@@ -76,6 +81,8 @@ export function AccessRequestsView() {
   );
 }
 
+const QUEUE_FILTERS = { status: "PENDING" } as const;
+
 function PendingQueue() {
   const t = useTranslations("applications");
   const { date } = useFormatters();
@@ -83,7 +90,7 @@ function PendingQueue() {
 
   const [offset, setOffset] = useState(0);
   const { data: page, isLoading, isError, error, refetch } = useAccessRequests({
-    status: "PENDING",
+    ...QUEUE_FILTERS,
     limit: PAGE_SIZE,
     offset,
   });
@@ -154,6 +161,15 @@ function PendingQueue() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <ExportButton
+          path={ACCESS_REQUEST_EXPORT_PATH}
+          params={accessRequestFilterParams(QUEUE_FILTERS)}
+          total={total}
+          filename="access-requests"
+          permission="accessRequest:read"
+        />
+      </div>
       <ul className="divide-y rounded-lg border">
         {items.map((request) => {
           const user = userById.get(request.requesterId);

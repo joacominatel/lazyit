@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,10 @@ import {
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useCan } from "@/lib/hooks/use-permissions";
+import {
+  consumableMovementFilterParams,
+  consumableMovementsExportPath,
+} from "@/lib/api/endpoints/consumables";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { useDeleteConsumable } from "@/lib/api/hooks/use-consumable-mutations";
 import {
@@ -345,7 +350,19 @@ export function ConsumableDetailView({ id }: { id: string }) {
         )}
       </DetailPanel>
 
-      <DetailPanel title={t("detail.movementsSection")}>
+      <DetailPanel
+        title={t("detail.movementsSection")}
+        actions={
+          <ExportButton
+            path={consumableMovementsExportPath(id)}
+            params={consumableMovementFilterParams()}
+            total={movements?.length}
+            filename="consumable-movements"
+            permission="consumable:read"
+            size="sm"
+          />
+        }
+      >
         {(movements?.length ?? 0) === 0 ? (
           <p className="text-sm text-muted-foreground">
             {t("detail.movementsEmpty")}
