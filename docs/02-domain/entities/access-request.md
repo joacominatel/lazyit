@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-16
 ---
 
 # AccessRequest
@@ -59,6 +59,14 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   without `notification:read` — closing the earlier deferral where the requester had to poll their own
   request list. Best-effort post-commit, de-duped per request; the denial reason rides the human summary,
   metadata stays REDACTED (app name/ids + decision + accessLevel). Email is opt-out-able (issue #879).
+
+- **Export (#1597):** `GET /access-requests/export?status=&applicationId=&requesterId=` streams every
+  request the estate-wide list returns for the same filters as CSV, under the same `accessRequest:read`
+  ([[0103-data-export-streaming-path]]). Columns: `Application, Requester, Requester email, Access level,
+  Justification, Status, Requested at, Decided by, Decided at, Denial reason, Grant ID, Request ID`. As in
+  the [[access-grant]] export, names need `application:read` / `user:read`, otherwise the cell keeps the
+  id the list returns, and the email column is present only with `user:read`. `GET /access-requests/mine`
+  has no export. Every export writes a [[data-export-log]] row.
 
 > [!note] Relationship to tickets — question closed (CEO 2026-06-16)
 > lazyit will NOT have a ticketing pillar (see [[vision]] non-goals). AccessRequest is a distinct entity in

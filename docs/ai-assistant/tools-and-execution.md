@@ -201,10 +201,12 @@ Legend:
 | access-requests | create | accessRequest:create, human-only | W | v1 |
 | access-requests | approve / deny | accessGrant:grant, human-only | W (+ext) | v1 `access_request_decide` |
 | access-requests | `mine` | human-only | R | v1 facet |
+| access-requests | export CSV | accessRequest:read | R | EXCL (bulk file; use `access_request_list`) |
 | consumables | list / get / movements | consumable:read | R | v1 `consumable_search` / `consumable_get` (built, W2-7) |
 | consumables | create / update / movement | consumable:write | W | v1 `consumable_create` / `consumable_update` / `consumable_record_movement` (built, W2-7) |
 | consumables | delete / restore | consumable:delete | D | v1.1 |
 | consumables | export CSV | consumable:read | R | EXCL (bulk file; use search) |
+| consumables | movements / deliveries export CSV | consumable:read (+ the target kind read for deliveries) | R | EXCL (bulk file; use `consumable_get`) |
 | articles | list / by-slug / get | article:read | R | v1 |
 | articles | versions / links / backlinks / aliases | article:read | R | v1.1 |
 | articles | create / update / publish / unpublish | article:write | W | v1 (SA create → 403, [R25]) |
@@ -233,6 +235,7 @@ Legend:
 | notifications | list, unread-count, mark read | self (service-scoped) | R / W | v1.1 |
 | account | preferences — language and theme (#1422) | self (human-only) | R / W | not in the v1 cut (set from the UI, where the browser value wins) |
 | infra | nodes (paged), node, edges, impact | infra:read | R | v1 `infra_node_search` / `infra_node_get` (built, W2-10) |
+| infra | nodes export CSV | infra:read | R | EXCL (bulk file; `infra_node_search` is the paged equivalent) |
 | infra | changes, identity-matches, auto-confirm rules | infra:read | R | v1.1 (with the curation surface they serve) |
 | infra | graph nodes / edges (canvas bulk reads) | infra:read | R | EXCL (unpaged, up to 10,000 rows; the two v1 tools are the paged equivalents) |
 | infra | agent fleet | infra:read (+settings:manage for the credential inventory) | R | not in v1 (carries the agent credential inventory) |
@@ -772,7 +775,8 @@ path unit (W2-0, #1315):
   (AUD-003) are wrapped with `untrusted()`.
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
-  `report`, the secret link and the agent binary distribution.
+  the CSV export ([[0103-data-export-streaming-path]]), `report`, the secret link and the agent binary
+  distribution.
 
 **KB tools as built (W2-8).** `kb.tools.ts` binds `ArticlesController` handlers and, for the folder
 shown on a card, `ArticleCategoriesController.findAll`. The folder ACL (ADR-0060, INV-9) and draft
@@ -1373,8 +1377,8 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
   - `access_request_create` — `write`, human-only (a Service Account is refused and never listed);
     `NOTIFIES_USERS`. `application_create` / `application_update` — `write` (update `destructive`,
     target + precondition the application); neither accepts `metadata`.
-- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1); the application
-  list CSV export (a bulk file, [[0103-data-export-streaming-path]]).
+- **Unexposed:** application archive / restore, grant batch revoke, notes and expiry (v1.1); the grant,
+  access-request and application list CSV exports (bulk files, [[0103-data-export-streaming-path]]).
 
 **Consumables tools as built (W2-7).** All five admit humans and Service Accounts holding the route's
 permission (`consumable:read` for the reads, `consumable:write` for the writes; no human-only guard).
@@ -1416,7 +1420,8 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
   stock change between the card and the approval is `STALE`. The result re-reads the consumable for the
   new stock (best effort: skipped when the caller lacks `consumable:read`). Refs: `consumable updated`
   and `consumableMovement created` with `parent: consumable` (§8.5).
-- Unexposed: `remove` / `restore` (archive and restore, v1.1).
+- Unexposed: `remove` / `restore` (archive and restore, v1.1); the consumables, movements and deliveries CSV
+  exports (bulk files, [[0103-data-export-streaming-path]]).
 - Follow-ups (G2 review of #1341):
   - the update preview's `before` values of `description` / `notes` are other-authored text and are not
     `untrusted()`-wrapped (the card renders them to the person). The runtime (W2-3) must wrap preview

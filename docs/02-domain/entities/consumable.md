@@ -58,6 +58,8 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
   a delivery ([[0098-consumable-delivery-targets]]).
 - `GET /consumables/:id/movements?type=&from=&to=` — the movement ledger. Each row carries its resolved
   delivery `target`.
+- `GET /consumables/:id/movements/export` and `GET /consumables/deliveries/export` — the ledger and the
+  deliveries list as CSV, with the same filters, gates and target redaction ([[consumable-movement]]).
 - `GET /consumables/deliveries?targetUserId=|targetAssetId=|targetLocationId=&outstandingOnly=&from=&to=&limit=&offset=`
   — the deliveries made to **one** user, asset or location. Paginated ([[0030-list-pagination-contract]]),
   newest first, with `returnedQuantity` / `outstandingQuantity`. It also requires the target domain's

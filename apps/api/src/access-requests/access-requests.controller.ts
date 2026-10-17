@@ -7,6 +7,8 @@ import {
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -14,11 +16,17 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { AccessRequestStatusSchema } from '@lazyit/shared';
-import { AccessRequestsService } from './access-requests.service';
+import {
+  AccessRequestsService,
+  type FindAccessRequestsFilters,
+} from './access-requests.service';
+import { accessRequestExportColumns } from './access-request-export';
 import {
   AccessRequestDto,
   AccessRequestListPageDto,
@@ -32,6 +40,8 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { ExportService } from '../common/export';
 
 /**
  * AccessRequest endpoints — the self-service request → approve/deny → grant flow (ADR-0085), closing the
@@ -51,7 +61,11 @@ import { isHumanPrincipal, type Principal } from '../auth/principal';
 @ApiTags('access-requests')
 @Controller('access-requests')
 export class AccessRequestsController {
-  constructor(private readonly requests: AccessRequestsService) {}
+  constructor(
+    private readonly requests: AccessRequestsService,
+    private readonly exports: ExportService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
   @Post()
   @RequirePermission('accessRequest:create')
@@ -98,13 +112,49 @@ export class AccessRequestsController {
     @Query('page') page?: string,
   ) {
     return this.requests.findPage(
-      {
-        status: this.parseStatus(status),
-        applicationId: parseCuidQuery(applicationId, 'applicationId'),
-        requesterId: parseUuidQuery(requesterId, 'requesterId'),
-      },
+      this.parseFilters(status, applicationId, requesterId),
       parsePageQuery({ limit, offset, page }),
     );
+  }
+
+  @Get('export')
+  @RequirePermission('accessRequest:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every access request matching the list filters (ADR-0103): same permission, filters and rows as GET /access-requests, newest first. Names need user:read / application:read, otherwise the id. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: AccessRequestStatusSchema.options,
+  })
+  @ApiQuery({ name: 'applicationId', required: false })
+  @ApiQuery({ name: 'requesterId', required: false })
+  @ApiOkResponse({
+    description: 'The filtered access requests as CSV (text/csv).',
+  })
+  async export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('status') status?: string,
+    @Query('applicationId') applicationId?: string,
+    @Query('requesterId') requesterId?: string,
+  ): Promise<StreamableFile> {
+    const filters = this.parseFilters(status, applicationId, requesterId);
+    const [users, applications] = await Promise.all([
+      this.permissions.principalHas(principal, 'user:read'),
+      this.permissions.principalHas(principal, 'application:read'),
+    ]);
+    return this.exports.exportCsv({
+      resource: 'ACCESS_REQUESTS',
+      principal,
+      response: res,
+      filters: { ...filters },
+      columns: accessRequestExportColumns({ users, applications }),
+      filename: 'access-requests',
+      ...this.requests.exportSource(filters),
+    });
   }
 
   @Get('mine')
@@ -171,6 +221,18 @@ export class AccessRequestsController {
       );
     }
     return principal.user.id;
+  }
+
+  private parseFilters(
+    status?: string,
+    applicationId?: string,
+    requesterId?: string,
+  ): FindAccessRequestsFilters {
+    return {
+      status: this.parseStatus(status),
+      applicationId: parseCuidQuery(applicationId, 'applicationId'),
+      requesterId: parseUuidQuery(requesterId, 'requesterId'),
+    };
   }
 
   /** Validate the optional `status` filter against the closed enum (→ 400 on an unknown value). */

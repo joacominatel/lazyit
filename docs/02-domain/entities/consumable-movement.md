@@ -3,7 +3,7 @@ title: ConsumableMovement
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-16
 ---
 
 # ConsumableMovement
@@ -96,6 +96,21 @@ transaction).
     delivery.
   - Listing by a user also requires `user:read`, by an asset `asset:read`, by a location
     `location:read` (403 otherwise).
+- **Export** (#1597, [[0103-data-export-streaming-path]]). Both reads stream as CSV, each under its
+  list's `consumable:read`, filters and gates, and every export is audited ([[data-export-log]]):
+  - `GET /consumables/:id/movements/export?type=&from=&to=` — 404 for a missing or archived
+    consumable, like the ledger. Columns: `Date, Type, Quantity, Reason, Notes, Performed by, Target
+    type, Target ID, Target, Target archived, Returnable, Return of, Purchase line ID, Movement ID`.
+  - `GET /consumables/deliveries/export?targetUserId=|targetAssetId=|targetLocationId=&outstandingOnly=&from=&to=`
+    — exactly one target (400 otherwise) and the same per-kind 403. Columns: `Delivered at, Consumable,
+    SKU, Unit, Consumable archived, Quantity, Returnable, Returned, Outstanding, Target type, Target ID,
+    Target, Target archived, Reason, Notes, Performed by, Delivery ID`.
+  - **Redaction is the list's**: a target whose domain the caller cannot read keeps its type and id, and
+    `Target` / `Target archived` are blank. Quantities and ids are numbers. `Performed by` is the user id
+    the list returns.
+  - **Order.** The lists order by `id`; the exports walk `(createdAt, id)` newest first like every
+    export. On this append-only ledger the two differ only between movements written by concurrent
+    transactions, whose `createdAt` (transaction start) and `id` (insert order) can disagree.
 - **Offboarding** moves no stock and closes no delivery. The offboarding sheet and the Return Act *list*
   the leaver's deliveries through this read.
 

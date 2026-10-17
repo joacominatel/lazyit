@@ -90,6 +90,11 @@ import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { appVersion } from '../common/export-provenance';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import type { Principal } from '../auth/principal';
 import { isServicePrincipal } from '../auth/principal';
@@ -578,6 +583,9 @@ const INFRA_NODE_LIST_SELECT = {
 type InfraNodeListRow = Prisma.InfraNodeGetPayload<{
   select: typeof INFRA_NODE_LIST_SELECT;
 }>;
+
+/** One Servers row as the page returns it; the CSV export maps its columns from this. */
+export type InfraNodeExportRow = ReturnType<typeof projectInfraNodeListRow>;
 
 /** Privacy-safe flattening shared by the compatibility array and the first-party page. */
 function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
@@ -3913,6 +3921,26 @@ export class InfraService {
 
     const items = rows.map(projectInfraNodeListRow);
     return pageOf(items, total, page);
+  }
+
+  /** The Servers CSV export's reads (ADR-0103): the page's `where` and projection, walked by keyset. */
+  nodeExportSource(filters: InfraNodeFilters) {
+    const where = this.buildNodeListWhere(filters);
+    return {
+      count: () => this.prisma.infraNode.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<string> | null,
+        take: number,
+      ): Promise<InfraNodeExportRow[]> =>
+        (
+          await this.prisma.infraNode.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            select: INFRA_NODE_LIST_SELECT,
+          })
+        ).map(projectInfraNodeListRow),
+    };
   }
 
   /**

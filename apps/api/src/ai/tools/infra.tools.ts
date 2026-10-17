@@ -386,6 +386,11 @@ export const infraToolset: AiToolset = {
     ),
     unexposed(
       InfraController,
+      ['exportNodes'],
+      'A bulk CSV file export (ADR-0103, @Res stream); infra_node_search is the paged equivalent.',
+    ),
+    unexposed(
+      InfraController,
       ['listNodes'],
       'An @Res passthrough; the paged listNodePage is the readable equivalent.',
     ),
