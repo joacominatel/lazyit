@@ -868,6 +868,54 @@ describe('ArticlesService', () => {
     });
   });
 
+  describe('findPage archived slice (#1647)', () => {
+    type ListCall = {
+      where: Record<string, unknown> & { AND: Array<Record<string, unknown>> };
+      includeSoftDeleted?: boolean;
+    };
+    const findManyArgs = (): ListCall =>
+      (article.findMany.mock.calls as Array<[ListCall]>)[0][0];
+    const countArgs = (): ListCall =>
+      (article.count.mock.calls as Array<[ListCall]>)[0][0];
+
+    it('lists live articles by default, without the soft-delete escape hatch', async () => {
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' },
+        undefined,
+      );
+      expect(findManyArgs().where.deletedAt).toBeNull();
+      expect(findManyArgs()).not.toHaveProperty('includeSoftDeleted');
+      expect(countArgs()).not.toHaveProperty('includeSoftDeleted');
+    });
+
+    it('deleted=only lists archived rows on page and count alike, past the read filter', async () => {
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'only' },
+        undefined,
+      );
+      expect(findManyArgs().where.deletedAt).toEqual({ not: null });
+      expect(findManyArgs().includeSoftDeleted).toBe(true);
+      expect(countArgs().includeSoftDeleted).toBe(true);
+      expect(countArgs().where).toEqual(findManyArgs().where);
+    });
+
+    it("keeps the folder pin and the draft rule on the archived slice: another author's archived draft stays out", async () => {
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(new Set(['c1']));
+      await service.findPage(
+        { q: 'vpn' },
+        { limit: 50, offset: 0, deleted: 'only' },
+        AUTHOR_USER as never,
+      );
+      const and = findManyArgs().where.AND;
+      expect(and[0]).toEqual({
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: AUTHOR }],
+      });
+      expect(and).toContainEqual({ categoryId: { in: ['c1'] } });
+    });
+  });
+
   // --- read visibility -----------------------------------------------------
 
   describe('findOne / findBySlug visibility', () => {

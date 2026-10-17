@@ -420,11 +420,16 @@ describe('GET /articles/export (ADR-0103, folder ACL ADR-0060, drafts ADR-0022)'
       }
     });
 
-    it('deleted=only is no article-list filter: a MEMBER gets the live rows the list returns, never an archived one', async () => {
-      const listed = await listIds(alice, 'deleted=only');
-      const exported = await exportedIds(alice, 'deleted=only');
-      expect(new Set(exported)).toEqual(new Set(listed));
+    it('the export ignores deleted=only: it walks the live rows the list returns, never an archived one', async () => {
+      const live = await listIds(admin, '');
+      const exported = await exportedIds(admin, 'deleted=only');
+      expect(new Set(exported)).toEqual(new Set(live));
       expect(exported).not.toContain(idOf('archived'));
+    });
+
+    it('the list serves deleted=only to an ADMIN only (#1647)', async () => {
+      expect((await get('/articles?deleted=only', alice)).status).toBe(403);
+      expect(await listIds(admin, 'deleted=only')).toEqual([idOf('archived')]);
     });
   });
 

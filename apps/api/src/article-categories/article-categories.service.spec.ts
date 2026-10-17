@@ -260,11 +260,18 @@ describe('ArticleCategoriesService', () => {
     // Prisma's nested `_count.articles` is flattened to `articleCount`; the hidden folder's count is
     // dropped to null so it never reveals how many articles sit in a folder the list itself hides.
     expect(result).toEqual([
-      { id: 'c1', name: 'Public', articleCount: 3, hasAccessRules: false },
+      {
+        id: 'c1',
+        name: 'Public',
+        articleCount: 3,
+        totalArticleCount: 3,
+        hasAccessRules: false,
+      },
       {
         id: 'c2',
         name: 'Restricted',
         articleCount: null,
+        totalArticleCount: null,
         hasAccessRules: false,
       },
     ]);
@@ -281,6 +288,77 @@ describe('ArticleCategoriesService', () => {
     });
   });
 
+  describe('the rolled-up totalArticleCount (#1651)', () => {
+    // Engineering (12) ─┬─ Linux (3) ── Kernels (2)
+    //                   └─ Secrets (3, restricted)
+    const TREE_ROWS = [
+      { id: 'eng', parentId: null, _count: { articles: 12 } },
+      { id: 'linux', parentId: 'eng', _count: { articles: 3 } },
+      { id: 'kernels', parentId: 'linux', _count: { articles: 2 } },
+      { id: 'secrets', parentId: 'eng', _count: { articles: 3 } },
+    ];
+    const totalsOf = (
+      rows: Array<{ id: string; totalArticleCount: unknown }>,
+    ) => Object.fromEntries(rows.map((r) => [r.id, r.totalArticleCount]));
+
+    it('totals a folder with every descendant, keeping articleCount as the own count', async () => {
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+
+      const result = await service.findAll(ADMIN_PRINCIPAL);
+
+      expect(totalsOf(result)).toEqual({
+        eng: 20,
+        linux: 5,
+        kernels: 2,
+        secrets: 3,
+      });
+      expect(result.find((r) => r.id === 'eng')?.articleCount).toBe(12);
+    });
+
+    it('leaves a restricted subfolder out of its parent for a viewer who cannot read it, and in for an admin', async () => {
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(
+        new Set(['eng', 'linux', 'kernels']),
+      );
+
+      const viewer = await service.findAll(VIEWER_PRINCIPAL);
+      // The hidden folder's 3 never reach Engineering: 12 + 3 + 2, not 20.
+      expect(totalsOf(viewer)).toEqual({
+        eng: 17,
+        linux: 5,
+        kernels: 2,
+        secrets: null,
+      });
+
+      folderAccess.visibleFolderIds.mockResolvedValueOnce('ALL');
+      const admin = await service.findAll(ADMIN_PRINCIPAL);
+      expect(totalsOf(admin).eng).toBe(20);
+    });
+
+    it("rolls up the same draft-filtered count as articleCount (published + the caller's own drafts)", async () => {
+      const MEMBER = {
+        kind: 'human',
+        user: { id: 'u1', role: 'MEMBER' },
+      } as never;
+      articleCategory.findMany.mockResolvedValue(TREE_ROWS);
+
+      await service.findAll(MEMBER);
+
+      // The totals are summed from this one filtered `_count`: another author's draft is never in the
+      // per-folder number, so it is never in the total either.
+      const call = (
+        articleCategory.findMany.mock.calls as Array<
+          [{ select: { _count: { select: { articles: { where: unknown } } } } }]
+        >
+      )[0][0];
+      expect(call.select._count.select.articles.where).toEqual({
+        deletedAt: null,
+        OR: [{ status: 'PUBLISHED' }, { status: 'DRAFT', authorId: 'u1' }],
+      });
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('the derived hasAccessRules flag (#1299, ADR-0060 §3 carve-out)', () => {
     it('findAll marks a restricted folder true and a public one false, WITHOUT leaking accessRules to a non-`settings:manage` caller', async () => {
       // A VIEWER: no `settings:manage` (the default mock), so the rules themselves stay gated (#554).
@@ -294,8 +372,20 @@ describe('ArticleCategoriesService', () => {
       const result = await service.findAll(VIEWER_PRINCIPAL);
 
       expect(result).toEqual([
-        { id: 'c1', name: 'Public', articleCount: 1, hasAccessRules: false },
-        { id: 'c2', name: 'Runbooks', articleCount: 2, hasAccessRules: true },
+        {
+          id: 'c1',
+          name: 'Public',
+          articleCount: 1,
+          totalArticleCount: 1,
+          hasAccessRules: false,
+        },
+        {
+          id: 'c2',
+          name: 'Runbooks',
+          articleCount: 2,
+          totalArticleCount: 2,
+          hasAccessRules: true,
+        },
       ]);
       // The whole point of the carve-out: the VIEWER learns THAT c2 is restricted and nothing else —
       // no rule kinds, no user list, no role, no counts. `accessRules` is not even selected.
