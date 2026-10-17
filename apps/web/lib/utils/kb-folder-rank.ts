@@ -10,6 +10,12 @@
 export interface RankableFolder {
   id: string;
   articleCount?: number | null;
+  totalArticleCount?: number | null;
+}
+
+// An older API sends no total, so the rail falls back to the folder's own count.
+export function railArticleCount(folder: RankableFolder): number | null {
+  return folder.totalArticleCount ?? folder.articleCount ?? null;
 }
 
 /** Articles filed in `folderId` and all its descendants. */
@@ -35,6 +41,9 @@ export function rankFolderCards<F extends RankableFolder>(
   roots: readonly F[],
   childrenById: ReadonlyMap<string, readonly F[]>,
 ): F[] {
-  const counts = new Map(roots.map((root) => [root.id, branchArticleCount(root, childrenById)]));
+  // The server's total is visibility-correct; the local sum is only the older-API fallback.
+  const counts = new Map(
+    roots.map((root) => [root.id, root.totalArticleCount ?? branchArticleCount(root, childrenById)]),
+  );
   return roots.toSorted((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0));
 }

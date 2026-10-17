@@ -21,9 +21,12 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
   automatically from the folder and stays the same everywhere (the sidebar, the home page cards, the
   folder's own page) and for everyone. It is a visual aid only; two folders can share a colour.
 - **Each folder shows how many articles it holds** — a small count on the right of the folder row. It
-  counts only the articles **you can actually see** (published articles, plus your own drafts), so it
-  never reveals more than the folder's list would. A **restricted folder you cannot read shows no
-  number**, and folders on an older server simply show none until it is updated.
+  counts the folder **and every subfolder inside it**: a folder with 12 articles and two subfolders of
+  3 articles each shows **18**. It counts only the articles **you can actually see** (published
+  articles, plus your own drafts), so it never reveals more than the folder's list would, and a
+  subfolder you cannot read adds nothing to its parent's number. A **restricted folder you cannot read
+  shows no number**. On an older server the number covers the folder's own articles only, until the
+  server is updated.
 - **A restricted folder shows one padlock** on its row — see
   [Restricting a folder](#restricting-a-folder). Everyone sees the padlock, not only administrators.
 - **Create a top-level folder** with the **+** next to the **Folders** heading in the sidebar, or with
@@ -72,7 +75,8 @@ description, and four facts:
   administrators see the rules in words, such as *Only Admins*, *Only 3 people* or *Only holders of
   Finance*; everyone else sees **Restricted**. A folder restricted by a parent says **Restricted ·
   from** that parent.
-- **Articles** — the folder's own article count (the same number as in the sidebar).
+- **Articles** — the articles filed directly in this folder, without its subfolders. The sidebar
+  number includes the subfolders, so the two differ when a subfolder holds articles.
 - **Subfolders** — how many folders sit directly inside it.
 - **Last change** — when an article in the folder was last updated.
 

@@ -1,7 +1,10 @@
 import type {
   DismissNotificationsResult,
+  MarkNotificationGroupRead,
   MarkReadResult,
   Notification,
+  NotificationGroupPage,
+  NotificationType,
   Page,
   UnreadCount,
 } from "@lazyit/shared";
@@ -12,8 +15,8 @@ import { apiFetch } from "../client";
  * gated server-side by `notification:read` (seeded ADMIN-only). The notification `title`/`summary` and
  * any `metadata` are server-built + REDACTED (INV-6); the UI renders them as escaped text only.
  *
- * Backend contract (ADR-0056 §2): `GET /notifications?limit=&offset=` → `Page<Notification>` (each item
- * carrying its per-caller `read` flag); `GET /notifications/unread-count` → `{ unread }`;
+ * Backend contract (ADR-0056 §2): the bell reads the grouped feed (`GET /notifications/groups`, the
+ * 2026-10-17 amendment, #1649); `GET /notifications/unread-count` → `{ unread }`;
  * `PATCH /notifications/:id/read` and `PATCH /notifications/read-all` → `{ marked, unread }`;
  * `PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all?upTo=` → `{ dismissed, unread }`
  * (ADR-0056 §7 amendment, #1309 — per-user, hides the row from the caller's bell only).
@@ -23,22 +26,45 @@ import { apiFetch } from "../client";
 
 const BASE = "/notifications";
 
-export interface NotificationListParams {
-  /** Page size (ADR-0030; 1-200). */
+export interface PageWindow {
   limit?: number;
-  /** Zero-based window offset (ADR-0030). */
   offset?: number;
 }
 
-/** List the caller's notifications (newest-first, paged). Returns the `Page<Notification>` envelope. */
-export function getNotifications(
-  params: NotificationListParams = {},
+function withWindow(qs: URLSearchParams, { limit, offset }: PageWindow) {
+  if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
+  return qs.toString();
+}
+
+// `tz` decides each group's day window, so all three group calls must send the same one (#1649).
+export function getNotificationGroups(
+  tz: string,
+  window: PageWindow = {},
+): Promise<NotificationGroupPage> {
+  const q = withWindow(new URLSearchParams({ tz }), window);
+  return apiFetch<NotificationGroupPage>(`${BASE}/groups?${q}`);
+}
+
+export function getNotificationGroupItems(
+  group: { type: NotificationType; day: string },
+  tz: string,
+  window: PageWindow = {},
 ): Promise<Page<Notification>> {
-  const qs = new URLSearchParams();
-  if (params.limit !== undefined) qs.set("limit", String(params.limit));
-  if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  const q = qs.toString();
-  return apiFetch<Page<Notification>>(q ? `${BASE}?${q}` : BASE);
+  const q = withWindow(
+    new URLSearchParams({ type: group.type, day: group.day, tz }),
+    window,
+  );
+  return apiFetch<Page<Notification>>(`${BASE}/groups/items?${q}`);
+}
+
+export function markNotificationGroupRead(
+  body: MarkNotificationGroupRead,
+): Promise<MarkReadResult> {
+  return apiFetch<MarkReadResult>(`${BASE}/read-group`, {
+    method: "PATCH",
+    body,
+  });
 }
 
 /** The caller's unread count — the bell badge (`GET /notifications/unread-count`). */

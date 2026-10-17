@@ -67,8 +67,8 @@ export type AccessRequest = z.infer<typeof AccessRequestSchema>;
  */
 export const CreateAccessRequestSchema = z.strictObject({
   applicationId: z.cuid(),
-  // On behalf of another person (#1645): 403 ACCESS_REQUEST_ON_BEHALF_FORBIDDEN without accessGrant:grant.
-  requesterId: z.uuid().optional(),
+  // On behalf of another person (#1645); lowercased so an uppercase self id is still a self-request.
+  requesterId: z.string().toLowerCase().pipe(z.uuid()).optional(),
   accessLevel: z.string().trim().min(1).max(100).optional(),
   justification: optionalText(2000),
 });

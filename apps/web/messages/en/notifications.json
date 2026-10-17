@@ -8,5 +8,33 @@
   "occurredAt": "Occurred {datetime}",
   "dismiss": "Dismiss notification: {title}",
   "dismissFailed": "Could not dismiss the notification.",
-  "clearAllFailed": "Could not clear your notifications."
+  "clearAllFailed": "Could not clear your notifications.",
+  "markGroupRead": "Mark group as read",
+  "markGroupReadFailed": "Could not mark the group as read.",
+  "groupUnread": "{count, plural, one {# unread} other {# unread}}",
+  "loadMore": "Load more",
+  "loadFailed": "Could not load your notifications.",
+  "day": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "groupSummary": {
+    "critical_app_access": "{count, plural, one {# grant on a critical application} other {# grants on critical applications}}",
+    "admin_granted": "{count, plural, one {# user raised to Administrator} other {# users raised to Administrator}}",
+    "low_stock": "{count, plural, one {# consumable low on stock} other {# consumables low on stock}}",
+    "workflow_manual_task": "{count, plural, one {# manual task waiting} other {# manual tasks waiting}}",
+    "workflow_run_failed": "{count, plural, one {# workflow run failed} other {# workflow runs failed}}",
+    "secret_vault_setup": "{count, plural, one {# vault setup reminder} other {# vault setup reminders}}",
+    "permission_widened": "{count, plural, one {# sensitive permission granted} other {# sensitive permissions granted}}",
+    "infra_agent_offline": "{count, plural, one {# agent went offline} other {# agents went offline}}",
+    "infra_identity_conflict": "{count, plural, one {# duplicate machine ID} other {# duplicate machine IDs}}",
+    "update_available": "{count, plural, one {# new release available} other {# new releases available}}",
+    "access_request_created": "{count, plural, one {# new access request} other {# new access requests}}",
+    "access_request_decided": "{count, plural, one {# access request decided} other {# access requests decided}}",
+    "warranty_expiring": "{count, plural, one {# warranty expiring soon} other {# warranties expiring soon}}",
+    "access_grant_expiring": "{count, plural, one {# access grant expiring soon} other {# access grants expiring soon}}",
+    "asset_assignment_acknowledged": "{count, plural, one {# asset receipt acknowledged} other {# asset receipts acknowledged}}",
+    "mcp_client_connected": "{count, plural, one {# new AI agent connected} other {# new AI agents connected}}",
+    "fallback": "{count, plural, one {# notification} other {# notifications}}"
+  }
 }

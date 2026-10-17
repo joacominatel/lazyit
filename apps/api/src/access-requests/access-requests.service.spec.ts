@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { CreateAccessRequestSchema } from '@lazyit/shared';
 import { AccessRequestsService } from './access-requests.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
@@ -299,6 +300,21 @@ describe('AccessRequestsService', () => {
       const emitted = (notifications.emit.mock.calls as EmitCall[])[0][0];
       expect(emitted.title).toBe('Ada Lovelace requested access to Jira');
       expect(emitted.metadata).not.toHaveProperty('filedById');
+    });
+
+    it('treats an uppercase copy of the caller id as self-filed', async () => {
+      primeCreate(null);
+      const self = '11111111-1111-4111-8111-11111111abcd';
+      const requesterId = CreateAccessRequestSchema.shape.requesterId.parse(
+        self.toUpperCase(),
+      );
+
+      await service.create(self, { applicationId: APP_ID, requesterId });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(self);
+      expect(data.filedById).toBeNull();
+      expect(user.findFirst).not.toHaveBeenCalled();
     });
 
     it.each([
