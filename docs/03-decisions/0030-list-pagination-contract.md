@@ -202,9 +202,9 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   consumable unit, user "Updated", …) are intentionally **not** sortable.
 - **Server vs client filters.** Where the API has a real filter param it is threaded through `q`/the
   list params (`assets` → `status`/`categoryId`/`locationId`; `consumables` → `lowStock`; `kb` →
-  `status`/`categoryId`). Filters the API does NOT support are applied **client-side over the current
-  page** and documented as such — `assets` ownership, `applications` category + criticality,
-  `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
+  `status`/`categoryId`; `applications` → `categoryId`/`isCritical`, since #1631). Filters the API does
+  NOT support are applied **client-side over the current page** and documented as such — `assets`
+  ownership, `consumables` category, `users` active/inactive, `locations` type. The URL param names (the
   dashboard deep-links + bookmarks depend on these): `assets` `status`/`category`/`location`/`ownership`;
   `applications` `category`/`criticality`; `consumables` `lowStock`(=`"true"`)/`category`; `users`
   `status`; `locations` `type`; `kb` `status`/`categoryId`.
