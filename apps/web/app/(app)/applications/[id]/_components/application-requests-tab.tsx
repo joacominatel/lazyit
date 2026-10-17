@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
+import { filedByOther } from "@/lib/access-requests/on-behalf";
 import {
   ACCESS_REQUEST_EXPORT_PATH,
   accessRequestFilterParams,
@@ -63,7 +64,10 @@ export function ApplicationRequestsTab({
 
   const items = useMemo(() => data?.items ?? [], [data]);
   const personIds = useMemo(
-    () => items.flatMap((r) => (r.decidedById ? [r.requesterId, r.decidedById] : [r.requesterId])),
+    () =>
+      items.flatMap((r) =>
+        [r.requesterId, r.decidedById, filedByOther(r)].filter((id): id is string => id != null),
+      ),
     [items],
   );
   const people = useUserNames(personIds);
@@ -142,6 +146,7 @@ export function ApplicationRequestsTab({
           <ul className="divide-y divide-border">
             {items.map((request) => {
               const user = people.get(request.requesterId);
+              const filerId = filedByOther(request);
               return (
                 <li
                   key={request.id}
@@ -188,6 +193,11 @@ export function ApplicationRequestsTab({
                           </span>
                         ) : null}
                       </p>
+                      {filerId ? (
+                        <p className="text-xs text-muted-foreground">
+                          {tr("filedBy", { name: nameOf(filerId) })}
+                        </p>
+                      ) : null}
                       {request.deniedReason ? (
                         <p className="text-xs break-words text-muted-foreground">
                           <span aria-hidden className="font-mono text-muted-foreground/60">

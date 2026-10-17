@@ -29,6 +29,9 @@ describe("buildAccessRequestPayload", () => {
     expect(buildAccessRequestPayload({ applicationId: APP, requesterId: ME }, ME)).toEqual({
       applicationId: APP,
     });
+    expect(buildAccessRequestPayload({ applicationId: APP, requesterId: ME }, ME.toUpperCase())).toEqual({
+      applicationId: APP,
+    });
   });
 
   test("a request for someone else names them", () => {
@@ -36,6 +39,8 @@ describe("buildAccessRequestPayload", () => {
       applicationId: APP,
       requesterId: ANA,
     });
+    const upper = ANA.toUpperCase();
+    expect(buildAccessRequestPayload({ applicationId: APP, requesterId: upper }, ME).requesterId).toBe(upper);
   });
 
   test("blank optionals are dropped and the rest trimmed", () => {

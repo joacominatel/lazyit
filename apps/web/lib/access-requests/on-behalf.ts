@@ -25,7 +25,7 @@ export function buildAccessRequestPayload(
   const requesterId = values.requesterId?.trim();
   return {
     applicationId: values.applicationId,
-    ...(requesterId && requesterId !== callerId ? { requesterId } : {}),
+    ...(requesterId && requesterId.toLowerCase() !== callerId?.toLowerCase() ? { requesterId } : {}),
     ...(level ? { accessLevel: level } : {}),
     ...(justification ? { justification } : {}),
   };
@@ -49,5 +49,6 @@ export function accessRequestErrorKind(error: unknown): AccessRequestErrorKind |
 export function filedByOther(
   request: Pick<AccessRequest, "requesterId" | "filedById">,
 ): string | null {
-  return request.filedById && request.filedById !== request.requesterId ? request.filedById : null;
+  const filer = request.filedById;
+  return filer && filer.toLowerCase() !== request.requesterId.toLowerCase() ? filer : null;
 }

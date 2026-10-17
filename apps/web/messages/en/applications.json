@@ -91,6 +91,7 @@
     "deleteLabel": "Delete application",
     "grantAccess": "Grant access",
     "requestAccess": "Request access",
+    "fileRequest": "Request for someone",
     "accessRequested": "Access requested",
     "youHaveAccess": "You have access",
     "opensInNewTab": "(opens in a new tab)",
