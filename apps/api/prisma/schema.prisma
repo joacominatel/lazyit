@@ -71,7 +71,7 @@ model User {
   directoryOnly  Boolean   @default(false)
   // Free-form directory attributes for a directory-only person (cargo/jobTitle, departamento, teléfono,
   // and any person sub-field with no native home). Same posture as Asset.specs (ADR-0007): jsonb,
-  // optional, only populated on directory rows. NOT validated per-field in this MVP. AD sync also stashes
+  // optional; a manual create/edit also writes jobTitle/department here (#1646). NOT validated per-field in this MVP. AD sync also stashes
   // the entry's `memberOf` group DNs here INERT (store-now-act-later, #846) — never acted on as subjects.
   directoryAttrs Json?
 

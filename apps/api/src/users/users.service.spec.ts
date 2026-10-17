@@ -398,6 +398,29 @@ describe('UsersService', () => {
     });
   });
 
+  it('stores a manual job title and department in directoryAttrs (#1646)', async () => {
+    const dto = {
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      jobTitle: 'Engineer',
+      department: 'IT',
+    };
+    user.create.mockResolvedValue({ id: 'uuid-a', email: dto.email });
+
+    await service.create(dto, 'admin-1');
+
+    expect(user.create).toHaveBeenCalledWith({
+      data: {
+        email: 'a@b.com',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'VIEWER',
+        directoryAttrs: { jobTitle: 'Engineer', department: 'IT' },
+      },
+    });
+  });
+
   it('OIDC create never hard-deletes the new row, even when a later step fails', async () => {
     const dto = { email: 'c@b.com', firstName: 'Caro', lastName: 'Line' };
     user.create.mockResolvedValue({
@@ -1157,6 +1180,82 @@ describe('UsersService', () => {
       history.record.mockClear();
       await service.update('uuid-1', { legajo: 'L-1', username: null }, ACTOR);
       expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('department and job title (#1646)', () => {
+    const ACTOR = 'actor-uuid';
+    type UpdateCall = [{ data: Record<string, unknown> }];
+    const updateData = () =>
+      (user.update.mock.calls as UpdateCall[])[0][0].data;
+
+    it('sets and clears them on a local user, keeping the other attributes', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+        directorySource: null,
+        directoryAttrs: { jobTitle: 'Intern', phone: '555' },
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update(
+        'uuid-1',
+        { jobTitle: null, department: 'Finance' },
+        ACTOR,
+      );
+
+      expect(updateData()).toEqual({
+        directoryAttrs: { phone: '555', department: 'Finance' },
+      });
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['jobTitle', 'department'] },
+        actor: { userId: ACTOR },
+      });
+    });
+
+    it('refuses a change on a person the AD/LDAP sync owns with 409 PROFILE_MANAGED_BY_DIRECTORY', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'VIEWER',
+        deletedAt: null,
+        directorySource: 'ad',
+        directoryAttrs: { department: 'IT' },
+      });
+
+      const err: unknown = await service
+        .update('uuid-1', { department: 'Finance' }, ACTOR)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'PROFILE_MANAGED_BY_DIRECTORY',
+      });
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts the unchanged values a full form resends for a directory-synced person', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'VIEWER',
+        deletedAt: null,
+        directorySource: 'ad',
+        directoryAttrs: { department: 'IT' },
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update(
+        'uuid-1',
+        { firstName: 'Ana', department: 'IT', jobTitle: null },
+        ACTOR,
+      );
+
+      expect(updateData()).toEqual({ firstName: 'Ana' });
     });
   });
 
