@@ -103,6 +103,7 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
 - **Pending units** (`GET /purchase-orders/pending-lines`, `purchaseOrder:read`): the countable lines with
   pending > 0 on live purchases that are neither `DRAFT` nor `CANCELLED`, oldest order date first, each with
   its purchase header and supplier; paged, filterable by `supplierId`. The *Pending units* tab reads it.
+  `GET /purchase-orders/pending-lines/export` streams the same lines as CSV ([[purchase-order-line]] § Export).
 - **Totals are derived, never stored**: the sum of its lines' quantity × unit price, in the purchase's
   currency label ([[0100-money-as-64-bit-minor-units]]). On the wire `totals` is a list of
   `{ currency, amount, unpricedLines }` built by the shared `groupMoneyTotals` — one entry for a purchase

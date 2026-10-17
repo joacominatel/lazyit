@@ -17,6 +17,12 @@ import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import { ACCESS_REQUEST_EXPORT_SELECT } from './access-request-export';
 
 /** Filters for the estate-wide request list (`GET /access-requests`). */
 export interface FindAccessRequestsFilters {
@@ -128,6 +134,21 @@ export class AccessRequestsService {
    */
   findMine(requesterId: string, page: PageQuery) {
     return this.findPage({ requesterId }, page);
+  }
+
+  /** The CSV export's reads (ADR-0103): the estate-wide list's `where`, walked newest first by keyset. */
+  exportSource(filters: FindAccessRequestsFilters) {
+    const where = this.buildWhere(filters);
+    return {
+      count: () => this.prisma.accessRequest.count({ where }),
+      fetchBatch: (after: KeysetCursor<string> | null, take: number) =>
+        this.prisma.accessRequest.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+          select: ACCESS_REQUEST_EXPORT_SELECT,
+        }),
+    };
   }
 
   /** The shared `where` for the request lists. */

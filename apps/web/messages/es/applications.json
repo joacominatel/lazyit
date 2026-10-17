@@ -8,6 +8,7 @@
     "allCategories": "Todas las categorías",
     "anyCriticality": "Cualquier criticidad",
     "criticalOnly": "Solo críticas",
+    "exportClientFilters": "Quita los filtros de categoría y criticidad para exportar; el archivo sigue la búsqueda.",
     "nonCritical": "No críticas",
     "criticalityAny": "Cualquiera",
     "columns": {

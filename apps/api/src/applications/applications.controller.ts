@@ -40,6 +40,8 @@ import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { ExportService } from '../common/export';
+import { APPLICATION_EXPORT_COLUMNS } from './applications-export';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
@@ -63,6 +65,7 @@ export class ApplicationsController {
     private readonly grants: AccessGrantsService,
     private readonly articles: ArticlesService,
     private readonly grantExports: AccessGrantsExportService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
@@ -138,6 +141,39 @@ export class ApplicationsController {
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
     return this.applications.findPage({ q }, pageQuery);
+  }
+
+  // STATIC route declared BEFORE `:id` so `/applications/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('application:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every application matching the list filters (ADR-0103): same permission, filters and rows as GET /applications, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({
+    description: 'The filtered applications as CSV (text/csv).',
+  })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('q') q?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    return this.exports.exportCsv({
+      resource: 'APPLICATIONS',
+      principal,
+      response: res,
+      filters: { q, deleted: slice },
+      columns: APPLICATION_EXPORT_COLUMNS,
+      filename: 'applications',
+      ...this.applications.exportSource({ q }, slice),
+    });
   }
 
   @Get(':id')

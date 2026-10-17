@@ -77,6 +77,9 @@ estrechas el árbol se colapsa tras un botón **Carpetas**. Las subcarpetas de l
 estás aparecen como filas discretas al principio de la lista, para que puedas profundizar como en un
 explorador de archivos.
 
+**Exportar CSV**, junto a los filtros, descarga el índice de artículos que estás viendo: solo metadatos,
+nunca el texto, y solo los artículos que puedes abrir — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Búsqueda
 
 El cuadro de búsqueda busca en el **cuerpo** completo de los artículos publicados — no solo en sus

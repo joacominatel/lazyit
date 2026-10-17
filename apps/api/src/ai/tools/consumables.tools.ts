@@ -679,7 +679,7 @@ export const consumablesToolset: AiToolset = {
     ),
     unexposed(
       ConsumablesController,
-      ['export'],
+      ['export', 'exportMovements', 'exportDeliveries'],
       'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
   ],

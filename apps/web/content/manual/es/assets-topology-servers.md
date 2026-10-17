@@ -71,6 +71,9 @@ querés agruparlos de forma previsible.
 Los filtros activos aparecen como chips removibles debajo de la barra de herramientas, y una acción
 **Limpiar** los restablece todos.
 
+**Exportar CSV**, al final de la barra de filtros, descarga todos los nodos que coinciden con la búsqueda
+y los filtros, no solo la página — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Recorrer la lista por páginas
 
 La tabla muestra una página por vez, con los **controles de paginación abajo**: cuántas filas estás

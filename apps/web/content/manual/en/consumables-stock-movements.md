@@ -77,6 +77,9 @@ same movement.
 If you cannot view people, assets or locations, a delivery's recipient shows as *restricted* — you
 see that the units went to someone or somewhere, but not to whom.
 
+**Export CSV** on the *Consumables delivered* panel downloads the deliveries the panel lists, with its
+filters — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Returnable items and returns
 
 Some supplies come back: a loaner headset, a projector remote, a spare charger. Mark those
@@ -127,3 +130,5 @@ signed quantity (`+`, `−` or `=`), where a delivery went (or which delivery a 
 reason, **who** performed it, and when. A movement made by a
 person shows that person; one made automatically (for example by a service account) shows as
 **System**.
+
+**Export CSV** on the **Movements** panel downloads the whole ledger of the item — see [Exporting data](/help/notifications-activity-data-export).

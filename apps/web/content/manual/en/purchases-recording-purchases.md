@@ -312,6 +312,9 @@ existing assets** and **Cancel remaining units**. On a consumable line, **Receiv
 [Apply license](#applying-a-license) instead. A purchase whose **expected delivery** date has passed is
 marked **Overdue**.
 
+**Export CSV** on the tab downloads every pending line, filtered by supplier when one is set — see
+[Exporting data](/help/notifications-activity-data-export).
+
 ## Documents
 
 A purchase keeps its **documents** — the quote, the order, the invoices, a photo of the delivery note — in
@@ -445,6 +448,8 @@ purchases made from it.
 
 Names and tax IDs are not unique, so lazyit never refuses a duplicate; it suggests instead. Typing a
 tax ID that another supplier already has tells you whose it is.
+
+**Export CSV** on the tab downloads every supplier matching the search — see [Exporting data](/help/notifications-activity-data-export).
 
 ### Merging duplicate suppliers
 

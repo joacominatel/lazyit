@@ -183,7 +183,9 @@ describe("endpoint hiding is CANVAS-ONLY (ADR-0093 decision 5, 2026-08-03)", () 
     const source = await surface("servers-table-view.tsx");
     expect(source).not.toContain("partitionEndpoints");
     expect(source).not.toContain("isEndpointChassis");
-    expect(source).not.toContain(SHOW_ENDPOINTS_PARAM);
+    // The `?endpoints=` toggle, by name or as a literal; an import path that merely says "endpoints" is fine.
+    expect(source).not.toContain("SHOW_ENDPOINTS_PARAM");
+    expect(source).not.toMatch(/["']endpoints["']/);
   });
 
   test("the PENDING review tray shows chassis but never hides a proposal by it", async () => {

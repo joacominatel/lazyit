@@ -31,6 +31,17 @@ export interface AccessRequestFilters {
   offset?: number;
 }
 
+export const ACCESS_REQUEST_EXPORT_PATH = `${BASE}/export`;
+
+/** The managers' list filters, never the page window; the CSV export sends exactly these. */
+export function accessRequestFilterParams(filters: AccessRequestFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.applicationId) params.set("applicationId", filters.applicationId);
+  if (filters.requesterId) params.set("requesterId", filters.requesterId);
+  return params;
+}
+
 /**
  * List access requests (newest first), filtered and paged (`GET /access-requests`,
  * `accessRequest:read`). Returns the whole `Page<AccessRequest>` envelope so callers can read both
@@ -39,10 +50,7 @@ export interface AccessRequestFilters {
 export async function getAccessRequests(
   filters: AccessRequestFilters = {},
 ): Promise<AccessRequestListPage> {
-  const params = new URLSearchParams();
-  if (filters.status) params.set("status", filters.status);
-  if (filters.applicationId) params.set("applicationId", filters.applicationId);
-  if (filters.requesterId) params.set("requesterId", filters.requesterId);
+  const params = accessRequestFilterParams(filters);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

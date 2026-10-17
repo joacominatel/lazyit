@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ActiveFilters } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
@@ -27,6 +28,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  PENDING_LINE_EXPORT_PATH,
+  pendingLineFilterParams,
+} from "@/lib/api/endpoints/purchase-orders";
 import { usePendingLines } from "@/lib/api/hooks/use-purchase-orders";
 import { useSupplier } from "@/lib/api/hooks/use-suppliers";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -107,6 +112,15 @@ export function PendingUnitsView() {
         pillar="inventory"
         icon={ShoppingCartIcon}
         subtitle={t("subtitle")}
+        actions={
+          <ExportButton
+            path={PENDING_LINE_EXPORT_PATH}
+            params={pendingLineFilterParams({ supplierId })}
+            total={page?.total}
+            filename="pending-units"
+            permission="purchaseOrder:read"
+          />
+        }
       />
       <PurchasesTabs active="pending" />
 

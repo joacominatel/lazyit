@@ -22,9 +22,26 @@ de cálculo, pasar a finanzas o procesar con un script. Busca el botón **Export
 | **La página de una persona** | Las mismas columnas de accesos para esa persona, activos y revocados. El botón está en la pestaña *Accesos*. |
 | **Consumibles** | Una fila por artículo: nombre, SKU, categoría, unidad, stock actual, umbral de reposición y si está bajo. |
 | **Compras** | Una fila por compra: referencia, proveedor, estado, estado de recepción, fechas, números de factura, unidades pedidas, recibidas y pendientes, total y moneda. |
+| **Compras → Unidades pendientes** | Una fila por línea que todavía espera unidades: compra, proveedor, fechas, tipo, modelo o descripción, y unidades pedidas, recibidas, canceladas y pendientes. |
+| **Compras → Proveedores** | Una fila por proveedor: nombre, identificación fiscal, sitio web, contactos de ventas y de soporte, y notas. |
+| **Aplicaciones** | Una fila por aplicación: nombre, fabricante, URL, criticidad, asientos comprados y usados, costo por asiento, fecha de renovación y notas. |
+| **Solicitudes de acceso** | Las solicitudes pendientes de la cola de revisión: aplicación, solicitante, nivel de acceso, justificación y cuándo se pidió. |
+| **Ubicaciones** | Una fila por ubicación: nombre, tipo, ubicación superior, dirección, piso, descripción y notas. |
+| **Topología → Tabla** (servidores) | Una fila por nodo que coincide con los filtros: etiqueta, tipo, estado, ciclo (confirmado o pendiente), origen, dirección IP, activo vinculado y sus responsables, chasis, versión del agente y último reporte. |
+| **La página de un consumible** | Sus movimientos de stock: fecha, tipo, cantidad, motivo, quién lo hizo y adónde fue una entrega. El botón está en el panel *Movimientos*. |
+| **Consumibles entregados** (en la página de una persona, un activo o una ubicación) | Las entregas a esa persona, activo o ubicación con los filtros del panel: consumible, cantidad, fecha y si es retornable, está pendiente o se devolvió. |
+| **Base de conocimiento** | El índice de artículos de la lista que estás viendo: título, carpeta, estado, autor, fechas, tiempo de lectura y cantidad de vínculos. |
 
 El gestor de secretos tiene su propia exportación de los ítems de una bóveda, que funciona de otra forma:
 mira [Bóvedas y miembros](/help/secret-manager-vaults-members).
+
+Algunos archivos dejan afuera lo que no podías ver en pantalla:
+
+- **Base de conocimiento**: el archivo contiene solo los *metadatos* de los artículos, nunca el texto.
+  Lista solo los artículos que puedes abrir: las carpetas restringidas para ti quedan afuera, y un
+  borrador aparece solo para su autor.
+- **Entregas y movimientos**: un destino de entrega que no puedes ver (por ejemplo una persona, si no
+  puedes ver usuarios) conserva solo su id, nunca su nombre.
 
 ## Qué entra en el archivo
 
@@ -35,6 +52,10 @@ las mismas columnas, con las filas más recientes primero, así un script que le
 funcionando.
 
 Para exportar una porción, filtra la lista primero y después exporta.
+
+En **Aplicaciones**, los filtros de categoría y criticidad acotan solo la página en pantalla, así que la
+exportación no puede seguirlos: el botón queda deshabilitado mientras alguno esté puesto. Quítalos para
+exportar; el archivo sigue la búsqueda.
 
 ## Límites
 
