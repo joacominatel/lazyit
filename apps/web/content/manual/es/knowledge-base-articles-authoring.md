@@ -62,6 +62,8 @@ debajo del título. Sobre la tabla:
   la A a la Z) o **Creados** (lo más reciente primero).
 - **Filtros** reduce la lista a los artículos **vinculados** a activos o aplicaciones: cualquiera, un
   tipo o algunos concretos. Los filtros activos se muestran como chips que puedes quitar uno a uno.
+- **Mostrar archivados** (solo administradores) cambia la lista por los artículos **archivados**;
+  consulta [Artículos archivados](#artículos-archivados).
 
 Cada elección queda en la dirección de la página, así que puedes guardar o compartir una lista
 filtrada.
@@ -221,9 +223,31 @@ imagen sobre el editor, o usar el botón **Insertar imagen** de la barra del edi
 - **Editar** abre el mismo formulario sobre el artículo existente. Guardar actualiza el cuerpo; no
   cambia si el artículo está publicado. Cada edición que cambia el título, el cuerpo o el extracto se
   registra en el historial del artículo: consulta [Versionado](/help/knowledge-base-versioning).
-- **Eliminar** quita el artículo de la Base de conocimiento. Es una **eliminación lógica**: la fila se
-  conserva, no se borra, de modo que puede restaurarse desde la base de datos si hace falta. Su slug
+- **Eliminar** quita el artículo de la Base de conocimiento. Es una **eliminación lógica**: el artículo
+  queda **archivado**, no se borra, y un administrador puede restaurarlo (ver más abajo). Su slug
   también queda libre para que un artículo nuevo reutilice el nombre.
+
+### Artículos archivados
+
+Los administradores pueden listar y restaurar los artículos archivados. Sobre la tabla de artículos,
+activa **Mostrar archivados**: la tabla pasa a listar los artículos archivados en lugar de los
+vigentes, y la columna de fecha muestra cuándo se archivó cada uno. Todas las demás elecciones siguen
+aplicándose (una carpeta, el control de estado, Orden y Filtros), así que puedes buscar un artículo
+archivado dentro de una carpeta. El interruptor no se muestra a nadie más, y el servidor rechaza la
+lista de archivados a quien no sea administrador.
+
+- **Qué ves.** Los artículos publicados archivados y **tus propios** borradores archivados. El
+  borrador archivado de otro autor nunca aparece, la misma regla que para los borradores vigentes.
+- **Restaurar.** Haz clic en **Restaurar** en la fila y confirma. El artículo vuelve a su carpeta con
+  la misma dirección, el mismo estado y el mismo historial, y vuelve a aparecer en la lista, en la
+  búsqueda y en los números de las carpetas. Restaurar requiere el permiso de eliminar artículos, que
+  los administradores tienen por defecto.
+- **Cuando la dirección está ocupada.** Archivar libera el slug del artículo, así que un artículo más
+  nuevo puede haberlo tomado mientras tanto. En ese caso la restauración falla con *Otro artículo usa
+  ahora la dirección …* y no cambia nada. Archiva primero el artículo que tiene la dirección y luego
+  restaura este.
+- Los artículos archivados no se incluyen en la exportación CSV, así que **Exportar** se oculta
+  mientras el interruptor está activo. La búsqueda cubre solo los artículos vigentes.
 
 ## Quién puede hacer qué
 
