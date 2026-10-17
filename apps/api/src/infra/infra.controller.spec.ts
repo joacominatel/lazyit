@@ -96,6 +96,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ state: 'PENDING' }),
         expect.objectContaining({ limit: 200, offset: 0 }),
+        undefined,
       );
     });
 
@@ -105,6 +106,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ limit: 50, offset: 0 }),
+        undefined,
       );
     });
 
@@ -140,6 +142,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
       expect(listNodePage).toHaveBeenCalledWith(
         expect.objectContaining({ q: 'web-01', source: 'AGENT' }),
         expect.objectContaining({ limit: 1 }),
+        undefined,
       );
     });
 
@@ -151,6 +154,7 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
         expect(listNodePage).toHaveBeenCalledWith(
           expect.objectContaining({ role }),
           expect.anything(),
+          undefined,
         );
       },
     );
@@ -339,11 +343,14 @@ describe('InfraController — legacy and page route contracts', () => {
       '</infra/nodes/page>; rel="successor-version"',
     );
     expect(res.headers.sunset).toBeUndefined();
-    expect(listNodes).toHaveBeenCalledWith({
-      kind: 'VM',
-      status: 'ONLINE',
-      state: 'CONFIRMED',
-    });
+    expect(listNodes).toHaveBeenCalledWith(
+      {
+        kind: 'VM',
+        status: 'ONLINE',
+        state: 'CONFIRMED',
+      },
+      undefined,
+    );
   });
 
   it.each(['source=AGENT', 'limit=1', 'q=web'])(
@@ -372,6 +379,7 @@ describe('InfraController — legacy and page route contracts', () => {
     expect(listNodePage).toHaveBeenCalledWith(
       expect.objectContaining({ source: 'AGENT', q: 'web' }),
       expect.objectContaining({ limit: 25, sort: 'label', dir: 'asc' }),
+      undefined,
     );
     expect(getNodeDetail).not.toHaveBeenCalled();
   });

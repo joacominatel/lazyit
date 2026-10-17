@@ -296,6 +296,85 @@ describe('GET /infra/nodes/export (ADR-0103)', () => {
     expect(pageArgs.where).toHaveProperty('OR');
   });
 
+  describe('owner emails need user:read (#1627)', () => {
+    type Caller = { role: Role } | { sa: string };
+    const call = (path: string, caller: Caller) => {
+      const req = request(app.getHttpServer()).get(path);
+      return 'role' in caller
+        ? req.set('X-Test-Role', caller.role)
+        : req.set('X-Test-Sa-Permissions', caller.sa);
+    };
+    type Row = { id: string; owners: unknown[] };
+    const ownersOf = (rows: Row[]) =>
+      rows.find((n) => n.id === NODES[0].id)!.owners;
+    const anaAndBruno = (withEmails: boolean): unknown[] => [
+      expect.objectContaining({
+        firstName: 'Ana',
+        lastName: 'Diaz',
+        email: withEmails ? 'ana@lazyit.local' : null,
+      }),
+      expect.objectContaining({
+        firstName: 'Bruno',
+        lastName: 'Ruiz',
+        email: withEmails ? 'bruno@lazyit.local' : null,
+      }),
+    ];
+    const callers: [string, Caller, boolean][] = [
+      ['VIEWER', { role: 'VIEWER' }, false],
+      ['MEMBER', { role: 'MEMBER' }, true],
+      ['ADMIN', { role: 'ADMIN' }, true],
+      ['an infra:read service account', { sa: 'infra:read' }, false],
+      [
+        'an infra:read + user:read service account',
+        { sa: 'infra:read,user:read' },
+        true,
+      ],
+    ];
+
+    it.each(callers)(
+      'the page and the legacy list give %s owner names, emails only with user:read',
+      async (_, caller, withEmails) => {
+        const page = await call('/infra/nodes/page?limit=200', caller);
+        const legacy = await call('/infra/nodes', caller);
+        expect(page.status).toBe(200);
+        expect(legacy.status).toBe(200);
+        const pageRows = (page.body as { items: Row[] }).items;
+        expect(ownersOf(pageRows)).toEqual(anaAndBruno(withEmails));
+        expect(ownersOf(legacy.body as Row[])).toEqual(anaAndBruno(withEmails));
+        if (!withEmails) {
+          expect(page.text).not.toContain('@lazyit.local');
+          expect(legacy.text).not.toContain('@lazyit.local');
+        }
+      },
+    );
+
+    it.each(callers)(
+      'q matches owner emails for %s only with user:read, on the page and the export',
+      async (_, caller, withEmails) => {
+        infraNode.findMany.mockClear();
+        infraNode.count.mockClear();
+        // The in-memory where cannot evaluate relation filters; only the emitted `where` is under test.
+        for (const path of [
+          '/infra/nodes/page?q=ana',
+          '/infra/nodes/export?q=ana',
+        ]) {
+          infraNode.findMany.mockResolvedValueOnce([]);
+          infraNode.count.mockResolvedValueOnce(0);
+          expect((await call(path, caller)).status).toBe(200);
+        }
+        const wheres = [
+          ...infraNode.findMany.mock.calls,
+          ...infraNode.count.mock.calls,
+        ].map(([args]) => JSON.stringify((args as { where?: unknown }).where));
+        expect(wheres).toHaveLength(4);
+        for (const where of wheres) {
+          expect(where).toContain('"firstName"');
+          expect(where.includes('"email"')).toBe(withEmails);
+        }
+      },
+    );
+  });
+
   it('rejects paging, sort and unknown keys, and malformed filters, before any audit row', async () => {
     for (const query of [
       'limit=10',
@@ -340,7 +419,7 @@ describe('GET /infra/nodes/export (ADR-0103)', () => {
   });
 
   it('nodeExportSource walked in batches of 2 sends every node once', async () => {
-    const source = app.get(InfraService).nodeExportSource({});
+    const source = app.get(InfraService).nodeExportSource({}, true);
     const batches: { id: string; createdAt: Date }[][] = [];
     for await (const batch of keysetBatches(source.fetchBatch, 2)) {
       batches.push(batch);
