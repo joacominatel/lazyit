@@ -19,6 +19,9 @@ const { activityFilterParams, getDashboardActivity } = await import("./dashboard
 const { auditLogFilterParams, getAuditLogs } = await import("./audit");
 const { getUserGrants, getUsers, userFilterParams } = await import("./users");
 const { deriveUserParams } = await import("@/app/(app)/users/_components/users-list-query");
+const { deriveApplicationParams } = await import(
+  "@/app/(app)/applications/_components/applications-list-query"
+);
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
 const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
 const { consumableFilterParams, getConsumables } = await import("./consumables");
@@ -194,12 +197,29 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
 });
 
 describe("phase 2: each list and its CSV export send identical filter params (ADR-0103)", () => {
-  test("applications", async () => {
-    const filters = { q: "jira", deleted: "only" as const };
+  test("applications, category and criticality included", async () => {
+    const filters = { q: "jira", deleted: "only" as const, categoryId: CUID, isCritical: false };
     await expectSameFilters(
       () => getApplications({ ...filters, ...window }),
       applicationFilterParams(filters),
     );
+  });
+
+  test("applications: the category and criticality filters reach the list request", async () => {
+    const state = { q: "", sort: "name", dir: "asc" as const, offset: 0, limit: 50 };
+    const derive = (category: string, criticality: string) =>
+      deriveApplicationParams({ ...state, filters: { category, criticality } });
+    const critical = derive(CUID, "CRITICAL");
+    const expected = [
+      ["categoryId", CUID],
+      ["isCritical", "true"],
+    ];
+    expect(await listFilters(() => getApplications(critical))).toEqual(expected);
+    expect(entries(applicationFilterParams(critical))).toEqual(expected);
+    expect(derive("ALL", "NORMAL").isCritical).toBe(false);
+    const all = derive("ALL", "ALL");
+    expect(all.categoryId).toBeUndefined();
+    expect(all.isCritical).toBeUndefined();
   });
 
   test("locations", async () => {

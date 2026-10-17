@@ -22,9 +22,9 @@ const crud = createCrudEndpoints<Application, CreateApplication, UpdateApplicati
 
 /**
  * Server-side params for the application list (#104). `q` matches name/vendor/url/description;
- * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). Category and
- * criticality are NOT server params — the Access screen applies them client-side over the page (it
- * already joins category + grants client-side). `limit`/`offset` thread the pagination window.
+ * `sort` is allowlisted to `name|vendor|isCritical|createdAt|updatedAt` (unknown → 400). `categoryId`
+ * is an exact category match and `isCritical` keeps critical (`true`) or non-critical (`false`)
+ * applications (#1631). `limit`/`offset` thread the pagination window.
  * `deleted: "only"` is the ADMIN-only archived view.
  */
 export interface ApplicationListParams {
@@ -34,6 +34,8 @@ export interface ApplicationListParams {
   limit?: number;
   offset?: number;
   deleted?: "only";
+  categoryId?: string;
+  isCritical?: boolean;
 }
 
 export const APPLICATION_EXPORT_PATH = `${BASE}/export`;
@@ -43,6 +45,8 @@ export function applicationFilterParams(params: ApplicationListParams = {}): URL
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
   if (params.deleted) qs.set("deleted", params.deleted);
+  if (params.categoryId) qs.set("categoryId", params.categoryId);
+  if (params.isCritical !== undefined) qs.set("isCritical", String(params.isCritical));
   return qs;
 }
 

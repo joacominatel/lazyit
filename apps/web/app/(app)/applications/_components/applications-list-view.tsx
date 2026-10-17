@@ -106,7 +106,7 @@ export function ApplicationsListView() {
 
   // `deriveApplicationParams` is the SAME URL→query mapping the server prefetch uses, so this hook's
   // key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
-  const listParams = deriveApplicationParams({ q, sort, dir, offset, limit });
+  const listParams = deriveApplicationParams({ q, sort, dir, offset, limit, filters });
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useApplicationList(listParams);
   const { data: categories } = useApplicationCategories();
@@ -152,16 +152,7 @@ export function ApplicationsListView() {
     return map;
   }, [activeGrants]);
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    return items.filter((application) => {
-      if (categoryFilter !== "ALL" && application.categoryId !== categoryFilter)
-        return false;
-      if (criticality === "CRITICAL" && !application.isCritical) return false;
-      if (criticality === "NORMAL" && application.isCritical) return false;
-      return true;
-    });
-  }, [page?.items, categoryFilter, criticality]);
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   const columns = useMemo<ResourceColumn[]>(
     () => [
@@ -356,11 +347,6 @@ export function ApplicationsListView() {
               total={page?.total}
               filename="applications"
               permission="application:read"
-              disabledReason={
-                categoryFilter !== "ALL" || criticality !== "ALL"
-                  ? t("list.exportClientFilters")
-                  : undefined
-              }
             />
             {canWrite ? (
               <Button asChild>

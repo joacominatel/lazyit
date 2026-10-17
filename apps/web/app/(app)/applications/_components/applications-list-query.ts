@@ -9,9 +9,8 @@ import type { DerivedListState } from "@/lib/hooks/list-params-url";
  */
 
 /**
- * URL filter defaults. `category` and `criticality` are filtered CLIENT-side over the page (the Access
- * API has no category/criticality params), so they never enter the server query key — only `q`/sort/
- * paging do.
+ * URL filter defaults. `category` ("ALL" | a category cuid) drives the server `?categoryId=`;
+ * `criticality` ("ALL" | "CRITICAL" | "NORMAL") drives `?isCritical=` (#1631).
  */
 export const APPLICATION_FILTER_DEFAULTS = {
   category: "ALL",
@@ -26,13 +25,25 @@ export const APPLICATION_LIST_OPTIONS = {
 };
 
 /**
- * Map the URL-derived list state to the server `ApplicationListParams`. Only the server-supported
- * params are keyed on (category/criticality are a client-side post-filter over the page), so every
- * filtered/paged/searched URL is prefetchable and matches the client's `useApplicationList(...)` key.
+ * Map the URL-derived list state to the server `ApplicationListParams`, so every filtered/paged/searched
+ * URL is prefetchable and matches the client's `useApplicationList(...)` key.
  */
 export function deriveApplicationParams(
-  state: Pick<DerivedListState, "q" | "sort" | "dir" | "offset" | "limit">,
+  state: Pick<DerivedListState, "q" | "sort" | "dir" | "offset" | "limit" | "filters">,
 ): ApplicationListParams {
-  const { q, sort, dir, offset, limit } = state;
-  return { q: q || undefined, sort, dir: sort ? dir : undefined, limit, offset };
+  const { q, sort, dir, offset, limit, filters } = state;
+  return {
+    q: q || undefined,
+    sort,
+    dir: sort ? dir : undefined,
+    limit,
+    offset,
+    categoryId: filters.category && filters.category !== "ALL" ? filters.category : undefined,
+    isCritical:
+      filters.criticality === "CRITICAL"
+        ? true
+        : filters.criticality === "NORMAL"
+          ? false
+          : undefined,
+  };
 }
