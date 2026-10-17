@@ -160,6 +160,19 @@ tree, no graph, no second palette. **Upgrade-safe:** no migration and no stored 
 document that predates the folder field is already dropped for a non-admin by the backstop, and every
 new wire field is nullish, so an older API simply renders without it.
 
+## Amendment — 2026-10-17: the rail counts the whole branch (#1651)
+
+The rail showed each folder's own `articleCount`, so a folder holding 12 articles with two subfolders of
+3 each read **12**. The CEO's report: the folder should show the total of itself and its subfolders.
+
+`GET /article-categories` now also returns **`totalArticleCount`**: the folder's own count plus every
+live descendant's, computed in memory from the folder rows the list already loads (no extra query, no
+N+1). It follows the same visibility as `articleCount` (ADR-0060 §4 folder access and the list's
+PUBLISHED-or-own-DRAFT rule): a descendant the caller cannot read adds 0, so a restricted subfolder never
+shows through its parent's number, and the total is `null` exactly where `articleCount` is.
+`articleCount` keeps its meaning (the folder's own articles) for the folder header and the cards.
+**Upgrade-safe:** computed, not stored; no migration; `.nullish()`, so an older API simply omits it.
+
 ## Alternatives considered
 
 - **Redesign the KB and the Manual separately** — rejected: they share the renderer; one Phase-1 PR lifts

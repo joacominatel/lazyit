@@ -51,3 +51,26 @@ export function expandFolderSubtrees(
   }
   return [...collected];
 }
+
+/**
+ * Each folder's own count plus every descendant's (#1651), in one pass over rows already loaded. A folder
+ * missing from `own` adds 0; an ancestor missing from `folders` stops the walk, as in expandFolderSubtrees.
+ */
+export function rollUpFolderCounts(
+  folders: readonly FolderTreeEdge[],
+  own: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const parentOf = new Map(folders.map((f) => [f.id, f.parentId]));
+  const totals = new Map<string, number>();
+  for (const folder of folders) {
+    const count = own.get(folder.id) ?? 0;
+    const visited = new Set<string>();
+    let cursor: string | null | undefined = folder.id;
+    while (cursor != null && parentOf.has(cursor) && !visited.has(cursor)) {
+      visited.add(cursor);
+      totals.set(cursor, (totals.get(cursor) ?? 0) + count);
+      cursor = parentOf.get(cursor);
+    }
+  }
+  return totals;
+}

@@ -157,7 +157,9 @@ ADMIN-only) performs the cascade delete described above and returns `{ deletedFo
 folder's access rules (body `{ accessRules: <rule list> | null }`). Both folder reads (`GET /article-categories`
 and `GET /article-categories/:id`) carry the derived **`hasAccessRules`** boolean for every
 `category:read` caller, plus `accessRules` itself only for a `settings:manage` one; the list read also
-carries the per-folder `articleCount` (`null` for a folder the caller cannot read).
+carries the per-folder `articleCount` (`null` for a folder the caller cannot read) and the rolled-up
+`totalArticleCount` (#1651: the folder plus every live descendant the caller can read; `null` where
+`articleCount` is).
 
 ## Implemented in #392 + #404 + #415; still deferred
 
