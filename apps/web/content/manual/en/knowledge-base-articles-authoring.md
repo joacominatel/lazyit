@@ -58,6 +58,8 @@ Above the table:
   **Created** (newest first).
 - **Filters** narrows to articles **linked** to assets or applications — any, a kind, or specific
   ones. Active filters show as chips you can remove one by one.
+- **Show archived** (administrators only) swaps the list for the **archived** articles — see
+  [Archived articles](#archived-articles).
 
 Every choice is kept in the page address, so you can bookmark or share a filtered list.
 
@@ -206,9 +208,28 @@ the **Insert image** button in the editor toolbar to pick one from disk.
 - **Edit** opens the same form on the existing article. Saving updates the body; it does not change
   whether the article is published. Every edit that changes the title, body or excerpt is captured
   in the article's history — see [Versioning](/help/knowledge-base-versioning).
-- **Delete** removes the article from the Knowledge Base. This is a **soft delete**: the row is
-  retained, not erased, so it can be restored from the database if needed. Its slug is also freed so
+- **Delete** removes the article from the Knowledge Base. This is a **soft delete**: the article is
+  **archived**, not erased, and an administrator can restore it (see below). Its slug is also freed so
   a new article can reuse the name.
+
+### Archived articles
+
+Administrators can list and restore archived articles. Above the articles table, turn on **Show
+archived**: the table then lists archived articles instead of live ones, and the date column shows
+when each one was archived. Every other choice still applies — a folder, the status control, Sort and
+Filters — so you can look for an archived article in one folder. The switch is not shown to anyone
+else, and the server refuses the archived list to anyone who is not an administrator.
+
+- **What you see.** Archived published articles, and **your own** archived drafts. Another author's
+  archived draft never appears, the same rule as for live drafts.
+- **Restore.** Click **Restore** on the row and confirm. The article goes back to its folder with the
+  same address, status and history, and appears in the live list, search and folder counts again.
+  Restoring needs the article-delete permission, which administrators hold by default.
+- **When the address is taken.** Archiving frees the article's slug, so a newer article may have
+  taken it in the meantime. Restore then fails with *Another article now uses the address …* and
+  nothing changes. Archive the article that holds the address first, then restore this one.
+- Archived articles are left out of the CSV export, so **Export** is hidden while the switch is on.
+  Search covers live articles only.
 
 ## Who can do what
 

@@ -8,7 +8,7 @@ subcategory: troubleshooting
 # Troubleshooting Access Automation
 
 When automation does not do what you expect, the run timeline almost always tells you why. Start
-there: open the application's **Workflows** tab, find the run (or look at the grant's chip —
+there: open the application's **Automation** tab, find the run (or look at the grant's chip —
 **Needs attention** means a run failed), and read its [timeline](/help/access-automation-testing-observability).
 
 > Whatever goes wrong with a workflow, **the access grant is safe.** A failed run never rolls back or

@@ -243,7 +243,7 @@
     "expand": "Expandir {name}",
     "collapse": "Contraer {name}",
     "subfoldersLabel": "Subcarpetas",
-    "articleCount": "{count, plural, one {# artículo} other {# artículos}}",
+    "branchArticleCount": "{count, plural, one {# artículo en esta carpeta y sus subcarpetas} other {# artículos en esta carpeta y sus subcarpetas}}",
     "emptyFolder": "Carpeta vacía",
     "actions": {
       "menuTitle": "Acciones de carpeta",
@@ -443,7 +443,8 @@
     "author": "Autor",
     "reading": "Lectura",
     "updated": "Actualizado",
-    "opened": "Abierto"
+    "opened": "Abierto",
+    "archived": "Archivado"
   },
   "home": {
     "stats": {
@@ -516,5 +517,18 @@
       "empty": "Todavía nada. Los artículos que abras aparecerán aquí."
     },
     "empty": "Todavía no hay artículos aquí."
+  },
+  "archived": {
+    "listTitle": "Artículos archivados",
+    "empty": "No hay artículos archivados aquí.",
+    "confirmTitle": "¿Restaurar este artículo?",
+    "confirmDescription": "“{title}” vuelve a su carpeta tal como estaba al archivarse, con la misma dirección, el mismo estado y el mismo historial.",
+    "cancel": "Cancelar",
+    "confirm": "Restaurar",
+    "restored": "Se restauró “{title}”",
+    "restoreError": "No se pudo restaurar el artículo",
+    "errors": {
+      "slugTaken": "Otro artículo usa ahora la dirección “{slug}”, así que este no puede volver con ella. Archiva primero ese artículo y luego restaura este."
+    }
   }
 }

@@ -30,6 +30,7 @@ const DEFAULT_FILTERS: ArticleFilters = {
   // #1539: the default order and no sub-folder widening are sent as nothing at all.
   sort: undefined,
   includeSubfolders: undefined,
+  deleted: undefined,
   limit: 50,
   offset: 0,
 };

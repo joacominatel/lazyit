@@ -19,8 +19,8 @@ capability (the same people who can grant access).
 ## How to request access
 
 1. Open the application from **Applications** and go to its detail page.
-2. In the **Active access** panel, click **Request access**. (If you already have access, or already
-   have a request waiting for a decision, the button is replaced by a short status instead.)
+2. At the top of the page, click **Request access**. (If you already have access, or already have a
+   request waiting for a decision, the button is replaced by *You have access* or *Access requested*.)
 3. Optionally add:
    - an **access level** — the kind of access you need, if the application distinguishes them; and
    - a **justification** — a short note so the approver understands why you need it.
@@ -54,6 +54,11 @@ Reviewing the queue needs the access-requests read permission; approving or deny
 permission as granting access. See [Roles & permissions](/help/permissions).
 
 **Export CSV** above the queue downloads every pending request — see [Exporting data](/help/notifications-activity-data-export).
+
+Each application's page also has a **Requests** tab with that application's requests only: **Pending**
+first, then **Approved** and **Denied**, each showing who decided and when (and the reason, for a
+denial). Pending ones can be approved or denied right there, and its **Export CSV** downloads the
+requests in the selected status.
 
 ## Tracking your requests
 

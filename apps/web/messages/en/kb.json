@@ -243,7 +243,7 @@
     "expand": "Expand {name}",
     "collapse": "Collapse {name}",
     "subfoldersLabel": "Sub-folders",
-    "articleCount": "{count, plural, one {# article} other {# articles}}",
+    "branchArticleCount": "{count, plural, one {# article in this folder and its subfolders} other {# articles in this folder and its subfolders}}",
     "emptyFolder": "Empty folder",
     "actions": {
       "menuTitle": "Folder actions",
@@ -443,7 +443,8 @@
     "author": "Author",
     "reading": "Reading",
     "updated": "Updated",
-    "opened": "Opened"
+    "opened": "Opened",
+    "archived": "Archived"
   },
   "home": {
     "stats": {
@@ -516,5 +517,18 @@
       "empty": "Nothing yet. Articles you open appear here."
     },
     "empty": "No articles here yet."
+  },
+  "archived": {
+    "listTitle": "Archived articles",
+    "empty": "No archived articles here.",
+    "confirmTitle": "Restore this article?",
+    "confirmDescription": "“{title}” goes back to its folder as it was when it was archived, with the same address, status and history.",
+    "cancel": "Cancel",
+    "confirm": "Restore",
+    "restored": "Restored “{title}”",
+    "restoreError": "Couldn't restore the article",
+    "errors": {
+      "slugTaken": "Another article now uses the address “{slug}”, so this one can't come back under it. Archive that article first, then restore this one."
+    }
   }
 }

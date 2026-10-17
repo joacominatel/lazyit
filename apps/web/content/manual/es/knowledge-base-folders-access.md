@@ -23,10 +23,12 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
   tarjetas de la página de inicio, la página de la carpeta) y para todos. Es solo una ayuda visual; dos
   carpetas pueden compartir color.
 - **Cada carpeta muestra cuántos artículos contiene** — un pequeño número a la derecha de la fila de
-  la carpeta. Cuenta solo los artículos que **realmente puedes ver** (los publicados, más tus propios
-  borradores), así que nunca revela más de lo que mostraría la lista de la carpeta. Una **carpeta
-  restringida que no puedes leer no muestra número**, y las carpetas en un servidor más antiguo
-  simplemente no muestran ninguno hasta que se actualice.
+  la carpeta. Cuenta la carpeta **y todas las subcarpetas que hay dentro**: una carpeta con 12
+  artículos y dos subcarpetas de 3 artículos cada una muestra **18**. Cuenta solo los artículos que
+  **realmente puedes ver** (los publicados, más tus propios borradores), así que nunca revela más de lo
+  que mostraría la lista de la carpeta, y una subcarpeta que no puedes leer no suma nada al número de
+  su carpeta padre. Una **carpeta restringida que no puedes leer no muestra número**. En un servidor
+  más antiguo el número cubre solo los artículos propios de la carpeta, hasta que se actualice.
 - **Una carpeta restringida muestra un candado** en su fila — consulta
   [Restringir una carpeta](#restringir-una-carpeta). Todos ven el candado, no solo los administradores.
 - **Crea una carpeta de primer nivel** con el **+** junto al título **Carpetas** de la barra lateral, o
@@ -76,7 +78,9 @@ encabezado reúne el cuadro de color, el nombre y la descripción de la carpeta,
   los administradores ven las reglas en palabras, como *Solo Administradores*, *Solo 3 personas* o
   *Solo quienes tienen acceso a Finanzas*; el resto ve **Restringido**. Una carpeta restringida por una
   carpeta padre dice **Restringida · por** esa carpeta.
-- **Artículos** — el número de artículos propios de la carpeta (el mismo que en la barra lateral).
+- **Artículos** — los artículos guardados directamente en esta carpeta, sin sus subcarpetas. El
+  número de la barra lateral incluye las subcarpetas, así que los dos difieren cuando una subcarpeta
+  tiene artículos.
 - **Subcarpetas** — cuántas carpetas hay directamente dentro.
 - **Último cambio** — cuándo se actualizó por última vez un artículo de la carpeta.
 
