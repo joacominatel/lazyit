@@ -24,7 +24,7 @@ or feed to a script. Look for the **Export CSV** button at the top of the list.
 | **Purchases** | One row per purchase: reference, supplier, status, receipt state, dates, invoice numbers, units ordered, received and pending, total and currency. |
 | **Purchases → Pending units** | One row per line still waiting for units: purchase, supplier, dates, kind, model or description, and units ordered, received, cancelled and pending. |
 | **Purchases → Suppliers** | One row per supplier: name, tax ID, website, sales and support contacts, and notes. |
-| **Applications** | One row per application: name, vendor, URL, criticality, seats purchased and used, cost per seat, renewal date and notes. |
+| **Applications** | One row per application: name, vendor, URL, criticality, seats purchased and used, cost per seat, renewal date and notes. It follows the search and the category and criticality filters. |
 | **Access requests** | The pending requests in the review queue: application, requester, access level, justification, and when it was asked. |
 | **Locations** | One row per location: name, type, parent, address, floor, description and notes. |
 | **Topology → Table** (servers) | One row per node matching the filters: label, kind, status, state (confirmed or pending), source, IP address, linked asset and its owners, chassis, agent version and last report. |
@@ -50,10 +50,6 @@ columns you chose to show and the order you sorted by. Each list always writes t
 rows first, so a script reading the file keeps working.
 
 To export a slice, filter the list first, then export.
-
-On **Applications**, the category and criticality filters narrow only the page on screen, so the export
-cannot follow them: the button is disabled while either is set. Clear them to export; the file follows
-the search.
 
 ## Limits
 

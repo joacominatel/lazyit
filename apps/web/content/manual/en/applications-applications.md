@@ -61,9 +61,8 @@ access** — how many people currently hold a live grant on that application —
 licensing, a **License** cell (used / purchased, with an over-allocation warning and the next
 renewal date), so you can see at a glance which systems are in active use.
 
-**Export CSV** downloads every application matching the current search. The category and criticality
-filters narrow only the page on screen, so the button is disabled while either is set; clear them to
-export. See [Exporting data](/help/notifications-activity-data-export).
+**Export CSV** downloads every application matching the current search and the category and
+criticality filters — see [Exporting data](/help/notifications-activity-data-export).
 
 ## License & seats
 

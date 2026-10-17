@@ -24,7 +24,7 @@ de cálculo, pasar a finanzas o procesar con un script. Busca el botón **Export
 | **Compras** | Una fila por compra: referencia, proveedor, estado, estado de recepción, fechas, números de factura, unidades pedidas, recibidas y pendientes, total y moneda. |
 | **Compras → Unidades pendientes** | Una fila por línea que todavía espera unidades: compra, proveedor, fechas, tipo, modelo o descripción, y unidades pedidas, recibidas, canceladas y pendientes. |
 | **Compras → Proveedores** | Una fila por proveedor: nombre, identificación fiscal, sitio web, contactos de ventas y de soporte, y notas. |
-| **Aplicaciones** | Una fila por aplicación: nombre, fabricante, URL, criticidad, asientos comprados y usados, costo por asiento, fecha de renovación y notas. |
+| **Aplicaciones** | Una fila por aplicación: nombre, fabricante, URL, criticidad, asientos comprados y usados, costo por asiento, fecha de renovación y notas. Sigue la búsqueda y los filtros de categoría y criticidad. |
 | **Solicitudes de acceso** | Las solicitudes pendientes de la cola de revisión: aplicación, solicitante, nivel de acceso, justificación y cuándo se pidió. |
 | **Ubicaciones** | Una fila por ubicación: nombre, tipo, ubicación superior, dirección, piso, descripción y notas. |
 | **Topología → Tabla** (servidores) | Una fila por nodo que coincide con los filtros: etiqueta, tipo, estado, ciclo (confirmado o pendiente), origen, dirección IP, activo vinculado y sus responsables, chasis, versión del agente y último reporte. |
@@ -52,10 +52,6 @@ las mismas columnas, con las filas más recientes primero, así un script que le
 funcionando.
 
 Para exportar una porción, filtra la lista primero y después exporta.
-
-En **Aplicaciones**, los filtros de categoría y criticidad acotan solo la página en pantalla, así que la
-exportación no puede seguirlos: el botón queda deshabilitado mientras alguno esté puesto. Quítalos para
-exportar; el archivo sigue la búsqueda.
 
 ## Límites
 

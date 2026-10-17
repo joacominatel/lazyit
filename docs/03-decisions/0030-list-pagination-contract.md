@@ -208,6 +208,16 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   dashboard deep-links + bookmarks depend on these): `assets` `status`/`category`/`location`/`ownership`;
   `applications` `category`/`criticality`; `consumables` `lowStock`(=`"true"`)/`category`; `users`
   `status`; `locations` `type`; `kb` `status`/`categoryId`.
+
+  > [!note] Correction (2026-10-16, #1631)
+  > None of the four filters this bullet calls client-side still is. Each is now a server param, so
+  > `total`, paging and the CSV export ([[0103-data-export-streaming-path]]) follow it:
+  > - `assets` ownership → `ownership` (#824);
+  > - `consumables` category → `category` (#824);
+  > - `locations` type → `type` (#824);
+  > - `users` active/inactive → `isActive` (API #1375, web #1617).
+  >
+  > The URL param names above are unchanged.
 - **Pagination + RBAC + recovery.** Every list renders the shared `Pagination` footer over `total`;
   the "New X" button, per-row Edit/Delete and the consumables ±1 quick-adjust are gated on
   `useCanWrite()` (ADR-0040) so a VIEWER never sees a control that would 403. Active filters show as

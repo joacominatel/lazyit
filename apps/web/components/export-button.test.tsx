@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import exportMessages from "@/messages/en/export.json";
 import { ExportButtonView } from "./export-button";
 
-function render(total: number | undefined, disabledReason?: string): string {
+function render(total: number | undefined): string {
   return renderToStaticMarkup(
     <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ export: exportMessages }}>
       <ExportButtonView
@@ -12,7 +12,6 @@ function render(total: number | undefined, disabledReason?: string): string {
         params={new URLSearchParams()}
         total={total}
         filename="assets"
-        disabledReason={disabledReason}
       />
     </NextIntlClientProvider>,
   );
@@ -23,12 +22,6 @@ function button(html: string): string {
 }
 
 describe("ExportButton", () => {
-  test("is disabled with its reason when the screen narrows rows the export cannot", () => {
-    const html = render(3, "Clear the filters to export");
-    expect(button(html)).toContain('disabled=""');
-    expect(button(html)).toContain('title="Clear the filters to export"');
-  });
-
   test("is disabled while the list total loads and when nothing matches", () => {
     expect(button(render(undefined))).toContain('disabled=""');
     expect(button(render(0))).toContain('disabled=""');
