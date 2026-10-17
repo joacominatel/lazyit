@@ -7,14 +7,14 @@ subcategory: building-a-workflow
 
 # Construir un flujo de trabajo
 
-Los flujos de trabajo se construyen desde la pestaña **Flujos de trabajo** de una aplicación. Un flujo
+Los flujos de trabajo se construyen desde la pestaña **Automatización** de una aplicación. Un flujo
 necesita dos cosas: una **conexión** que indica *cómo* llega lazyit al sistema externo, y una
 **secuencia de pasos** que indica *qué* hacer cuando se activa el disparador.
 
 ## 1. Añade una conexión
 
 Una conexión es la configuración reutilizable de transporte y credencial de un sistema externo. Abre
-la pestaña Flujos de trabajo, elige **Añadir conexión** y selecciona un **tipo**:
+la pestaña Automatización, elige **Añadir conexión** y selecciona un **tipo**:
 
 - **API / HTTP** — llamar a cualquier API HTTP/JSON (por ejemplo, «crear un usuario en Jira»).
 - **Webhook** — enviar un POST firmado a una URL de webhook (por ejemplo, a tu propia plataforma de

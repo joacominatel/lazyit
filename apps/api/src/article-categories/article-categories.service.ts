@@ -24,6 +24,7 @@ import {
 import {
   expandFolderSubtrees,
   FOLDER_TREE_LOCK,
+  rollUpFolderCounts,
   type FolderTreeEdge,
 } from './folder-tree';
 
@@ -103,6 +104,9 @@ export class ArticleCategoriesService {
    * them. The nested relation count is filtered explicitly (`deletedAt: null`) because the soft-delete
    * read extension only scopes TOP-LEVEL queries, not nested `_count` relation filters.
    *
+   * `totalArticleCount` (#1651) sums that count over the folder and its live descendants, and is `null`
+   * exactly where `articleCount` is.
+   *
    * Each row also carries the derived `hasAccessRules` flag (#1299, ADR-0060 §3 carve-out): whether the
    * folder CARRIES a restriction — never who it lets in, nor what the rule is. It is readable by ANY
    * `category:read` caller (VIEWER included) so the web can warn that moving an article into or out of
@@ -133,13 +137,28 @@ export class ArticleCategoriesService {
         },
       },
     });
+    // A folder the caller can't read adds nothing to its ancestors' totals (#1651), so a restricted
+    // subfolder never shows through its parent's number.
+    const totals = rollUpFolderCounts(
+      rows,
+      new Map(
+        rows.map((row) => [
+          row.id,
+          folderVisible(visible, row.id) ? row._count.articles : 0,
+        ]),
+      ),
+    );
     // Flatten Prisma's nested `_count.articles` into the flat `articleCount` the DTO exposes, and null
     // it out for a folder the caller can't read (don't leak a hidden folder's article count — §4).
-    return rows.map(({ _count, ...row }) => ({
-      ...row,
-      articleCount: folderVisible(visible, row.id) ? _count.articles : null,
-      hasAccessRules: restricted.has(row.id),
-    }));
+    return rows.map(({ _count, ...row }) => {
+      const readable = folderVisible(visible, row.id);
+      return {
+        ...row,
+        articleCount: readable ? _count.articles : null,
+        totalArticleCount: readable ? (totals.get(row.id) ?? 0) : null,
+        hasAccessRules: restricted.has(row.id),
+      };
+    });
   }
 
   /**

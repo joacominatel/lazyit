@@ -19,8 +19,8 @@ es una capacidad de administrador (las mismas personas que pueden otorgar acceso
 ## Cómo solicitar acceso
 
 1. Abrí la aplicación desde **Aplicaciones** y entrá a su página de detalle.
-2. En el panel **Acceso activo**, hacé clic en **Solicitar acceso**. (Si ya tenés acceso, o ya tenés
-   una solicitud esperando una decisión, el botón se reemplaza por un estado breve.)
+2. Arriba de la página, hacé clic en **Solicitar acceso**. (Si ya tenés acceso, o ya tenés una
+   solicitud esperando una decisión, el botón se reemplaza por *Tienes acceso* o *Acceso solicitado*.)
 3. Opcionalmente agregá:
    - un **nivel de acceso** —el tipo de acceso que necesitás, si la aplicación los distingue—; y
    - una **justificación** —una nota breve para que quien apruebe entienda por qué lo necesitás—.
@@ -56,6 +56,11 @@ Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar
 mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
 
 **Exportar CSV**, sobre la cola, descarga todas las solicitudes pendientes — mira [Exportar datos](/help/notifications-activity-data-export).
+
+La página de cada aplicación también tiene una pestaña **Solicitudes** con solo las solicitudes de esa
+aplicación: primero las **Pendientes**, después las **Aprobadas** y **Denegadas**, cada una con quién
+decidió y cuándo (y el motivo, si se denegó). Las pendientes se pueden aprobar o denegar ahí mismo, y
+su **Exportar CSV** descarga las solicitudes del estado seleccionado.
 
 ## Seguir tus solicitudes
 

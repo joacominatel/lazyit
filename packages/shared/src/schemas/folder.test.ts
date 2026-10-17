@@ -190,3 +190,31 @@ describe("FolderSchema.hasAccessRules — the derived restriction flag (#1299)",
     }
   });
 });
+
+describe("FolderSchema.totalArticleCount — the rolled-up folder count (#1651)", () => {
+  const base = {
+    id: "clw0000000000000000000000",
+    name: "Runbooks",
+    description: null,
+    icon: null,
+    order: null,
+    parentId: null,
+    createdAt: "2026-09-10T00:00:00.000Z",
+    updatedAt: "2026-09-10T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("accepts a count alongside the folder's own articleCount", () => {
+    const parsed = FolderSchema.parse({ ...base, articleCount: 12, totalArticleCount: 18 });
+    expect(parsed.totalArticleCount).toBe(18);
+  });
+
+  test("accepts null for a folder the caller cannot read, and absence from an older server", () => {
+    expect(FolderSchema.parse({ ...base, totalArticleCount: null }).totalArticleCount).toBeNull();
+    expect(FolderSchema.parse(base).totalArticleCount).toBeUndefined();
+  });
+
+  test("rejects a negative count", () => {
+    expect(FolderSchema.safeParse({ ...base, totalArticleCount: -1 }).success).toBe(false);
+  });
+});

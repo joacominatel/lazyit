@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, INestApplication } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  INestApplication,
+} from '@nestjs/common';
 import request from 'supertest';
 import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
@@ -89,7 +93,7 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
  *
  * `findAll` positional args:
  * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, offset,
- * page, principal, sort, includeSubfolders).
+ * page, principal, sort, includeSubfolders, deleted).
  */
 describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
@@ -423,4 +427,64 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       expect(findPage).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('ArticlesController GET /articles?deleted= (the archived slice, #1647)', () => {
+  const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
+  const controller = new ArticlesController(
+    { findPage } as unknown as ArticlesService,
+    {} as unknown as ArticleImportService,
+    {} as unknown as ExportService,
+  );
+  const ADMIN = { id: 'a1', role: 'ADMIN' } as never;
+  const MEMBER = { id: 'm1', role: 'MEMBER' } as never;
+  const listWith = (user: unknown, deleted?: string) =>
+    controller.findAll(
+      user as never,
+      undefined, // categoryId
+      undefined, // authorId
+      undefined, // status
+      undefined, // q
+      undefined, // linked
+      undefined, // linkedTo
+      undefined, // assetId
+      undefined, // applicationId
+      undefined, // limit
+      undefined, // offset
+      undefined, // page
+      undefined, // principal
+      undefined, // sort
+      undefined, // includeSubfolders
+      deleted,
+    );
+
+  beforeEach(() => findPage.mockClear());
+
+  it('lets an ADMIN list the archived slice', async () => {
+    await listWith(ADMIN, 'only');
+    expect(findPage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ deleted: 'only' }),
+      ADMIN,
+      undefined,
+    );
+  });
+
+  it('refuses the archived slice to a non-admin (403) without reaching the service', () => {
+    expect(() => listWith(MEMBER, 'only')).toThrow(ForbiddenException);
+    expect(() => listWith(undefined, 'only')).toThrow(ForbiddenException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('defaults to the live slice for everyone, and accepts deleted=active explicitly', async () => {
+    await listWith(MEMBER);
+    await listWith(MEMBER, 'active');
+    for (const call of findPage.mock.calls as Array<[unknown, unknown]>) {
+      expect(call[1]).toEqual(expect.objectContaining({ deleted: 'active' }));
+    }
+  });
+
+  it('rejects an unknown slice with 400', () => {
+    expect(() => listWith(ADMIN, 'all')).toThrow(BadRequestException);
+  });
 });

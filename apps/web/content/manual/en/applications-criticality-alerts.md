@@ -16,7 +16,8 @@ two things: how the app is **shown**, and what happens **when access is granted*
 
 When you create or edit an application, turn on **Critical**. lazyit then:
 
-- Shows a **Critical** badge on the application's row and detail page.
+- Shows a **Critical** badge on the application's row and page. The page's side column also notes the
+  rule below for the AI assistant.
 - Lets you **filter** the Access list to *critical only* (or *non-critical*), so you can review
   your most sensitive systems on their own.
 - Surfaces a count of active access on critical applications for at-a-glance review.
@@ -41,6 +42,14 @@ notice. Each grant raises its own alert, so re-granting access later is flagged 
 
 > The notification bell and how to read and clear alerts are covered under **Notifications &
 > Activity** in this Help. Criticality alerts are one of the curated events that land there.
+
+## Critical applications and the AI assistant
+
+Every change the AI assistant makes on a critical application — granting or revoking access, or
+touching its automation — happens only in the lazyit chat, after you confirm your password. Claude
+Code and other MCP clients are refused. People working in lazyit itself are not affected: they grant,
+revoke and manage workflows on a critical application exactly as on any other. See
+[Approvals](/help/ai-assistant-approvals).
 
 ## What criticality does not do
 

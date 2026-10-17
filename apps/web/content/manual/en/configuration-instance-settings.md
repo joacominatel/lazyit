@@ -50,7 +50,7 @@ same pages as cards, in the same groups.
   switch that lets external AI agents such as Claude Code connect over MCP. Everything starts off. See
   [AI assistant — setup](/help/ai-assistant-setup).
 - **Tasks** — the cross-application manual-task inbox for provisioning workflows. Per-application
-  automation is configured on each application's own Workflows tab.
+  automation is configured on each application's own Automation tab.
 
 **System**
 

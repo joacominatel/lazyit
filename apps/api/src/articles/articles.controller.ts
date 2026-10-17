@@ -59,6 +59,7 @@ import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
+import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -98,7 +99,7 @@ export class ArticlesController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted; drafts are visible only to their author.',
+      'List articles (paginated; lean — no markdown content, excerpt kept). Excludes soft-deleted by default; deleted=only lists archived articles (ADMIN). Drafts are visible only to their author.',
   })
   @ApiQuery({
     name: 'categoryId',
@@ -181,6 +182,13 @@ export class ArticlesController {
     type: Number,
     description: '1-based page number (alternative to offset).',
   })
+  @ApiQuery({
+    name: 'deleted',
+    required: false,
+    enum: ['active', 'only'],
+    description:
+      'Soft-delete slice. active (default) = live articles; only = archived (soft-deleted) articles — ADMIN only (403 otherwise). Every other filter, the folder access and the draft rule still apply. (ADR-0041)',
+  })
   @ApiOkResponse({ type: ArticleListPageDto })
   findAll(
     @CurrentUser() user: User | undefined,
@@ -203,7 +211,10 @@ export class ArticlesController {
     // #1539: the browse order and the subfolder widening — single-value allowlists, 400 on unknown.
     @Query('sort') sort?: string,
     @Query('includeSubfolders') includeSubfolders?: string,
+    @Query('deleted') deleted?: string,
   ) {
+    const pageQuery = parsePageQuery({ limit, offset, page, deleted });
+    assertCanListDeleted(pageQuery.deleted, user);
     return this.articles.findPage(
       {
         ...this.parseListFilters({
@@ -223,7 +234,7 @@ export class ArticlesController {
           'sort',
         ),
       },
-      parsePageQuery({ limit, offset, page }),
+      pageQuery,
       user,
       principal,
     );
