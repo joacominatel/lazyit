@@ -176,6 +176,8 @@ model User {
   // losing the decider never blocks deleting them, the request record survives).
   accessRequestsMade    AccessRequest[] @relation("AccessRequestRequester")
   accessRequestsDecided AccessRequest[] @relation("AccessRequestDecidedBy")
+  // Requests this user filed on someone else's behalf (#1645). SetNull, like the decider.
+  accessRequestsFiled   AccessRequest[] @relation("AccessRequestFiledBy")
 
   // Asset events this user caused (AssetHistory.performedById). SetNull keeps the log on deletion.
   assetHistoryActed AssetHistory[] @relation("AssetHistoryActor")
@@ -1741,10 +1743,14 @@ enum AccessRequestStatus {
 /// same pattern as AssetAssignment's active-key — ADR-0019/0041). See docs/02-domain/entities/access-request.md
 model AccessRequest {
   id            String              @id @default(cuid())
-  // Who is asking. @db.Uuid to match User.id (uuid). Restrict: a person's request history is preserved
-  // (soft delete bypasses it). NEVER set from the body — the requester is the authenticated caller.
+  // Who the access is for. @db.Uuid to match User.id (uuid). Restrict: a person's request history is
+  // preserved (soft delete bypasses it). The caller, unless an approver files on their behalf (#1645).
   requesterId   String              @db.Uuid
   requester     User                @relation("AccessRequestRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  // Who filed it on the requester's behalf (#1645). null = the requester filed it, as every row before
+  // #1645 did. SetNull: losing the filer never blocks deleting them.
+  filedById     String?             @db.Uuid
+  filedBy       User?               @relation("AccessRequestFiledBy", fields: [filedById], references: [id], onDelete: SetNull)
   // The application access is requested on. Restrict (soft delete bypasses).
   applicationId String
   application   Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)

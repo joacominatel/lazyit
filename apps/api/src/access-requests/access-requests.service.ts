@@ -55,13 +55,22 @@ export class AccessRequestsService {
   ) {}
 
   /**
-   * Raise a request (`POST /access-requests`). `requesterId` is the authenticated human (never the body).
+   * Raise a request (`POST /access-requests`). The requester is the caller, or `data.requesterId` when an
+   * approver files on that person's behalf (#1645; the controller holds the permission check).
    * The application must be live (→ 400). At most one OPEN (PENDING) request per (requester, application):
    * a second is 409 — checked up-front for a clean message and enforced by the partial unique index for
    * the race (mapped to the same 409). Fires the `access_request.created` bell nudge AFTER commit.
    */
-  async create(requesterId: string, data: CreateAccessRequest) {
+  async create(callerId: string, data: CreateAccessRequest) {
+    const requesterId = data.requesterId ?? callerId;
+    const filedById = requesterId === callerId ? null : callerId;
     await this.assertApplicationUsable(data.applicationId);
+    if (filedById) {
+      await this.assertRequesterUsable(requesterId);
+    }
+    const duplicateMessage = filedById
+      ? 'This person already has a pending access request for this application.'
+      : 'You already have a pending access request for this application.';
 
     const existing = await this.prisma.accessRequest.findFirst({
       where: {
@@ -72,9 +81,7 @@ export class AccessRequestsService {
       select: { id: true },
     });
     if (existing) {
-      throw new ConflictException(
-        'You already have a pending access request for this application.',
-      );
+      throw new ConflictException(duplicateMessage);
     }
 
     let request;
@@ -82,6 +89,7 @@ export class AccessRequestsService {
       request = await this.prisma.accessRequest.create({
         data: {
           requesterId,
+          filedById,
           applicationId: data.applicationId,
           ...(data.accessLevel !== undefined
             ? { accessLevel: data.accessLevel }
@@ -95,9 +103,7 @@ export class AccessRequestsService {
       // The partial unique index (WHERE status = 'PENDING') is the race backstop: two concurrent creates
       // for the same (requester, application) → the loser hits P2002 → the same friendly 409.
       if (this.isPendingUniqueViolation(err)) {
-        throw new ConflictException(
-          'You already have a pending access request for this application.',
-        );
+        throw new ConflictException(duplicateMessage);
       }
       throw err;
     }
@@ -293,6 +299,22 @@ export class AccessRequestsService {
     }
   }
 
+  // The grant an approval creates refuses a directory-only person, so a request for one could never be approved.
+  private async assertRequesterUsable(requesterId: string): Promise<void> {
+    const person = await this.prisma.user.findFirst({
+      where: { id: requesterId },
+      select: { isActive: true, directoryOnly: true },
+    });
+    if (!person || !person.isActive || person.directoryOnly) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'ACCESS_REQUEST_TARGET_UNAVAILABLE',
+        message:
+          'You can only file a request for an active person who has an account.',
+      });
+    }
+  }
+
   /** True when the error is the partial-unique (one-PENDING-per-pair) violation. */
   private isPendingUniqueViolation(err: unknown): boolean {
     if (
@@ -315,19 +337,23 @@ export class AccessRequestsService {
   private async emitCreatedNotification(request: {
     id: string;
     requesterId: string;
+    filedById: string | null;
     applicationId: string;
     accessLevel: string | null;
   }): Promise<void> {
     try {
-      const [application, user] = await Promise.all([
+      const nameOf = (id: string) =>
+        this.prisma.user.findUnique({
+          where: { id },
+          select: { firstName: true, lastName: true },
+        });
+      const [application, user, filer] = await Promise.all([
         this.prisma.application.findUnique({
           where: { id: request.applicationId },
           select: { name: true },
         }),
-        this.prisma.user.findUnique({
-          where: { id: request.requesterId },
-          select: { firstName: true, lastName: true },
-        }),
+        nameOf(request.requesterId),
+        request.filedById ? nameOf(request.filedById) : null,
       ]);
       if (!application) {
         return; // app vanished post-commit — nothing meaningful to nudge about.
@@ -335,12 +361,17 @@ export class AccessRequestsService {
       const userName = user
         ? `${user.firstName} ${user.lastName}`.trim()
         : 'A user';
+      const filerName = filer
+        ? `${filer.firstName} ${filer.lastName}`.trim()
+        : 'A user';
 
       await this.notifications.emit({
         type: 'access_request.created',
         dedupeKey: `access_request.created:${request.id}`,
         severity: 'info',
-        title: `${userName} requested access to ${application.name}`,
+        title: request.filedById
+          ? `${filerName} requested access to ${application.name} on behalf of ${userName}`
+          : `${userName} requested access to ${application.name}`,
         summary: request.accessLevel
           ? `Requested level: ${request.accessLevel}.`
           : 'Access requested.',
@@ -350,6 +381,7 @@ export class AccessRequestsService {
         metadata: {
           applicationName: application.name,
           accessRequestId: request.id,
+          ...(request.filedById ? { filedById: request.filedById } : {}),
           ...(request.accessLevel !== null
             ? { accessLevel: request.accessLevel }
             : {}),

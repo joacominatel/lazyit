@@ -18,8 +18,8 @@ import { optionalText } from "./primitives";
  * (raw SQL in the migration, the [[0019]]/[[0041]] pattern) rejects a second create with 409. A decided
  * request frees the pair so the user can request again later.
  *
- * ID note: `id` / `grantId` are `cuid` (AccessRequest, AccessGrant); `requesterId` / `decidedById`
- * reference User (`uuid`, @db.Uuid); `applicationId` references Application (`cuid`). See
+ * ID note: `id` / `grantId` are `cuid` (AccessRequest, AccessGrant); `requesterId` / `filedById` /
+ * `decidedById` reference User (`uuid`, @db.Uuid); `applicationId` references Application (`cuid`). See
  * docs/03-decisions/0005-id-strategy.md.
  */
 
@@ -36,6 +36,8 @@ export type AccessRequestStatus = z.infer<typeof AccessRequestStatusSchema>;
 export const AccessRequestSchema = z.object({
   id: z.cuid(),
   requesterId: z.uuid(),
+  // Who filed it on the requester's behalf (#1645); null = the requester filed it themselves.
+  filedById: z.uuid().nullable().optional(),
   applicationId: z.cuid(),
   // The access level the requester asked for — free-form, app-defined (e.g. "admin", "developer").
   // null when unspecified. On approval it becomes the created grant's `accessLevel` verbatim.
@@ -59,13 +61,14 @@ export type AccessRequest = z.infer<typeof AccessRequestSchema>;
 
 /**
  * Payload to raise a request (`POST /access-requests`). `applicationId` is required and must reference
- * a live application (the service enforces → 400). `requesterId` is NOT here — the requester is the
- * authenticated caller (a human; ADR-0085). `accessLevel` mirrors the grant's constraint (free-form,
+ * a live application (the service enforces → 400). `accessLevel` mirrors the grant's constraint (free-form,
  * 1–100 chars) so the approved grant inherits exactly what was asked for. A second PENDING request for
  * the same (requester, application) is rejected with 409.
  */
 export const CreateAccessRequestSchema = z.strictObject({
   applicationId: z.cuid(),
+  // On behalf of another person (#1645): 403 ACCESS_REQUEST_ON_BEHALF_FORBIDDEN without accessGrant:grant.
+  requesterId: z.uuid().optional(),
   accessLevel: z.string().trim().min(1).max(100).optional(),
   justification: optionalText(2000),
 });

@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-17
 ---
 
 # AccessRequest
@@ -26,7 +26,9 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 
 ## Relationships
 
-- **raised by** a [[user]] (`requesterId`, Restrict — the requester's history is preserved).
+- **for** a [[user]] (`requesterId`, Restrict — the requester's history is preserved).
+- **filed by** a [[user]] on the requester's behalf (`filedById`, SetNull; nullable — null means the
+  requester filed it themselves, which is every request before #1645).
 - **targets** one [[application]] (`applicationId`, Restrict).
 - **decided by** a [[user]] approver (`decidedById`, SetNull; nullable — a HUMAN, no service-account decider).
 - **produces** one [[access-grant]] when approved (`grantId`, `@unique`, SetNull — a 1:1).
@@ -41,6 +43,15 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 - **Approval is atomic:** the [[access-grant]] is created and the request flipped to `APPROVED` in **one
   transaction**, via `AccessGrantsService.createWithinApproval` — the grant inherits the request's
   `accessLevel`. The workflow engine fires AFTER the grant commits ([[0054-applications-workflow-engine]]).
+- **On behalf of someone else (#1645, CEO 2026-10-17):** `POST /access-requests` takes an optional
+  `requesterId`. Omitted or the caller's own id, nothing changes. Another person's id needs
+  `accessGrant:grant`, the permission that decides requests (otherwise **403**
+  `ACCESS_REQUEST_ON_BEHALF_FORBIDDEN`), and that person must be live, active and have an account (otherwise
+  **400** `ACCESS_REQUEST_TARGET_UNAVAILABLE`; a directory-only person is refused because the grant an
+  approval creates refuses them too). The caller is stored as `filedById`. The one-pending rule applies to
+  the person the request is for. Approval is unchanged. This is the help-desk case: someone asks by phone
+  or chat and an approver files the request for them. The MCP tool `access_request_create` stays
+  self-only.
 - **Who may act:** requesting is **self-service** (`accessRequest:create`, seeded to every role incl VIEWER);
   **deciding** reuses `accessGrant:grant` (no new verb); both approve/deny are **human-only**. Listing all
   requests needs `accessRequest:read` (ADMIN+MEMBER), but a requester always sees their **own** via
@@ -53,7 +64,9 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   still records it: `requesterId` and `decidedById` name the same person, and the grant is attributed
   to the approver.
 - **Notified on create:** a broadcast `access_request.created` bell nudge to the admins who can decide
-  ([[0056-in-app-notification-bell]]).
+  ([[0056-in-app-notification-bell]]). A request filed on someone's behalf reads "<filer> requested access
+  to <app> on behalf of <requester>" and carries `filedById` in its metadata. The requester is not told
+  at filing time; the filer is not sent the decision (they hold `accessGrant:grant` and see the queue).
 - **Notified on decision (#1071):** a TARGETED `access_request.decided` bell + email nudge to the
   **requester** on approve/deny (`recipientUserId = requesterId`), so it lands in their OWN bell even
   without `notification:read` — closing the earlier deferral where the requester had to poll their own
@@ -63,7 +76,8 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 - **Export (#1597):** `GET /access-requests/export?status=&applicationId=&requesterId=` streams every
   request the estate-wide list returns for the same filters as CSV, under the same `accessRequest:read`
   ([[0103-data-export-streaming-path]]). Columns: `Application, Requester, Requester email, Access level,
-  Justification, Status, Requested at, Decided by, Decided at, Denial reason, Grant ID, Request ID`. As in
+  Justification, Status, Filed by, Requested at, Decided by, Decided at, Denial reason, Grant ID, Request ID`
+  (`Filed by` is empty for a self-filed request, #1645). As in
   the [[access-grant]] export, names need `application:read` / `user:read`, otherwise the cell keeps the
   id the list returns, and the email column is present only with `user:read`. `GET /access-requests/mine`
   has no export. Every export writes a [[data-export-log]] row.

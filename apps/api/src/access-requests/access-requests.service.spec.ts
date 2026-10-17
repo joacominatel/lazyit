@@ -83,6 +83,8 @@ type EmitCall = [
     recipientUserId?: string | null;
     severity?: string;
     summary?: string | null;
+    title?: string;
+    metadata?: Record<string, unknown>;
   },
 ];
 type GrantCall = [Record<string, unknown>];
@@ -92,7 +94,7 @@ describe('AccessRequestsService', () => {
   let service: AccessRequestsService;
   let accessRequest: AccessRequestMock;
   let application: { findFirst: jest.Mock; findUnique: jest.Mock };
-  let user: { findUnique: jest.Mock };
+  let user: { findUnique: jest.Mock; findFirst: jest.Mock };
   let prisma: {
     $transaction: jest.Mock;
     accessRequest: AccessRequestMock;
@@ -110,7 +112,7 @@ describe('AccessRequestsService', () => {
       count: jest.fn(),
     };
     application = { findFirst: jest.fn(), findUnique: jest.fn() };
-    user = { findUnique: jest.fn() };
+    user = { findUnique: jest.fn(), findFirst: jest.fn() };
     prisma = {
       accessRequest,
       application,
@@ -235,6 +237,114 @@ describe('AccessRequestsService', () => {
       await expect(
         service.create(REQUESTER, { applicationId: APP_ID }),
       ).resolves.toMatchObject({ id: REQ_ID });
+    });
+  });
+
+  describe('create on behalf of another person (#1645)', () => {
+    const FILER = DECIDER;
+
+    function primeCreate(target: Record<string, unknown> | null) {
+      application.findFirst.mockResolvedValue({ id: APP_ID });
+      user.findFirst.mockResolvedValue(target);
+      accessRequest.findFirst.mockResolvedValue(null);
+      accessRequest.create.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ id: REQ_ID, accessLevel: null, ...data }),
+      );
+      application.findUnique.mockResolvedValue({ name: 'Jira' });
+      user.findUnique.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            where.id === FILER
+              ? { firstName: 'Hal', lastName: 'Desk' }
+              : { firstName: 'Ada', lastName: 'Lovelace' },
+          ),
+      );
+    }
+
+    it('files the request for the target and records the caller as filedById', async () => {
+      primeCreate({ isActive: true, directoryOnly: false });
+
+      const result = await service.create(FILER, {
+        applicationId: APP_ID,
+        requesterId: REQUESTER,
+      });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(REQUESTER);
+      expect(data.filedById).toBe(FILER);
+      expect(result).toMatchObject({
+        requesterId: REQUESTER,
+        filedById: FILER,
+      });
+      const emitted = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitted.title).toBe(
+        'Hal Desk requested access to Jira on behalf of Ada Lovelace',
+      );
+      expect(emitted.metadata).toMatchObject({ filedById: FILER });
+    });
+
+    it('treats the caller naming themselves as a self-service request', async () => {
+      primeCreate(null);
+
+      await service.create(REQUESTER, {
+        applicationId: APP_ID,
+        requesterId: REQUESTER,
+      });
+
+      const data = (accessRequest.create.mock.calls as WriteCall[])[0][0].data;
+      expect(data.requesterId).toBe(REQUESTER);
+      expect(data.filedById).toBeNull();
+      expect(user.findFirst).not.toHaveBeenCalled();
+      const emitted = (notifications.emit.mock.calls as EmitCall[])[0][0];
+      expect(emitted.title).toBe('Ada Lovelace requested access to Jira');
+      expect(emitted.metadata).not.toHaveProperty('filedById');
+    });
+
+    it.each([
+      ['offboarded or missing', null],
+      ['inactive', { isActive: false, directoryOnly: false }],
+      ['directory-only (no account)', { isActive: true, directoryOnly: true }],
+    ])('refuses a %s target with 400 and writes nothing', async (_, target) => {
+      primeCreate(target);
+
+      const err: unknown = await service
+        .create(FILER, { applicationId: APP_ID, requesterId: REQUESTER })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        code: 'ACCESS_REQUEST_TARGET_UNAVAILABLE',
+      });
+      expect(accessRequest.create).not.toHaveBeenCalled();
+      expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('applies the one-pending rule to the target, not the filer', async () => {
+      primeCreate({ isActive: true, directoryOnly: false });
+      accessRequest.findFirst.mockResolvedValue({ id: 'existing' });
+
+      await expect(
+        service.create(FILER, {
+          applicationId: APP_ID,
+          requesterId: REQUESTER,
+        }),
+      ).rejects.toThrow(
+        new ConflictException(
+          'This person already has a pending access request for this application.',
+        ),
+      );
+      const lookup = (
+        accessRequest.findFirst.mock.calls as Array<
+          [{ where: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(lookup.where).toEqual({
+        requesterId: REQUESTER,
+        applicationId: APP_ID,
+        status: 'PENDING',
+      });
+      expect(accessRequest.create).not.toHaveBeenCalled();
     });
   });
 

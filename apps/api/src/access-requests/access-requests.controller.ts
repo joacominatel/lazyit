@@ -47,7 +47,7 @@ import { ExportService } from '../common/export';
  * AccessRequest endpoints — the self-service request → approve/deny → grant flow (ADR-0085), closing the
  * ADR-0023 deferral. Four surfaces:
  *   - `POST /access-requests`        — raise a request (`accessRequest:create`, human-only). Requester =
- *     the authenticated caller (never the body).
+ *     the caller, or `requesterId` when an `accessGrant:grant` holder files on that person's behalf (#1645).
  *   - `GET  /access-requests`        — the estate-wide list (`accessRequest:read`; paged, ADR-0030).
  *   - `GET  /access-requests/mine`   — the caller's OWN requests (any authenticated human; self-scope
  *     carve-out — no `accessRequest:read` needed).
@@ -72,17 +72,31 @@ export class AccessRequestsController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @ApiOperation({
     summary:
-      'Raise a request for access to an application (any role incl VIEWER; human-only). 409 if you already have a pending request for it.',
+      'Raise a request for access to an application (any role incl VIEWER; human-only). 409 if a pending request for it already exists. `requesterId` files it on behalf of another active person and needs accessGrant:grant (403 ACCESS_REQUEST_ON_BEHALF_FORBIDDEN); the caller is recorded as filedById.',
   })
   @ApiCreatedResponse({ type: AccessRequestDto })
   @ApiConflictResponse({
     description: 'A pending request for this application already exists',
   })
-  create(
+  async create(
     @Body() dto: CreateAccessRequestDto,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.requests.create(this.requireHumanId(principal), dto);
+    const callerId = this.requireHumanId(principal);
+    const onBehalf =
+      dto.requesterId !== undefined && dto.requesterId !== callerId;
+    if (
+      onBehalf &&
+      !(await this.permissions.principalHas(principal, 'accessGrant:grant'))
+    ) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'ACCESS_REQUEST_ON_BEHALF_FORBIDDEN',
+        message:
+          'Only someone who can approve access requests can file one on behalf of another person.',
+      });
+    }
+    return this.requests.create(callerId, dto);
   }
 
   @Get()
