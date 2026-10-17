@@ -117,9 +117,12 @@ Indexes: `@@index([categoryId])`.
 `apps/api/src/applications/` (`ApplicationsModule`). Documented via Swagger
 ([[0018-api-documentation-swagger]]).
 
-- `GET /applications` — list (excludes soft-deleted, ordered by name).
-- `GET /applications/export?q=&deleted=` — a CSV of every application the list would return for the same
-  filters, under the same `application:read` and the same ADMIN-only `deleted=only` (#1597,
+- `GET /applications?q=&categoryId=&isCritical=&deleted=` — list (excludes soft-deleted, ordered by name).
+  `categoryId` (a cuid, else `400`) keeps the applications filed under that category — an archived
+  category still matches, since filing is not undone by archiving it; `isCritical` is exactly `true` or
+  `false` (else `400`), absent = both. Both narrow the query, so `total` and every page honour them (#1631).
+- `GET /applications/export?q=&categoryId=&isCritical=&deleted=` — a CSV of every application the list
+  would return for the same filters, under the same `application:read` and the same ADMIN-only `deleted=only` (#1597,
   [[0103-data-export-streaming-path]]). Columns: `id, name, vendor, url, description, isCritical,
   seatsPurchased, seatsUsed, costPerSeat, renewalDate, notes, createdAt, updatedAt, deletedAt`;
   `costPerSeat` in major units with a dot decimal, `seatsUsed` derived as on the list. The category (the

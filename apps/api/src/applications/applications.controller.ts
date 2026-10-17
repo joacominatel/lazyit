@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -31,12 +32,14 @@ import {
 import {
   ApplicationsService,
   APPLICATION_SORT_ALLOWLIST,
+  type ApplicationFilters,
 } from './applications.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
@@ -72,13 +75,26 @@ export class ApplicationsController {
   @RequirePermission('application:read')
   @ApiOperation({
     summary:
-      'List applications (paginated; active by default). Server-side q search + sort. deleted=only lists archived rows (ADMIN).',
+      'List applications (paginated; active by default). Server-side q search, category and criticality filters + sort. deleted=only lists archived rows (ADMIN).',
   })
   @ApiQuery({
     name: 'q',
     required: false,
     description:
       'Case-insensitive substring match on name, vendor, url and description',
+  })
+  @ApiQuery({
+    name: 'categoryId',
+    required: false,
+    description:
+      'Only applications filed under this category (an archived category still matches). Invalid cuid → 400.',
+  })
+  @ApiQuery({
+    name: 'isCritical',
+    required: false,
+    enum: ['true', 'false'],
+    description:
+      'Criticality filter: true = critical only; false = non-critical only; absent = both. Any other value → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -121,6 +137,8 @@ export class ApplicationsController {
   @ApiOkResponse({ type: ApplicationListPageDto })
   findAll(
     @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('isCritical') isCritical?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
@@ -140,7 +158,35 @@ export class ApplicationsController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE rows), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    return this.applications.findPage({ q }, pageQuery);
+    return this.applications.findPage(
+      this.parseFilters(q, categoryId, isCritical),
+      pageQuery,
+    );
+  }
+
+  /** The list's filters, parsed once for GET /applications and its export so the two cannot drift. */
+  private parseFilters(
+    q: string | undefined,
+    categoryId: string | undefined,
+    isCritical: string | undefined,
+  ): ApplicationFilters {
+    return {
+      q,
+      categoryId: parseCuidQuery(categoryId, 'categoryId'),
+      isCritical:
+        isCritical !== undefined
+          ? this.parseIsCriticalQuery(isCritical)
+          : undefined,
+    };
+  }
+
+  /** Exactly "true" or "false": a raw @Query is otherwise unchecked, so anything else is a clean 400. */
+  private parseIsCriticalQuery(raw: string): boolean {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    throw new BadRequestException(
+      'Invalid isCritical filter: must be "true" or "false"',
+    );
   }
 
   // STATIC route declared BEFORE `:id` so `/applications/export` never resolves as an id.
@@ -152,6 +198,8 @@ export class ApplicationsController {
       'CSV export of every application matching the list filters (ADR-0103): same permission, filters and rows as GET /applications, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
   })
   @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'isCritical', required: false, enum: ['true', 'false'] })
   @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
   @ApiOkResponse({
     description: 'The filtered applications as CSV (text/csv).',
@@ -160,19 +208,22 @@ export class ApplicationsController {
     @CurrentPrincipal() principal: Principal,
     @Res({ passthrough: true }) res: Response,
     @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('isCritical') isCritical?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ): Promise<StreamableFile> {
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
+    const filters = this.parseFilters(q, categoryId, isCritical);
     return this.exports.exportCsv({
       resource: 'APPLICATIONS',
       principal,
       response: res,
-      filters: { q, deleted: slice },
+      filters: { ...filters, deleted: slice },
       columns: APPLICATION_EXPORT_COLUMNS,
       filename: 'applications',
-      ...this.applications.exportSource({ q }, slice),
+      ...this.applications.exportSource(filters, slice),
     });
   }
 
