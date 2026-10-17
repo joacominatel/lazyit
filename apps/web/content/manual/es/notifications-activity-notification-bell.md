@@ -59,14 +59,34 @@ oscila alrededor de su umbral no inunda la campana.
 
 ## Leer notificaciones
 
-Abre la campana para ver las notificaciones más recientes, las más nuevas primero. Cada fila lleva un
-icono, un título corto, un resumen opcional de una línea y una hora relativa.
+Abre la campana para ver tus notificaciones, las más nuevas primero. Cada fila lleva un icono, un
+título corto, un resumen opcional de una línea y una hora relativa.
 
 - **Haz clic en una fila** para abrir aquello de lo que trata — la aplicación, el consumible o la
   bandeja de tareas del flujo de trabajo — y la fila queda marcada como leída.
 - **Marcar todo como leído** limpia el indicador de no leídas en un clic.
 - El **indicador rojo** cuenta las notificaciones sin leer; muestra `99+` cuando pasan de noventa y
-  nueve.
+  nueve. Los lectores de pantalla siguen anunciando el número exacto.
+
+### Agrupadas por tipo y día
+
+Una operación masiva — una importación, un lote grande de accesos, una baja de personal — puede generar
+cientos de notificaciones del mismo tipo en un día. Por eso la campana agrupa las notificaciones **por
+tipo y día**: todo lo de un mismo tipo que ocurrió en un mismo día es una sola fila, por ejemplo «312
+accesos a aplicaciones críticas · Hoy».
+
+- Un grupo con **una** notificación se muestra como esa notificación, igual que arriba.
+- Un grupo más grande muestra cuántas notificaciones contiene, el día (**Hoy**, **Ayer** o la fecha),
+  cuántas siguen sin leer y una vista previa de las más recientes.
+- **Selecciona el grupo** para desplegarlo ahí mismo y ver cada notificación; vuelve a seleccionarlo
+  para plegarlo. En los grupos largos, **Cargar más** trae las siguientes cuando las pides.
+- **Marcar grupo como leído** marca como leídas todas las notificaciones de ese grupo de una vez,
+  incluidas las que todavía no se cargaron. Los demás grupos no cambian.
+
+Los días siguen la zona horaria de visualización de la instancia (consulta
+[Zona horaria y formatos](/help/configuration-time-zone-formats)), así que «Hoy» es hoy donde trabaja tu
+equipo. Cuando hay más grupos de los que caben, **Cargar más** al final de la campana trae los
+siguientes; la campana mantiene una altura fija y se desplaza por dentro.
 
 El estado de lectura es por persona: marcar como leída una difusión la limpia solo para ti, no para los
 demás administradores.
@@ -76,11 +96,13 @@ demás administradores.
 Cuando ya te ocupaste de una notificación, puedes quitarla de tu campana en lugar de esperar a que
 caduque:
 
-- **Descartar una** — pasa el cursor sobre una fila y selecciona la **×** de su borde derecho. En un
+- **Descartar una** — pasa el cursor sobre una notificación y selecciona la **×** de su borde derecho.
+  Dentro de un grupo desplegado, cada notificación tiene su propia **×**. En un
   teléfono o una tableta la × se muestra siempre; con el teclado, llega a ella con Tab. Descartar no abre
   la notificación.
 - **Descartar todas** — en la cabecera de la campana, quita de una vez todas las notificaciones hasta la
-  más reciente que se muestra, incluidas las más antiguas que la campana no llega a cargar. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
+  más reciente que se muestra, incluidas todas las de cada grupo y las más antiguas que la campana no
+  llega a cargar. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
   descarta y sigue sin leer. Cuando la campana queda vacía muestra «Estás al día.»
 
 Descartar también marca la notificación como leída, así que el indicador baja con ella. Una notificación
