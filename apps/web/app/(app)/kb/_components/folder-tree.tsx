@@ -11,6 +11,7 @@ import {
   type FolderNode,
 } from "@/lib/utils/folder-tree";
 import { restrictedFolderIdSet } from "@/lib/utils/kb-folder-access";
+import { railArticleCount } from "@/lib/utils/kb-folder-rank";
 import { cn } from "@/lib/utils";
 import type { RawAccessRules } from "./folder-access-rule-editor";
 import { FolderActionsMenu, type FolderPermissions } from "./folder-actions-menu";
@@ -40,9 +41,10 @@ export type FolderWithRules = Folder & {
  * drafts", …) and the "+" for a new root folder live in the shell's rail, not here.
  *
  * Each row: a chevron (branches), the folder's colour tile, its name, its article count right-aligned
- * in tabular figures, ONE padlock only when the folder is restricted — its own rule in the warning
- * tone, an inherited one in a muted warning tone with a tooltip naming the ancestor (#414) — and the
- * "⋯" menu ({@link FolderActionsMenu}). The menu trigger stays out of the way: it shows on row hover,
+ * in tabular figures (the folder plus its subfolders, #1651), ONE padlock only when the folder is
+ * restricted — its own rule in the warning tone, an inherited one in a muted warning tone with a
+ * tooltip naming the ancestor (#414) — and the "⋯" menu ({@link FolderActionsMenu}). The menu trigger
+ * stays out of the way: it shows on row hover,
  * on keyboard focus inside the row, on the selected row, and always on touch screens (no hover). The
  * padlock is presentation only; the API enforces (INV-9). Restriction reads the #1299 `hasAccessRules`
  * flag, so every viewer sees the padlock, not only administrators.
@@ -184,6 +186,7 @@ function FolderTreeNode({
     ? null
     : restrictedAncestorOf(folder.id, ctx.parentById, ctx.restrictedFolderIds);
   const ancestorName = ancestorId ? (ctx.nameById.get(ancestorId) ?? "") : "";
+  const articleCount = railArticleCount(folder);
 
   return (
     <li role="none">
@@ -235,14 +238,12 @@ function FolderTreeNode({
             />
           ) : null}
 
-          {/* Live-article count (#1106 Phase 4): null for a folder the viewer can't read and absent
-              on a legacy server, so the row self-heals to no number. */}
-          {folder.articleCount != null ? (
+          {articleCount != null ? (
             <span
               className="min-w-5 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums"
-              title={t("folders.articleCount", { count: folder.articleCount })}
+              title={t("folders.branchArticleCount", { count: articleCount })}
             >
-              {folder.articleCount}
+              {articleCount}
             </span>
           ) : null}
         </button>

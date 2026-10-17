@@ -243,7 +243,7 @@
     "expand": "Expand {name}",
     "collapse": "Collapse {name}",
     "subfoldersLabel": "Sub-folders",
-    "articleCount": "{count, plural, one {# article} other {# articles}}",
+    "branchArticleCount": "{count, plural, one {# article in this folder and its subfolders} other {# articles in this folder and its subfolders}}",
     "emptyFolder": "Empty folder",
     "actions": {
       "menuTitle": "Folder actions",
