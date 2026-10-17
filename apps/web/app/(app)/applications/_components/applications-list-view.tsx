@@ -356,6 +356,11 @@ export function ApplicationsListView() {
               total={page?.total}
               filename="applications"
               permission="application:read"
+              disabledReason={
+                categoryFilter !== "ALL" || criticality !== "ALL"
+                  ? t("list.exportClientFilters")
+                  : undefined
+              }
             />
             {canWrite ? (
               <Button asChild>

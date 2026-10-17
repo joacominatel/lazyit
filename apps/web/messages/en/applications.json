@@ -8,6 +8,7 @@
     "allCategories": "All categories",
     "anyCriticality": "Any criticality",
     "criticalOnly": "Critical only",
+    "exportClientFilters": "Clear the category and critical filters to export; the file follows the search.",
     "nonCritical": "Non-critical",
     "criticalityAny": "Any",
     "columns": {

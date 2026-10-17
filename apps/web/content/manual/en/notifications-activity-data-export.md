@@ -51,6 +51,10 @@ rows first, so a script reading the file keeps working.
 
 To export a slice, filter the list first, then export.
 
+On **Applications**, the category and criticality filters narrow only the page on screen, so the export
+cannot follow them: the button is disabled while either is set. Clear them to export; the file follows
+the search.
+
 ## Limits
 
 - **100,000 rows per file.** If the list matches more, the button tells you before downloading anything,

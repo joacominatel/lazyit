@@ -53,6 +53,10 @@ funcionando.
 
 Para exportar una porción, filtra la lista primero y después exporta.
 
+En **Aplicaciones**, los filtros de categoría y criticidad acotan solo la página en pantalla, así que la
+exportación no puede seguirlos: el botón queda deshabilitado mientras alguno esté puesto. Quítalos para
+exportar; el archivo sigue la búsqueda.
+
 ## Límites
 
 - **100.000 filas por archivo.** Si la lista coincide con más, el botón te avisa antes de descargar nada, y
