@@ -16,6 +16,7 @@ import { CopyButton } from "@/components/copy-button";
 import { DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
+import { directoryAttr } from "@/components/quick-view-fields";
 import { Breadcrumb } from "@/components/breadcrumb";
 import {
   AttentionItem,
@@ -512,6 +513,12 @@ export function UserDetailView({ id }: { id: string }) {
                 <ProfileRow label={t("detail.fields.manager")}>
                   <ManagerDisplay manager={user.manager} />
                 </ProfileRow>
+                <ProfileRow label={t("detail.fields.department")}>
+                  {directoryAttr(user.directoryAttrs, "department") ?? <Empty />}
+                </ProfileRow>
+                <ProfileRow label={t("detail.fields.jobTitle")}>
+                  {directoryAttr(user.directoryAttrs, "jobTitle") ?? <Empty />}
+                </ProfileRow>
                 <ProfileRow label={t("detail.fields.legajo")} mono>
                   {user.legajo ?? <Empty />}
                 </ProfileRow>
@@ -548,6 +555,7 @@ export function UserDetailView({ id }: { id: string }) {
             id: user.id,
             firstName: user.firstName,
             lastName: user.lastName,
+            directoryAttrs: user.directoryAttrs,
           }}
         />
       ) : null}

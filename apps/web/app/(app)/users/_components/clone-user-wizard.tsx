@@ -13,6 +13,7 @@ import {
   type Role,
   RoleSchema,
   toManagerInput,
+  type User,
 } from "@lazyit/shared";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -60,6 +61,12 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { ManagerField } from "./manager-field";
 import { assignableRoles, notifyUserError } from "./role-ceiling";
+import {
+  DIRECTORY_PROFILE_FIELDS,
+  type DirectoryProfileValues,
+  directoryProfileValues,
+  newDirectoryProfile,
+} from "./user-form-payload";
 
 const FORM_ID = "clone-user-form";
 
@@ -68,10 +75,11 @@ export interface CloneSource {
   id: string;
   firstName: string;
   lastName: string;
+  directoryAttrs?: User["directoryAttrs"];
 }
 
 /** The new hire's profile inputs (a CreateUser-shaped form, manager as the XOR form value). */
-interface ProfileValues {
+interface ProfileValues extends DirectoryProfileValues {
   email: string;
   firstName: string;
   lastName: string;
@@ -85,6 +93,7 @@ function blankProfile(source: CloneSource): ProfileValues {
   return {
     // The clone NEVER pre-fills the source email/legajo/username (those are unique) — only the names,
     // as a convenience starting point the operator overwrites. Role defaults to least-privilege VIEWER.
+    // A clone usually joins the same team, so department and job title carry over too (#1646).
     email: "",
     firstName: source.firstName,
     lastName: source.lastName,
@@ -92,6 +101,7 @@ function blankProfile(source: CloneSource): ProfileValues {
     legajo: "",
     username: "",
     manager: { kind: "none" },
+    ...directoryProfileValues(source.directoryAttrs),
   };
 }
 
@@ -230,6 +240,7 @@ export function CloneUserWizard({
         ...(legajo !== "" ? { legajo } : {}),
         ...(username !== "" ? { username } : {}),
         manager,
+        ...newDirectoryProfile(profile),
       },
       cloneAssetAssignments: [...options.selectedAssignments],
       cloneAccessGrants: [...options.selectedGrants],
@@ -407,6 +418,22 @@ export function CloneUserWizard({
                 />
                 {errors.username && <FieldError errors={[{ message: errors.username }]} />}
               </Field>
+
+              {DIRECTORY_PROFILE_FIELDS.map((name) => (
+                <Field key={name} data-invalid={Boolean(errors[name]) || undefined}>
+                  <FieldLabel htmlFor={`clone-${name}`}>{tf(name)}</FieldLabel>
+                  <Input
+                    id={`clone-${name}`}
+                    value={profile[name]}
+                    onChange={(e) =>
+                      setProfile((p) => ({ ...p, [name]: e.target.value }))
+                    }
+                    placeholder={tf(`${name}Placeholder`)}
+                    aria-invalid={Boolean(errors[name]) || undefined}
+                  />
+                  {errors[name] && <FieldError errors={[{ message: errors[name] }]} />}
+                </Field>
+              ))}
 
               <Field>
                 <FieldLabel htmlFor="clone-manager">

@@ -131,7 +131,9 @@
       "username": "Nombre de usuario",
       "manager": "Responsable",
       "joined": "Ingreso",
-      "lastUpdated": "Última actualización"
+      "lastUpdated": "Última actualización",
+      "department": "Departamento",
+      "jobTitle": "Puesto"
     },
     "fieldEmpty": "—",
     "managerField": {
@@ -216,6 +218,11 @@
     "username": "Nombre de usuario",
     "usernamePlaceholder": "ej. ada.lovelace",
     "usernameHelp": "Identificador de directorio opcional, distinto del correo. No es una credencial de inicio de sesión. Debe ser único entre los usuarios activos.",
+    "department": "Departamento",
+    "departmentPlaceholder": "p. ej. Finanzas",
+    "jobTitle": "Puesto",
+    "jobTitlePlaceholder": "p. ej. Contador",
+    "directoryManagedHint": "Se sincroniza desde el directorio de la empresa. Cambialo ahí.",
     "manager": {
       "label": "Responsable",
       "help": "Opcional. Un usuario de lazyit o un nombre libre — no ambos.",
@@ -570,6 +577,7 @@
   "errors": {
     "roleCeiling": "Solo puedes gestionar usuarios con un rol igual o inferior al tuyo. Solo un administrador puede gestionar administradores.",
     "directoryRoleLocked": "Es una persona solo de directorio, sin inicio de sesión, así que su rol no puede cambiar. Dale de alta primero.",
-    "lastAdmin": "No se puede quitar al último administrador que puede iniciar sesión. Otro administrador debe iniciar sesión, o ser promovido, primero."
+    "lastAdmin": "No se puede quitar al último administrador que puede iniciar sesión. Otro administrador debe iniciar sesión, o ser promovido, primero.",
+    "profileManagedByDirectory": "El departamento y el puesto de esta persona vienen del directorio de la empresa, así que no se pueden cambiar acá. Cambialos en el directorio."
   }
 }

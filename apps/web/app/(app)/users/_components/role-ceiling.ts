@@ -17,7 +17,11 @@ export function isPromotion(from: Role, to: Role): boolean {
   return canManageRole(to, from) && !canManageRole(from, to);
 }
 
-export type UserMutationErrorKind = "roleCeiling" | "directoryRoleLocked" | "lastAdmin";
+export type UserMutationErrorKind =
+  | "roleCeiling"
+  | "directoryRoleLocked"
+  | "lastAdmin"
+  | "profileManagedByDirectory";
 
 export function userMutationErrorKind(error: unknown): UserMutationErrorKind | null {
   if (!(error instanceof ApiError)) return null;
@@ -25,6 +29,7 @@ export function userMutationErrorKind(error: unknown): UserMutationErrorKind | n
   if (error.status === 403 && code === "ROLE_CEILING_EXCEEDED") return "roleCeiling";
   if (error.status === 422 && code === "DIRECTORY_PERSON_ROLE_LOCKED") return "directoryRoleLocked";
   if (error.status === 409 && code === "LAST_ADMIN_REQUIRED") return "lastAdmin";
+  if (error.status === 409 && code === "PROFILE_MANAGED_BY_DIRECTORY") return "profileManagedByDirectory";
   return null;
 }
 

@@ -131,7 +131,9 @@
       "username": "Username",
       "manager": "Manager",
       "joined": "Joined",
-      "lastUpdated": "Last updated"
+      "lastUpdated": "Last updated",
+      "department": "Department",
+      "jobTitle": "Job title"
     },
     "fieldEmpty": "—",
     "managerField": {
@@ -216,6 +218,11 @@
     "username": "Username",
     "usernamePlaceholder": "e.g. ada.lovelace",
     "usernameHelp": "Optional directory handle, distinct from the email. Not a login credential. Must be unique among active users.",
+    "department": "Department",
+    "departmentPlaceholder": "e.g. Finance",
+    "jobTitle": "Job title",
+    "jobTitlePlaceholder": "e.g. Accountant",
+    "directoryManagedHint": "Synced from your company directory. Change it there.",
     "manager": {
       "label": "Manager",
       "help": "Optional. Either a lazyit user or a free-text name — not both.",
@@ -570,6 +577,7 @@
   "errors": {
     "roleCeiling": "You can only manage users whose role is at or below your own. Only an administrator can manage administrators.",
     "directoryRoleLocked": "This is a directory-only person with no login, so their role cannot change. Onboard them first.",
-    "lastAdmin": "Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first."
+    "lastAdmin": "Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.",
+    "profileManagedByDirectory": "Department and job title come from your company directory for this person, so they can't be changed here. Change them in the directory."
   }
 }

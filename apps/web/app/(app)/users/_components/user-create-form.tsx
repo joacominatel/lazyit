@@ -55,7 +55,8 @@ import { cn } from "@/lib/utils";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { ManagerField } from "./manager-field";
 import { assignableRoles, notifyUserError } from "./role-ceiling";
-import { wireShapeResolver } from "./user-form-payload";
+import { DirectoryProfileFields } from "./directory-profile-fields";
+import { newDirectoryProfile, wireShapeResolver } from "./user-form-payload";
 
 const FORM_ID = "user-create-form";
 
@@ -76,6 +77,8 @@ type UserCreateFormValues = {
   legajo: string;
   username: string;
   manager: ManagerFormValue;
+  jobTitle: string;
+  department: string;
   password: string;
   assetId: string;
   applicationId: string;
@@ -90,6 +93,8 @@ const EMPTY_VALUES: UserCreateFormValues = {
   legajo: "",
   username: "",
   manager: EMPTY_MANAGER,
+  jobTitle: "",
+  department: "",
   password: "",
   assetId: "",
   applicationId: "",
@@ -113,6 +118,7 @@ function toResolverInput(
     lastName: values.lastName,
     role: values.role,
     manager: toManagerInput(values.manager),
+    ...newDirectoryProfile(values),
   };
   // Coalesce before `.trim()` — an untouched optional can be `undefined` at submit (RHF), even
   // though the field is typed `string` with an `""` default.
@@ -260,6 +266,7 @@ export function UserCreateForm() {
       ...(legajo !== "" ? { legajo } : {}),
       ...(username !== "" ? { username } : {}),
       manager,
+      ...newDirectoryProfile(values),
       // Send the temporary password ONLY on the management path (never under BYOI — ADR-0064 §4).
       ...(requiresPassword && values.password !== ""
         ? { password: values.password }
@@ -518,6 +525,12 @@ export function UserCreateForm() {
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
+            />
+
+            <DirectoryProfileFields
+              control={form.control}
+              idPrefix="create"
+              managedByDirectory={false}
             />
           </div>
         </FieldGroup>

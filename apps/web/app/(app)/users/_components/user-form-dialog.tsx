@@ -40,7 +40,12 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import { notifyUserError } from "./role-ceiling";
 import { ManagerField } from "./manager-field";
+import { DirectoryProfileFields } from "./directory-profile-fields";
 import {
+  directoryProfileInput,
+  directoryProfileValues,
+  isProfileManagedByDirectory,
+  newDirectoryProfile,
   toResolverInput,
   type UserFormValues,
   wireShapeResolver,
@@ -65,6 +70,7 @@ function toFormValues(user?: User): UserFormValues {
       legajo: user.legajo ?? "",
       username: user.username ?? "",
       manager: managerDescriptorToFormValue(user.manager),
+      ...directoryProfileValues(user.directoryAttrs),
       isActive: user.isActive,
     };
   }
@@ -75,6 +81,8 @@ function toFormValues(user?: User): UserFormValues {
     legajo: "",
     username: "",
     manager: EMPTY_MANAGER,
+    jobTitle: "",
+    department: "",
   };
 }
 
@@ -116,7 +124,7 @@ export function UserFormDialog({
   // exactly once instead of re-serializing the resolver's already-wire output.
   const resolver = wireShapeResolver<UserFormValues>(
     zodResolver(isEdit ? UpdateUserSchema : CreateUserSchema),
-    toResolverInput,
+    (values) => toResolverInput(values, user?.directoryAttrs),
   );
 
   const form = useForm<UserFormValues>({
@@ -150,6 +158,7 @@ export function UserFormDialog({
             legajo: legajo === "" ? null : legajo,
             username: username === "" ? null : username,
             manager,
+            ...directoryProfileInput(values, user.directoryAttrs),
           },
         },
         {
@@ -173,6 +182,7 @@ export function UserFormDialog({
           ...(username !== "" ? { username } : {}),
           // null = "no manager"; a set value is the XOR input union. Always explicit.
           manager,
+          ...newDirectoryProfile(values),
         },
         {
           onSuccess: (created) => {
@@ -323,6 +333,12 @@ export function UserFormDialog({
                   <FieldError errors={[fieldState.error]} />
                 </Field>
               )}
+            />
+
+            <DirectoryProfileFields
+              control={form.control}
+              idPrefix="user"
+              managedByDirectory={user != null && isProfileManagedByDirectory(user)}
             />
 
             <Controller

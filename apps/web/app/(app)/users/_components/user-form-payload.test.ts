@@ -13,8 +13,11 @@
 
 import { expect, describe, test } from "bun:test";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CreateUserSchema } from "@lazyit/shared";
+import { CreateUserSchema, UpdateUserSchema } from "@lazyit/shared";
 import {
+  directoryProfileInput,
+  isProfileManagedByDirectory,
+  newDirectoryProfile,
   toResolverInput,
   type UserFormValues,
   wireShapeResolver,
@@ -27,6 +30,8 @@ const BASE = {
   lastName: "Lovelace",
   legajo: "",
   username: "",
+  jobTitle: "",
+  department: "",
 } as const;
 
 // ── issue #410 regression ────────────────────────────────────────────────────────────────────────
@@ -190,5 +195,41 @@ describe("wireShapeResolver (issue #934 regression)", () => {
 
     expect(result.errors.email).toBeDefined();
     expect(result.values).toEqual({});
+  });
+});
+
+// ── department and job title (#1646) ──────────────────────────────────────────────────────────────
+describe("department and job title", () => {
+  test("only a directory-synced person is read-only; a spreadsheet import stays editable", () => {
+    expect(isProfileManagedByDirectory({ directorySource: "ad" })).toBe(true);
+    expect(isProfileManagedByDirectory({ directorySource: null })).toBe(false);
+    expect(isProfileManagedByDirectory({})).toBe(false);
+  });
+
+  test("a create sends what was typed, trimmed, and nothing for a blank", () => {
+    expect(newDirectoryProfile({ jobTitle: " SRE ", department: "  " })).toEqual({ jobTitle: "SRE" });
+    const payload = toResolverInput({ ...BASE, jobTitle: "SRE", department: "IT", manager: { kind: "none" } });
+    expect(CreateUserSchema.safeParse(payload).success).toBe(true);
+    expect(payload).toMatchObject({ jobTitle: "SRE", department: "IT" });
+  });
+
+  test("an edit sends only a changed value, and null to clear one", () => {
+    const stored = { jobTitle: "SRE", department: "IT", phone: "123" };
+    expect(directoryProfileInput({ jobTitle: "SRE", department: "IT" }, stored)).toEqual({});
+    expect(directoryProfileInput({ jobTitle: " SRE ", department: "Finance" }, stored)).toEqual({
+      department: "Finance",
+    });
+    expect(directoryProfileInput({ jobTitle: "", department: "IT" }, stored)).toEqual({ jobTitle: null });
+    expect(directoryProfileInput({ jobTitle: "SRE", department: "" }, null)).toEqual({ jobTitle: "SRE" });
+  });
+
+  test("an untouched legacy value the schema would now reject is not sent", () => {
+    const legacy = { department: "x".repeat(250) };
+    const payload = toResolverInput(
+      { ...BASE, department: legacy.department, manager: { kind: "none" } },
+      legacy,
+    );
+    expect("department" in payload).toBe(false);
+    expect(UpdateUserSchema.safeParse(payload).success).toBe(true);
   });
 });
