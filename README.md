@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
-  <img alt="Status: MVP" src="https://img.shields.io/badge/status-MVP-orange.svg">
+  <a href="https://github.com/joacominatel/lazyit/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/joacominatel/lazyit?sort=semver"></a>
   <img alt="Self-hosted" src="https://img.shields.io/badge/deploy-self--hosted-success.svg">
   <img alt="Stack" src="https://img.shields.io/badge/stack-Next.js%20%C2%B7%20NestJS%20%C2%B7%20Postgres-9e2b25.svg">
 </p>
@@ -295,6 +295,6 @@ behind each decision), the setup guide, and the operations runbooks. **It's the 
 start at [`docs/README.md`](docs/README.md).
 
 > [!NOTE]
-> **Status:** lazyit is a personal project at the MVP stage — built in the open, finishing its
-> refinement, and validated internally before any wider release. Expect rough edges, honest
-> docs, and steady progress.
+> **Status:** lazyit is a personal project, built in the open. It runs on self-hosted instances
+> that upgrade in place, and every release lists its upgrade actions and migrations. Expect honest
+> docs and steady progress.
