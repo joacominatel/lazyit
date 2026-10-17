@@ -25,7 +25,7 @@ de cálculo, pasar a finanzas o procesar con un script. Busca el botón **Export
 | **Compras → Unidades pendientes** | Una fila por línea que todavía espera unidades: compra, proveedor, fechas, tipo, modelo o descripción, y unidades pedidas, recibidas, canceladas y pendientes. |
 | **Compras → Proveedores** | Una fila por proveedor: nombre, identificación fiscal, sitio web, contactos de ventas y de soporte, y notas. |
 | **Aplicaciones** | Una fila por aplicación: nombre, fabricante, URL, criticidad, asientos comprados y usados, costo por asiento, fecha de renovación y notas. Sigue la búsqueda y los filtros de categoría y criticidad. |
-| **Solicitudes de acceso** | Las solicitudes pendientes de la cola de revisión: aplicación, solicitante, nivel de acceso, justificación y cuándo se pidió. |
+| **Solicitudes de acceso** | Las solicitudes pendientes de la cola de revisión: aplicación, solicitante, nivel de acceso, justificación, quién la cargó (si alguien la cargó en nombre del solicitante) y cuándo se pidió. |
 | **Ubicaciones** | Una fila por ubicación: nombre, tipo, ubicación superior, dirección, piso, descripción y notas. |
 | **Topología → Tabla** (servidores) | Una fila por nodo que coincide con los filtros: etiqueta, tipo, estado, ciclo (confirmado o pendiente), origen, dirección IP, activo vinculado y sus responsables, chasis, versión del agente y último reporte. |
 | **La página de un consumible** | Sus movimientos de stock: fecha, tipo, cantidad, motivo, quién lo hizo y adónde fue una entrega. El botón está en el panel *Movimientos*. |

@@ -25,6 +25,13 @@ Choose **New user** and fill in the person's identity:
   in with either their username or their email. Behind an identity provider it is only a directory
   handle, never a credential.
 - **Manager** (optional) — either an existing lazyit user **or** a free-text name, not both.
+- **Department** and **Job title** (both optional) — free text, up to 200 characters each.
+
+**Department and job title** can also be changed later with **Edit**; clearing a field removes the
+value. For a person synced from **AD/LDAP** ([directory sync](/help/configuration-directory-sync)) both
+fields are read-only, because the next sync would overwrite them — change them in the directory
+instead. People added from a **spreadsheet import** have no sync behind them, so their department and
+job title stay editable.
 
 **Sign-in credential.** With **local accounts**, you set a **temporary password** so the person can
 sign in; they must choose their own at first login, and it is shown only once for hand-off. lazyit
@@ -52,8 +59,8 @@ Opening a user shows their record, laid out like an asset's page.
   **Consumables**, and **History**, one list of the assets they returned and the access they lost,
   most recent first. Each tab only appears to people allowed to see what it lists. The open tab is
   kept in the page address, so a shared link opens on the same tab.
-- **The side column** holds the **Profile**: role (editable with *Manage users*), manager, employee
-  number, username, email and dates. For a directory person it also explains how to give them a sign-in
+- **The side column** holds the **Profile**: role (editable with *Manage users*), manager, department,
+  job title, employee number, username, email and dates. For a directory person it also explains how to give them a sign-in
   account.
 
 The header keeps **Reset password** (local accounts only) and **Edit** in sight. **Clone** and
@@ -63,7 +70,8 @@ The header keeps **Reset password** (local accounts only) and **Edit** in sight.
 
 To onboard someone who mirrors a colleague ("same access as Ana"), open a user and choose **Clone** from the **⋯** menu.
 You pick a fresh, unique email and a role, then choose which of the source's **assets** and
-**application access** carry over.
+**application access** carry over. The colleague's department and job title are filled in for you;
+change them if the new person's differ.
 
 By default, cloned access is **recorded only** — bookkeeping, no external effect. There is an opt-in
 switch to **provision the new user in these applications**, which runs the provisioning workflows for

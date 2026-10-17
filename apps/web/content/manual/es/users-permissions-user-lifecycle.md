@@ -27,6 +27,13 @@ Elige **Nuevo usuario** y completa la identidad de la persona:
   correo. Detrás de un proveedor de identidad es solo un identificador de directorio, nunca una
   credencial.
 - **Responsable** (opcional) — un usuario de lazyit existente **o** un nombre de texto libre, no ambos.
+- **Departamento** y **Puesto** (ambos opcionales) — texto libre, hasta 200 caracteres cada uno.
+
+**Departamento y puesto** también se pueden cambiar después con **Editar**; vaciar un campo borra el
+valor. Para una persona sincronizada desde **AD/LDAP** ([sincronización de directorio](/help/configuration-directory-sync))
+los dos campos son de solo lectura, porque la próxima sincronización los sobrescribiría — cámbialos en
+el directorio. Las personas que llegaron por una **importación de planilla** no tienen sincronización
+detrás, así que su departamento y puesto siguen siendo editables.
 
 **Credencial de inicio de sesión.** Con **cuentas locales**, defines una **contraseña temporal** para
 que la persona pueda iniciar sesión; deberá elegir la suya en el primer inicio, y se muestra una sola
@@ -58,7 +65,7 @@ Al abrir un usuario ves su ficha, organizada como la página de un activo.
   La pestaña abierta queda en la dirección de la página, así un enlace compartido abre en la misma
   pestaña.
 - **La columna lateral** tiene el **Perfil**: rol (editable con *Gestionar usuarios*), responsable,
-  legajo, nombre de usuario, correo y fechas. Para una persona de directorio también explica cómo darle
+  departamento, puesto, legajo, nombre de usuario, correo y fechas. Para una persona de directorio también explica cómo darle
   una cuenta de acceso.
 
 El encabezado deja a mano **Restablecer contraseña** (solo con cuentas locales) y **Editar**. **Clonar**
@@ -69,7 +76,8 @@ error.
 
 Para incorporar a alguien que replica a un colega ("el mismo acceso que Ana"), abre un usuario y elige
 **Clonar** en el menú **⋯**. Eliges un correo nuevo y único y un rol, y luego seleccionas cuáles de los **activos** y del
-**acceso a aplicaciones** del origen se trasladan.
+**acceso a aplicaciones** del origen se trasladan. El departamento y el puesto del colega se completan
+solos; cámbialos si los de la persona nueva son otros.
 
 Por defecto, el acceso clonado **solo se registra** — es contabilidad, sin efecto externo. Hay un
 interruptor opcional para **aprovisionar al nuevo usuario en estas aplicaciones**, que ejecuta los

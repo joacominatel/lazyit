@@ -40,10 +40,30 @@ tells you so instead of creating a duplicate.
 - Approval and denial are final for that request. If a request was denied and you still need access,
   you can raise a new one.
 
+## Filing a request for someone else
+
+People who can approve requests can also file one **on someone else's behalf** — the help-desk case,
+where a colleague asks you in person and you want the request on record. Only holders of the
+**Grant & revoke access** permission see this option.
+
+- On an application's page, click **Request for someone**; or, from **Access → Access requests**, click
+  **File a request** and pick the application.
+- Pick the person in **On behalf of**. Leave it empty to request access for yourself. The person must
+  be **active and have a sign-in account** — directory-only people and offboarded people can't be
+  picked, and lazyit refuses the request if they are.
+- The one-pending-request rule applies to that person: if they already have a request waiting for this
+  application, lazyit tells you instead of creating a duplicate.
+
+The request then follows the normal approval flow. It records **who filed it**: the queue, the
+application's **Requests** tab and the person's own profile show **Filed by**, and the CSV export has a
+**Filed by** column. The decision notification goes to the person the request is for, not to whoever
+filed it.
+
 ## Reviewing requests (administrators)
 
 Open **Access → Access requests** to see everything waiting for a decision. Each row shows who is
-asking, which application, the requested level, any justification, and when it was raised.
+asking, which application, the requested level, any justification, when it was raised and, for a
+request filed on someone's behalf, who filed it.
 
 - **Approve** grants the access right away — no extra form. The new grant behaves exactly like one you
   create by hand (it runs any access workflows and is recorded in the application's access history).
@@ -63,6 +83,7 @@ requests in the selected status.
 ## Tracking your requests
 
 Open your **Profile** to see **My access requests** — every request you've raised and its current
-status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave.
+status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave,
+and a request an approver filed for you says so.
 lazyit also notifies you the moment a decision is made — in your bell, and by email unless you opt out —
 so this list is the full history, not the only way to learn the outcome.

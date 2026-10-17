@@ -25,7 +25,7 @@ or feed to a script. Look for the **Export CSV** button at the top of the list.
 | **Purchases → Pending units** | One row per line still waiting for units: purchase, supplier, dates, kind, model or description, and units ordered, received, cancelled and pending. |
 | **Purchases → Suppliers** | One row per supplier: name, tax ID, website, sales and support contacts, and notes. |
 | **Applications** | One row per application: name, vendor, URL, criticality, seats purchased and used, cost per seat, renewal date and notes. It follows the search and the category and criticality filters. |
-| **Access requests** | The pending requests in the review queue: application, requester, access level, justification, and when it was asked. |
+| **Access requests** | The pending requests in the review queue: application, requester, access level, justification, who filed it (when someone filed it on the requester's behalf), and when it was asked. |
 | **Locations** | One row per location: name, type, parent, address, floor, description and notes. |
 | **Topology → Table** (servers) | One row per node matching the filters: label, kind, status, state (confirmed or pending), source, IP address, linked asset and its owners, chassis, agent version and last report. |
 | **A consumable's page** | Its stock movements: date, type, quantity, reason, who did it, and where a delivery went. The button is on the *Movements* panel. |
