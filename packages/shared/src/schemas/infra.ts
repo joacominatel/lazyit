@@ -291,7 +291,8 @@ export const InfraNodeOwnerSchema = z.object({
   userId: z.uuid(),
   firstName: z.string(),
   lastName: z.string(),
-  email: z.email(),
+  /** Null when the caller lacks `user:read` (#1627): `infra:read` alone is VIEWER-default. */
+  email: z.email().nullable(),
   /** Non-null when the owner left the company but the assignment was never released (history kept). */
   deletedAt: z.iso.datetime().nullable(),
 });

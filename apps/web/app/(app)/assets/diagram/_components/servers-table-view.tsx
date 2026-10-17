@@ -585,7 +585,8 @@ function OwnersCell({ owners }: { owners: InfraNodeOwner[] }) {
   }
   const [first, ...rest] = owners;
   const gone = first.deletedAt !== null;
-  const name = `${first.firstName} ${first.lastName}`.trim() || first.email;
+  const name =
+    `${first.firstName} ${first.lastName}`.trim() || (first.email ?? "");
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
