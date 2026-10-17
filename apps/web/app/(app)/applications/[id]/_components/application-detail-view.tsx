@@ -333,9 +333,8 @@ export function ApplicationDetailView({ id }: { id: string }) {
                     <UserPlusIcon />
                     {t("grantAccess")}
                   </Button>
-                ) : (
-                  <RequestAccessButton applicationId={application.id} />
-                )}
+                ) : null}
+                <RequestAccessButton applicationId={application.id} />
                 {canWrite ? (
                   <Button size="sm" variant="outline" asChild>
                     <Link href={`/applications/${application.id}/edit`}>

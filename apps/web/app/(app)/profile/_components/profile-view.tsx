@@ -20,11 +20,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
+import { filedByOther } from "@/lib/access-requests/on-behalf";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useMyAssets } from "@/lib/api/hooks/use-assets";
 import { useMyGrants } from "@/lib/api/hooks/use-access-grants";
 import { useMyAccessRequests } from "@/lib/api/hooks/use-access-requests";
-import { useCurrentUser } from "@/lib/api/hooks/use-users";
+import { useCurrentUser, useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 
@@ -67,6 +68,17 @@ export function ProfileView() {
     () => new Map((applications ?? []).map((app) => [app.id, app.name])),
     [applications],
   );
+
+  // A VIEWER lacks `user:read`, so a request filed for them shows without the filer's name.
+  const canReadUsers = useCan("user:read");
+  const filerIds = useMemo(
+    () =>
+      (requestsPage?.items ?? [])
+        .map(filedByOther)
+        .filter((id): id is string => id !== null),
+    [requestsPage],
+  );
+  const filerById = useUserNames(filerIds, { enabled: canReadUsers });
 
   if (isLoading) {
     return (
@@ -265,6 +277,7 @@ export function ProfileView() {
                 <p className="font-mono text-xs tabular-nums text-muted-foreground">
                   {t("requests.requestedOn", { date: date(request.createdAt) })}
                 </p>
+                <FiledFor filerId={filedByOther(request)} filerById={filerById} />
               </li>
             ))}
           </ul>
@@ -306,5 +319,24 @@ export function ProfileView() {
         </DetailPanel>
       )}
     </div>
+  );
+}
+
+function FiledFor({
+  filerId,
+  filerById,
+}: {
+  filerId: string | null;
+  filerById: ReturnType<typeof useUserNames>;
+}) {
+  const t = useTranslations("profile.requests");
+  if (!filerId) return null;
+  const filer = filerById.get(filerId);
+  return (
+    <p className="text-xs text-muted-foreground">
+      {filer
+        ? t("filedForYouBy", { name: `${filer.firstName} ${filer.lastName}` })
+        : t("filedForYou")}
+    </p>
   );
 }

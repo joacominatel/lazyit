@@ -16,7 +16,9 @@ import type { FieldValues, Resolver, ResolverResult } from "react-hook-form";
 import {
   type ManagerFormValue,
   toManagerInput,
+  type User,
 } from "@lazyit/shared";
+import { directoryAttr } from "@/components/quick-view-fields";
 
 /**
  * The form's internal value shape. `isActive` is only present (and rendered) in edit mode: a new
@@ -30,8 +32,56 @@ export type UserFormValues = {
   legajo: string;
   username: string;
   manager: ManagerFormValue;
+  jobTitle: string;
+  department: string;
   isActive?: boolean;
 };
+
+export const DIRECTORY_PROFILE_FIELDS = ["jobTitle", "department"] as const;
+type DirectoryProfileField = (typeof DIRECTORY_PROFILE_FIELDS)[number];
+export type DirectoryProfileValues = Record<DirectoryProfileField, string>;
+export type DirectoryProfileInput = Partial<Record<DirectoryProfileField, string | null>>;
+
+// The AD/LDAP sync rewrites both on every run, so the API refuses a change (409); a spreadsheet import does not.
+export function isProfileManagedByDirectory(user: Pick<User, "directorySource">): boolean {
+  return user.directorySource != null;
+}
+
+export function directoryProfileValues(
+  attrs: User["directoryAttrs"] | undefined,
+): DirectoryProfileValues {
+  return {
+    jobTitle: directoryAttr(attrs, "jobTitle") ?? "",
+    department: directoryAttr(attrs, "department") ?? "",
+  };
+}
+
+// A create sends only what was typed.
+export function newDirectoryProfile(
+  values: Partial<DirectoryProfileValues>,
+): Partial<DirectoryProfileValues> {
+  const out: Partial<DirectoryProfileValues> = {};
+  for (const key of DIRECTORY_PROFILE_FIELDS) {
+    const value = (values[key] ?? "").trim();
+    if (value !== "") out[key] = value;
+  }
+  return out;
+}
+
+// Only what changed is sent: an untouched value never trips the directory 409 or a legacy over-long value.
+export function directoryProfileInput(
+  values: Partial<DirectoryProfileValues>,
+  stored?: User["directoryAttrs"],
+): DirectoryProfileInput {
+  const before = directoryProfileValues(stored);
+  const out: DirectoryProfileInput = {};
+  for (const key of DIRECTORY_PROFILE_FIELDS) {
+    const next = (values[key] ?? "").trim();
+    if (next === before[key].trim()) continue;
+    out[key] = next === "" ? null : next;
+  }
+  return out;
+}
 
 /**
  * Translate the form's loose values into the wire payload the resolver validates.
@@ -41,12 +91,24 @@ export type UserFormValues = {
  *   `{ managerId }`; a free-text name → `{ managerName }`.
  * - `isActive` is forwarded when present (edit mode only).
  */
-export function toResolverInput(values: UserFormValues): Record<string, unknown> {
+// An edit of a directory-synced person never carries the two keys, so an unrelated save cannot 409.
+export function directoryProfilePatch(
+  values: Partial<DirectoryProfileValues>,
+  user: Pick<User, "directorySource" | "directoryAttrs">,
+): DirectoryProfileInput {
+  return isProfileManagedByDirectory(user) ? {} : directoryProfileInput(values, user.directoryAttrs);
+}
+
+export function toResolverInput(
+  values: UserFormValues,
+  editing?: Pick<User, "directorySource" | "directoryAttrs">,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {
     email: values.email,
     firstName: values.firstName,
     lastName: values.lastName,
     manager: toManagerInput(values.manager),
+    ...(editing ? directoryProfilePatch(values, editing) : newDirectoryProfile(values)),
   };
   // Empty optional directory fields are simply absent (not "" — which would fail min(1)).
   if (values.legajo.trim() !== "") out.legajo = values.legajo;

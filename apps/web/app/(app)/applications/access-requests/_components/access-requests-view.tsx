@@ -1,6 +1,10 @@
 "use client";
 
-import { CheckIcon, InboxStackIcon } from "@heroicons/react/24/outline";
+import {
+  CheckIcon,
+  HandRaisedIcon,
+  InboxStackIcon,
+} from "@heroicons/react/24/outline";
 import type { AccessRequest } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -16,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
 import { toast } from "sonner";
+import { canFileOnBehalf, filedByOther } from "@/lib/access-requests/on-behalf";
 import {
   ACCESS_REQUEST_EXPORT_PATH,
   accessRequestFilterParams,
@@ -29,7 +34,8 @@ import {
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
-import { useCan } from "@/lib/hooks/use-permissions";
+import { useCan, useMyPermissions } from "@/lib/hooks/use-permissions";
+import { RequestAccessDialog } from "../../_components/request-access-dialog";
 import { DenyRequestDialog } from "./deny-request-dialog";
 
 const PAGE_SIZE = 25;
@@ -55,11 +61,14 @@ function useBreadcrumb() {
  * 2 of #948). Reading the estate-wide queue is `accessRequest:read` (ADMIN+MEMBER, gated below);
  * DECIDING (approve/deny) is the existing `accessGrant:grant` (ADMIN-only), so a MEMBER can watch the
  * queue but the action buttons only render for a decider. Approve creates the grant through the
- * existing grant path in one transaction; deny requires a reason.
+ * existing grant path in one transaction; deny requires a reason. A decider can also file a request on
+ * someone's behalf from here (#1645), the help-desk path.
  */
 export function AccessRequestsView() {
   const t = useTranslations("applications");
   const breadcrumb = useBreadcrumb();
+  const { can } = useMyPermissions();
+  const [fileOpen, setFileOpen] = useState(false);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -69,6 +78,14 @@ export function AccessRequestsView() {
         subtitle={t("requests.subtitle")}
         pillar="access"
         icon={InboxStackIcon}
+        actions={
+          canFileOnBehalf(can) ? (
+            <Button size="sm" onClick={() => setFileOpen(true)}>
+              <HandRaisedIcon />
+              {t("requests.fileRequest")}
+            </Button>
+          ) : undefined
+        }
       />
       <PermissionGate
         permission="accessRequest:read"
@@ -77,6 +94,7 @@ export function AccessRequestsView() {
       >
         <PendingQueue />
       </PermissionGate>
+      <RequestAccessDialog open={fileOpen} onOpenChange={setFileOpen} />
     </div>
   );
 }
@@ -102,12 +120,19 @@ function PendingQueue() {
 
   const [denyTarget, setDenyTarget] = useState<AccessRequest | null>(null);
 
-  // Resolve just the requesters on this page (#961) — a targeted id→name batch, not the whole directory.
-  const requesterIds = useMemo(
-    () => [...new Set((page?.items ?? []).map((r) => r.requesterId))],
+  // Resolve just the requesters and filers on this page (#961) — a targeted id→name batch, not the whole directory.
+  const userIds = useMemo(
+    () => [
+      ...new Set(
+        (page?.items ?? []).flatMap((r) => {
+          const filer = filedByOther(r);
+          return filer ? [r.requesterId, filer] : [r.requesterId];
+        }),
+      ),
+    ],
     [page],
   );
-  const userById = useUserNames(requesterIds);
+  const userById = useUserNames(userIds);
   const appNameById = useMemo(
     () => new Map((applications ?? []).map((a) => [a.id, a.name])),
     [applications],
@@ -173,6 +198,7 @@ function PendingQueue() {
       <ul className="divide-y rounded-lg border">
         {items.map((request) => {
           const user = userById.get(request.requesterId);
+          const filerId = filedByOther(request);
           return (
             <li key={request.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex min-w-0 gap-3">
@@ -210,6 +236,11 @@ function PendingQueue() {
                   <p className="font-mono text-xs tabular-nums text-muted-foreground">
                     {t("requests.requestedOn", { date: date(request.createdAt) })}
                   </p>
+                  {filerId && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("requests.filedBy", { name: requesterName(filerId) })}
+                    </p>
+                  )}
                 </div>
               </div>
 

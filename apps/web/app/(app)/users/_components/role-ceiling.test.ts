@@ -51,6 +51,12 @@ describe("userMutationErrorKind", () => {
     expect(userMutationErrorKind(new ApiError(403, "x", { code: "LAST_ADMIN_REQUIRED" }))).toBeNull();
   });
 
+  test("a department or job title change on a directory-synced person is recognised by code (#1646)", () => {
+    expect(
+      userMutationErrorKind(new ApiError(409, "x", { code: "PROFILE_MANAGED_BY_DIRECTORY" })),
+    ).toBe("profileManagedByDirectory");
+  });
+
   test("other failures fall through to the server's message", () => {
     expect(userMutationErrorKind(new ApiError(403, "You cannot change your own role"))).toBeNull();
     expect(userMutationErrorKind(new ApiError(409, "A record with this email already exists"))).toBeNull();

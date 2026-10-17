@@ -23,6 +23,7 @@ export function UserCombobox({
   ariaInvalid,
   disabled,
   excludeUserIds = [],
+  accountsOnly = false,
   placeholder,
   searchPlaceholder,
   emptyText,
@@ -34,6 +35,8 @@ export function UserCombobox({
   disabled?: boolean;
   /** User ids to hide from the list (e.g. an asset's current owners). */
   excludeUserIds?: string[];
+  /** Hide directory-only people, who have no login account. */
+  accountsOnly?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -42,7 +45,11 @@ export function UserCombobox({
   const [query, setQuery] = useState("");
   // Active-only directory page for the current query. The status filter is client-side over the page
   // (the user list's `q` is server-side; `isActive` is not a server param — see endpoints/users.ts).
-  const { data, isFetching } = useUserList({ q: query || undefined, limit: 50 });
+  const { data, isFetching } = useUserList({
+    q: query || undefined,
+    limit: 50,
+    ...(accountsOnly ? { directoryOnly: false } : {}),
+  });
   // Resolve the selected user's label even when it isn't on the current search page.
   const { data: selected } = useUser(value || undefined);
 
