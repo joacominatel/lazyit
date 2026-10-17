@@ -13,6 +13,7 @@ import {
   AgentReportSchema,
   CONTAINER_ID_SEPARATOR,
   DEFAULT_PAGE_LIMIT,
+  DEFAULT_ROLE_PERMISSIONS,
   GUEST_ID_SEPARATOR,
   INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
@@ -20,6 +21,8 @@ import {
   InfraNodeListItemSchema,
   MAX_PAGE_LIMIT,
   type PageQuery,
+  type Permission,
+  type Role,
   softwareFingerprint,
 } from '@lazyit/shared';
 import {
@@ -41,6 +44,7 @@ import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { Principal } from '../auth/principal';
 import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
@@ -209,10 +213,11 @@ describe('InfraService', () => {
   // here we only assert that ingest ASKS it, hands it the node's own override, puts the answer in the
   // ack, and survives it failing.
   let agentPolicy: { resolveForReport: Mock };
-  // The RolePermission matrix (ADR-0046). InfraService asks it exactly ONE question: does this human
-  // hold `asset:delete`, on the detach branch that ARCHIVES an auto-created Asset (#1202). Mocking it
-  // is also how these tests assert the SILENCE — the un-link branch must never consult it at all.
-  let permissions: { hasAll: Mock };
+  // The RolePermission matrix (ADR-0046). InfraService asks it two questions: may this caller see owner
+  // emails (#1627), and does this human hold `asset:delete` on the detach branch that ARCHIVES an
+  // auto-created Asset (#1202). Mocking it is also how these tests assert the SILENCE — the un-link
+  // branch must never consult `hasAll` at all.
+  let permissions: { hasAll: Mock; principalHas: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
   let txEdge: { create: Mock; createMany: Mock; updateMany: Mock };
@@ -310,7 +315,10 @@ describe('InfraService', () => {
     };
     // Default: the caller holds whatever is asked of them, so every pre-existing test keeps exercising
     // the path it was written for. The #1202 gate tests flip this per case.
-    permissions = { hasAll: jest.fn().mockResolvedValue(true) };
+    permissions = {
+      hasAll: jest.fn().mockResolvedValue(true),
+      principalHas: jest.fn().mockResolvedValue(true),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -3575,6 +3583,77 @@ describe('InfraService', () => {
         assetId: 'asset-1',
         activeOnly: true,
         includeUser: true,
+      });
+    });
+
+    describe('owner emails need user:read (#1627)', () => {
+      // The real resolver over the seeded matrix, so each role answers as it does in production.
+      const resolver = new PermissionResolverService({
+        rolePermission: {
+          findMany: ({ where }: { where: { role: Role } }) =>
+            Promise.resolve(
+              DEFAULT_ROLE_PERMISSIONS[where.role].map((permission) => ({
+                permission,
+              })),
+            ),
+        },
+      } as never);
+      const human = (role: Role) =>
+        ({ kind: 'human', user: { id: `u-${role}`, role } }) as never;
+      const sa = (...granted: string[]) =>
+        ({
+          kind: 'service',
+          serviceAccount: { id: 'sa-1' },
+          permissions: new Set(granted),
+        }) as never;
+
+      beforeEach(() => {
+        permissions.principalHas.mockImplementation(
+          (principal: Principal | undefined, permission: Permission) =>
+            resolver.principalHas(principal, permission),
+        );
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          label: 'web-01',
+          assetId: 'asset-1',
+        });
+        prisma.infraEdge.findMany.mockResolvedValue([]);
+        prisma.asset.findFirst.mockResolvedValue({ name: 'srv-prod-01' });
+        assignments.findAll.mockResolvedValue([
+          {
+            id: 'as-1',
+            user: {
+              id: 'u-9',
+              firstName: 'Ada',
+              lastName: 'Lovelace',
+              email: 'ada@example.com',
+              deletedAt: null,
+            },
+          },
+        ]);
+      });
+
+      it.each([
+        ['VIEWER', human('VIEWER'), null],
+        ['MEMBER', human('MEMBER'), 'ada@example.com'],
+        ['ADMIN', human('ADMIN'), 'ada@example.com'],
+        ['an infra:read service account', sa('infra:read'), null],
+        [
+          'a service account also granted user:read',
+          sa('infra:read', 'user:read'),
+          'ada@example.com',
+        ],
+        ['no principal', undefined, null],
+      ])('%s gets the owner name and email %p', async (_, principal, email) => {
+        const detail = await service.getNodeDetail('node-1', principal);
+
+        expect(detail.owners).toEqual([
+          expect.objectContaining({
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+            email,
+          }),
+        ]);
       });
     });
 

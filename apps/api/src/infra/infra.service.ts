@@ -477,9 +477,10 @@ export interface InfraNodeFilters {
   ids?: string[];
   /**
    * Case-insensitive search over the row's visible text — label, IP, the linked Asset's inventory
-   * name, and each ACTIVE owner's name/email. It has to run in the DATABASE: the Servers table used
-   * to filter the loaded array in memory, which under a page becomes a false "no results" for
-   * anything outside the window (the exact bug ADR-0030 §2 fixed for four other lists).
+   * name, and each ACTIVE owner's name (and email, for a `user:read` caller only — #1627). It has to
+   * run in the DATABASE: the Servers table used to filter the loaded array in memory, which under a
+   * page becomes a false "no results" for anything outside the window (the exact bug ADR-0030 §2
+   * fixed for four other lists).
    */
   q?: string;
 }
@@ -587,8 +588,14 @@ type InfraNodeListRow = Prisma.InfraNodeGetPayload<{
 /** One Servers row as the page returns it; the CSV export maps its columns from this. */
 export type InfraNodeExportRow = ReturnType<typeof projectInfraNodeListRow>;
 
-/** Privacy-safe flattening shared by the compatibility array and the first-party page. */
-function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
+/**
+ * Privacy-safe flattening shared by the compatibility array and the first-party page. Owner emails
+ * only reach a caller holding `user:read` (#1627): `infra:read` alone is VIEWER-default.
+ */
+function projectInfraNodeListRow(
+  { asset, ...node }: InfraNodeListRow,
+  ownerEmails: boolean,
+) {
   const liveAsset = asset?.deletedAt === null ? asset : null;
   return {
     ...node,
@@ -598,7 +605,7 @@ function projectInfraNodeListRow({ asset, ...node }: InfraNodeListRow) {
       userId: assignment.user.id,
       firstName: assignment.user.firstName,
       lastName: assignment.user.lastName,
-      email: assignment.user.email,
+      email: ownerEmails ? assignment.user.email : null,
       deletedAt: assignment.user.deletedAt,
     })),
   };
@@ -718,10 +725,10 @@ export class InfraService {
     private readonly autoConfirm: InfraAutoConfirmService,
     // The #1140 policy channel — resolution only; every WRITE to a policy scope is a human route.
     private readonly agentPolicy: AgentPolicyService,
-    // The RolePermission matrix (ADR-0046). Injected for exactly ONE decision: whether the caller may
-    // ARCHIVE the auto-created Asset a detach would soft-delete (#1202). It answers a question the
-    // `@RequirePermission` decorator cannot, because the answer depends on a stored row — see
-    // {@link detachAsset}. AuthModule is @Global, so no module wiring is needed.
+    // The RolePermission matrix (ADR-0046), for two decisions the route decorator cannot make: whether
+    // the caller may see owner emails (#1627), and whether it may ARCHIVE the auto-created Asset a
+    // detach would soft-delete (#1202), which depends on a stored row — see {@link detachAsset}.
+    // AuthModule is @Global, so no module wiring is needed.
     private readonly permissions: PermissionResolverService,
   ) {}
 
@@ -3837,13 +3844,14 @@ export class InfraService {
    * projection and privacy mapper are shared with the first-party page, so compatibility does not
    * preserve the archived-Asset disclosure bug.
    */
-  async listNodes(filters: LegacyInfraNodeFilters) {
+  async listNodes(filters: LegacyInfraNodeFilters, principal?: Principal) {
+    const ownerEmails = await this.canReadOwnerEmails(principal);
     const rows = await this.prisma.infraNode.findMany({
-      where: this.buildNodeListWhere(filters),
+      where: this.buildNodeListWhere(filters, ownerEmails),
       orderBy: INFRA_NODE_DEFAULT_ORDER,
       select: INFRA_NODE_LIST_SELECT,
     });
-    return rows.map(projectInfraNodeListRow);
+    return rows.map((row) => projectInfraNodeListRow(row, ownerEmails));
   }
 
   /**
@@ -3888,8 +3896,13 @@ export class InfraService {
    * (soft-deleted) USER still surfaces with its `deletedAt` set, so the UI renders the same "left the
    * company" affordance (history kept, ADR-0019).
    */
-  async listNodePage(filters: InfraNodeFilters, page: PageQuery) {
-    const where = this.buildNodeListWhere(filters);
+  async listNodePage(
+    filters: InfraNodeFilters,
+    page: PageQuery,
+    principal?: Principal,
+  ) {
+    const ownerEmails = await this.canReadOwnerEmails(principal);
+    const where = this.buildNodeListWhere(filters, ownerEmails);
     const { take, skip } = offsetOf(page);
     // An allowlisted sort still gets the unique `id` appended. Sorting by `label` re-opens exactly
     // the tie the default order closed — two hosts can share a label — and under a window a partial
@@ -3919,13 +3932,16 @@ export class InfraService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    const items = rows.map(projectInfraNodeListRow);
+    const items = rows.map((row) => projectInfraNodeListRow(row, ownerEmails));
     return pageOf(items, total, page);
   }
 
-  /** The Servers CSV export's reads (ADR-0103): the page's `where` and projection, walked by keyset. */
-  nodeExportSource(filters: InfraNodeFilters) {
-    const where = this.buildNodeListWhere(filters);
+  /**
+   * The Servers CSV export's reads (ADR-0103): the page's `where` and projection, walked by keyset.
+   * `ownerEmails` only decides whether `q` may match an owner's email; the CSV never carries one.
+   */
+  nodeExportSource(filters: InfraNodeFilters, ownerEmails: boolean) {
+    const where = this.buildNodeListWhere(filters, ownerEmails);
     return {
       count: () => this.prisma.infraNode.count({ where }),
       fetchBatch: async (
@@ -3939,8 +3955,16 @@ export class InfraService {
             take,
             select: INFRA_NODE_LIST_SELECT,
           })
-        ).map(projectInfraNodeListRow),
+        ).map((row) => projectInfraNodeListRow(row, ownerEmails)),
     };
+  }
+
+  /**
+   * Whether owner emails may reach this caller (#1627) — the `user:read` the directory itself requires.
+   * Public because the export route asks it before choosing its `where`.
+   */
+  canReadOwnerEmails(principal?: Principal): Promise<boolean> {
+    return this.permissions.principalHas(principal, 'user:read');
   }
 
   /**
@@ -3950,6 +3974,7 @@ export class InfraService {
    */
   private buildNodeListWhere(
     filters: InfraNodeFilters,
+    ownerEmails: boolean,
   ): Prisma.InfraNodeWhereInput {
     const q = filters.q?.trim();
     return {
@@ -3999,12 +4024,17 @@ export class InfraService {
                                 mode: 'insensitive' as const,
                               },
                             },
-                            {
-                              email: {
-                                contains: q,
-                                mode: 'insensitive' as const,
-                              },
-                            },
+                            // Matching an email the row then withholds would make `q` an email oracle.
+                            ...(ownerEmails
+                              ? [
+                                  {
+                                    email: {
+                                      contains: q,
+                                      mode: 'insensitive' as const,
+                                    },
+                                  },
+                                ]
+                              : []),
                           ],
                         },
                       },
@@ -4151,7 +4181,10 @@ export class InfraService {
         // promise an outcome the detach does not perform.
         assetAutoCreated = assetSpecs[INFRA_AUTO_ASSET_MARKER] === true;
       }
-      owners = await this.resolveOwners(node.assetId);
+      owners = await this.resolveOwners(
+        node.assetId,
+        await this.canReadOwnerEmails(principal),
+      );
       articleLinks = await this.resolveArticleLinks(node.assetId, principal);
     }
 
@@ -4352,7 +4385,7 @@ export class InfraService {
   }
 
   /** Active owners of an asset (multi-owner), each a lean summary; via the active AssetAssignment join. */
-  private async resolveOwners(assetId: string) {
+  private async resolveOwners(assetId: string, ownerEmails: boolean) {
     const rows = await this.assignments.findAll({
       assetId,
       activeOnly: true,
@@ -4365,7 +4398,7 @@ export class InfraService {
         userId: user.id,
         firstName: user.firstName,
         lastName: user.lastName,
-        email: user.email,
+        email: ownerEmails ? user.email : null,
         deletedAt: user.deletedAt,
       };
     });

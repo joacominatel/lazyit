@@ -1282,7 +1282,7 @@ function OwnersSection({ owners }: { owners: InfraNodeOwner[] }) {
                 <UserAvatar
                   firstName={owner.firstName}
                   lastName={owner.lastName}
-                  email={owner.email}
+                  email={owner.email ?? owner.userId}
                   size="sm"
                   className={gone ? "opacity-50 grayscale" : undefined}
                 />
@@ -1303,9 +1303,11 @@ function OwnersSection({ owners }: { owners: InfraNodeOwner[] }) {
                       </Badge>
                     ) : null}
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {owner.email}
-                  </p>
+                  {owner.email ? (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {owner.email}
+                    </p>
+                  ) : null}
                 </div>
               </li>
             );

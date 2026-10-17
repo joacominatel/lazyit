@@ -354,6 +354,7 @@ export class InfraController {
   listNodes(
     @Query() query: Record<string, unknown>,
     @Res({ passthrough: true }) res: Response,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     this.assertAllowedQueryKeys(query, LEGACY_INFRA_NODE_LIST_QUERY_KEYS);
     res.setHeader('Deprecation', 'true');
@@ -362,11 +363,14 @@ export class InfraController {
     const kind = this.parseStringQuery(query.kind, 'kind');
     const status = this.parseStringQuery(query.status, 'status');
     const state = this.parseStringQuery(query.state, 'state');
-    return this.infra.listNodes({
-      kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
-      status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
-      state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
-    });
+    return this.infra.listNodes(
+      {
+        kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
+        status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
+        state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
+      },
+      principal,
+    );
   }
 
   @Get('nodes/page')
@@ -420,7 +424,7 @@ export class InfraController {
     name: 'q',
     required: false,
     description:
-      "Case-insensitive substring over label / ipAddress / the linked Asset's name / each active owner's name+email.",
+      "Case-insensitive substring over label / ipAddress / the linked Asset's name / each active owner's name, and their email for a user:read caller.",
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
@@ -439,7 +443,10 @@ export class InfraController {
     description: 'Sort direction (default asc when sort is set).',
   })
   @ApiOkResponse({ type: InfraNodeListPageDto })
-  listNodePage(@Query() query: Record<string, unknown>) {
+  listNodePage(
+    @Query() query: Record<string, unknown>,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
     this.assertAllowedQueryKeys(query, INFRA_NODE_PAGE_QUERY_KEYS);
     const limit = this.parseStringQuery(query.limit, 'limit');
     const offset = this.parseStringQuery(query.offset, 'offset');
@@ -450,6 +457,7 @@ export class InfraController {
     return this.infra.listNodePage(
       this.parseNodeFilters(query),
       parsePageQuery({ limit, offset, page, sort, dir }),
+      principal,
     );
   }
 
@@ -490,13 +498,14 @@ export class InfraController {
   @ApiQuery({ name: 'assetIds', required: false })
   @ApiQuery({ name: 'q', required: false })
   @ApiOkResponse({ description: 'The filtered nodes as CSV (text/csv).' })
-  exportNodes(
+  async exportNodes(
     @Query() query: Record<string, unknown>,
     @CurrentPrincipal() principal: Principal,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     this.assertAllowedQueryKeys(query, INFRA_NODE_EXPORT_QUERY_KEYS);
     const filters = this.parseNodeFilters(query);
+    const ownerEmails = await this.infra.canReadOwnerEmails(principal);
     return this.exports.exportCsv({
       resource: 'INFRA_NODES',
       principal,
@@ -504,7 +513,7 @@ export class InfraController {
       filters: { ...filters },
       columns: INFRA_NODE_EXPORT_COLUMNS,
       filename: 'servers',
-      ...this.infra.nodeExportSource(filters),
+      ...this.infra.nodeExportSource(filters, ownerEmails),
     });
   }
 

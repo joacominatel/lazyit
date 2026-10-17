@@ -54,8 +54,8 @@ there is no column on the server to order by. Sort by Name to group them predict
 
 ## Searching and filtering
 
-- **Search** matches the **name**, **IP**, the linked **asset name** and the **owner** (name or
-  email) as you type. The search runs across your **whole estate**, not just the page you are looking
+- **Search** matches the **name**, **IP**, the linked **asset name** and the **owner** (name, or
+  email if your role can view the user directory) as you type. The search runs across your **whole estate**, not just the page you are looking
   at — so a machine on page four is found from page one, and "no results" genuinely means no results.
 - **Kind**, **Status** and **State** dropdowns narrow the list. *State* distinguishes **confirmed**
   nodes from **pending** ones — pending nodes are servers the
