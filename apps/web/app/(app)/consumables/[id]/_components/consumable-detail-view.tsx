@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type {
   ConsumableMovement,
+  ConsumableMovementQuery,
   ConsumableMovementType,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -58,6 +59,9 @@ import { STOCK_STATUS_TONE, stockTone } from "../../_components/stock-badge";
 import { StockMovementDialog } from "../../_components/stock-movement-dialog";
 
 /** Stock tone → its i18n key under `consumables.detail` for the display label. */
+/** The Movements panel lists the whole ledger, and its export takes the same query. */
+const MOVEMENT_QUERY: ConsumableMovementQuery = {};
+
 const STATUS_LABEL_KEY = {
   ok: "statusInStock",
   low: "statusLowStock",
@@ -132,7 +136,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
 
   const { data: consumable, isLoading, isError, error, refetch } =
     useConsumable(id);
-  const { data: movements } = useConsumableMovements(id);
+  const { data: movements } = useConsumableMovements(id, MOVEMENT_QUERY);
   const { data: categories } = useConsumableCategories();
   const deleteConsumable = useDeleteConsumable();
 
@@ -355,7 +359,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
         actions={
           <ExportButton
             path={consumableMovementsExportPath(id)}
-            params={consumableMovementFilterParams()}
+            params={consumableMovementFilterParams(MOVEMENT_QUERY)}
             total={movements?.length}
             filename="consumable-movements"
             permission="consumable:read"
