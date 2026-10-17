@@ -5,17 +5,23 @@ import {
 } from '@nestjs/common';
 import type {
   CreateApplication,
+  DeletedFilter,
   PageQuery,
   UpdateApplication,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type Application } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectApplication } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { applicationMoneyToDb, applicationMoneyToWire } from '../common/money';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 
 /** Optional filters for listing applications. */
 export interface ApplicationFilters {
@@ -80,16 +86,44 @@ export class ApplicationsService {
       }),
       this.prisma.application.count({ where, ...escapeHatch }),
     ]);
-    // Derived license seats (#949): ONE distinct query for the whole page, folded in memory — no
-    // per-row fan-out (N+1). Absent app → 0 seats used.
+    return pageOf(await this.toListItems(items), total, page);
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where` and rows, walked newest first by keyset. */
+  exportSource(filters: ApplicationFilters, deleted: DeletedFilter) {
+    const where: Prisma.ApplicationWhereInput = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.application.count({ where, ...escapeHatch }),
+      fetchBatch: async (after: KeysetCursor<string> | null, take: number) =>
+        this.toListItems(
+          await this.prisma.application.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            ...escapeHatch,
+          }),
+        ),
+    };
+  }
+
+  /**
+   * List rows: money on the wire plus the derived license seats (#949), ONE distinct query for the whole
+   * set, folded in memory — no per-row fan-out (N+1). Absent app → 0 seats used.
+   */
+  private async toListItems(items: Application[]) {
     const seatsUsed = await this.seatsUsedByApplication(
       items.map((application) => application.id),
     );
-    const withSeats = items.map((application) => ({
+    return items.map((application) => ({
       ...applicationMoneyToWire(application),
       seatsUsed: seatsUsed.get(application.id) ?? 0,
     }));
-    return pageOf(withSeats, total, page);
   }
 
   /**

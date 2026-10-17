@@ -2633,7 +2633,7 @@ export const purchasesToolset: AiToolset = {
     ),
     unexposed(
       PurchaseOrdersController,
-      ['export'],
+      ['export', 'exportPendingLines'],
       'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
     unexposed(
@@ -2653,6 +2653,11 @@ export const purchasesToolset: AiToolset = {
       ['remove', 'restore'],
       'Archive and restore of a supplier are ADMIN-only lifecycle actions (ADR-0099 §9), done from the ' +
         'Suppliers page; not part of the chat purchase flow (#1478).',
+    ),
+    unexposed(
+      SuppliersController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
     unexposed(
       SuppliersController,

@@ -8,14 +8,18 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateLocationSchema,
@@ -31,6 +35,8 @@ import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { parseDeleteResolution } from '../common/delete-resolution';
+import { ExportService } from '../common/export';
+import { LOCATION_EXPORT_COLUMNS } from './locations-export';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
@@ -47,10 +53,25 @@ class LocationDeleteImpactDto extends createZodDto(
   LocationDeleteImpactSchema,
 ) {}
 
+/** The list's `type` filter: absent, or one of the location types (400 otherwise). */
+function parseLocationType(type?: string): LocationType | undefined {
+  if (type === undefined) return undefined;
+  const result = LocationTypeSchema.safeParse(type);
+  if (!result.success) {
+    throw new BadRequestException(
+      `Invalid type. Expected one of: ${LocationTypeSchema.options.join(', ')}`,
+    );
+  }
+  return result.data;
+}
+
 @ApiTags('locations')
 @Controller('locations')
 export class LocationsController {
-  constructor(private readonly locations: LocationsService) {}
+  constructor(
+    private readonly locations: LocationsService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get()
   @RequirePermission('location:read')
@@ -121,16 +142,7 @@ export class LocationsController {
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
   ) {
-    let parsedType: LocationType | undefined;
-    if (type !== undefined) {
-      const result = LocationTypeSchema.safeParse(type);
-      if (!result.success) {
-        throw new BadRequestException(
-          `Invalid type. Expected one of: ${LocationTypeSchema.options.join(', ')}`,
-        );
-      }
-      parsedType = result.data;
-    }
+    const parsedType = parseLocationType(type);
     const pageQuery = parsePageQuery({
       limit,
       offset,
@@ -143,6 +155,44 @@ export class LocationsController {
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
     return this.locations.findPage({ q, type: parsedType }, pageQuery);
+  }
+
+  // STATIC route declared BEFORE `:id` so `/locations/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('location:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every location matching the list filters (ADR-0103): same permission, filters and rows as GET /locations, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: [...LocationTypeSchema.options],
+  })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered locations as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('q') q?: string,
+    @Query('type') type?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const filters = { q, type: parseLocationType(type) };
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    return this.exports.exportCsv({
+      resource: 'LOCATIONS',
+      principal,
+      response: res,
+      filters: { ...filters, deleted: slice },
+      columns: LOCATION_EXPORT_COLUMNS,
+      filename: 'locations',
+      ...this.locations.exportSource(filters, slice),
+    });
   }
 
   @Get(':id')
