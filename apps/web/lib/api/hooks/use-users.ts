@@ -1,5 +1,5 @@
 import { MAX_RESOLVE_USER_IDS, type UserListItem } from "@lazyit/shared";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import {
   getCurrentUser,
@@ -63,11 +63,7 @@ const EMPTY_USER_MAP: ReadonlyMap<string, UserListItem> = new Map();
  * (`GET /users?ids=a,b,c`), so it resolves ANY referenced user regardless of directory size.
  *
  * The ids are de-duplicated and SORTED into a stable query key (shared cache across callers asking for
- * the same set, order-independent) and the batch is capped at `MAX_RESOLVE_USER_IDS` to match the
- * server bound — a larger set is sliced (never hit in a 5–20-person org). Returns a `Map<id, user>`:
- * a caller reads `.get(id)` for the name (`${firstName} ${lastName}`) or the whole row where a chip
- * needs it (avatars, Quick View). An unresolved id (soft-deleted, or beyond the cap) is simply absent
- * from the map, and the caller falls back to its own placeholder — exactly as before.
+ * the same set, order-independent), split into batches of the server bound `MAX_RESOLVE_USER_IDS`.
  *
  * `enabled` gates the fetch when the caller lacks `user:read` (would 403 — issue #935); the query is
  * also inert when there are no ids to resolve.
@@ -76,27 +72,38 @@ export function useUserNames(
   ids: string[],
   { enabled = true }: { enabled?: boolean } = {},
 ): ReadonlyMap<string, UserListItem> {
-  // De-duplicate + sort for a stable key, and cap to the server bound so a large set can't 400.
-  const uniqueIds = useMemo(
-    () => [...new Set(ids)].sort().slice(0, MAX_RESOLVE_USER_IDS),
-    [ids],
-  );
-  const { data } = useQuery({
-    queryKey: userKeys.names(uniqueIds),
-    // Pair `ids` with `limit` = the id count so the single page returns every requested user (the ids
-    // are capped at the page ceiling, so one page always suffices).
-    queryFn: ({ signal }) =>
-      getUsers({ ids: uniqueIds, limit: uniqueIds.length }, signal),
-    select: (page) =>
-      new Map(page.items.map((u) => [u.id, u] as const)) as ReadonlyMap<
-        string,
-        UserListItem
-      >,
-    enabled: enabled && uniqueIds.length > 0,
-    // The resolved names rarely change within a session; a brief stale read is harmless.
-    staleTime: 5 * 60 * 1000,
+  const batches = useMemo(() => {
+    const unique = [...new Set(ids)].sort();
+    const out: string[][] = [];
+    for (let i = 0; i < unique.length; i += MAX_RESOLVE_USER_IDS) {
+      out.push(unique.slice(i, i + MAX_RESOLVE_USER_IDS));
+    }
+    return out;
+  }, [ids]);
+  const pages = useQueries({
+    queries: batches.map((batch) => ({
+      queryKey: userKeys.names(batch),
+      // `limit` = the batch size, so one page returns every requested user.
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getUsers({ ids: batch, limit: batch.length }, signal),
+      enabled,
+      // The resolved names rarely change within a session; a brief stale read is harmless.
+      staleTime: 5 * 60 * 1000,
+    })),
+    combine: pageData,
   });
-  return data ?? EMPTY_USER_MAP;
+  return useMemo(() => {
+    const map = new Map<string, UserListItem>();
+    for (const page of pages) {
+      for (const user of page?.items ?? []) map.set(user.id, user);
+    }
+    return map.size > 0 ? map : EMPTY_USER_MAP;
+  }, [pages]);
+}
+
+// Module-level so `useQueries` keeps the combined array stable while no batch changes.
+function pageData<T>(results: { data: T | undefined }[]): (T | undefined)[] {
+  return results.map((result) => result.data);
 }
 
 /**
