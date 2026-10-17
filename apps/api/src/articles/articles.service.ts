@@ -26,6 +26,7 @@ import { Prisma } from '../../generated/prisma/client';
 import type { Article, User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import {
   isHumanPrincipal,
   isServicePrincipal,
@@ -190,7 +191,8 @@ export class ArticlesService {
   ) {}
 
   /**
-   * A single page of non-deleted articles, newest-updated first by default. PUBLISHED is visible to
+   * A single page of live articles — or, with `page.deleted === 'only'` (#1647, ADMIN-gated by the
+   * controller), of archived ones — newest-updated first by default. PUBLISHED is visible to
    * all; DRAFT only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
    * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
    * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
@@ -210,7 +212,18 @@ export class ArticlesService {
     currentUser?: User,
     principal?: Principal,
   ) {
-    const { where } = await this.listScope(filters, currentUser, principal);
+    const { where: scope } = await this.listScope(
+      filters,
+      currentUser,
+      principal,
+    );
+    const where = { ...scope, ...deletedWhere(page.deleted) };
+    // Same opaque spread as the assets list: Prisma's args type does not carry the ADR-0032 escape hatch.
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(
+      page.deleted,
+    )
+      ? { includeSoftDeleted: true }
+      : {};
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
@@ -219,8 +232,9 @@ export class ArticlesService {
         take,
         skip,
         select: ARTICLE_LIST_SELECT,
+        ...escapeHatch,
       }),
-      this.prisma.article.count({ where }),
+      this.prisma.article.count({ where, ...escapeHatch }),
     ]);
     // Flatten Prisma's nested `_count.links` into the flat `linkCount` the DTO exposes. The lean rows
     // carry `Date`s; the API serializes them to ISO strings at the HTTP boundary (same as findOne) —

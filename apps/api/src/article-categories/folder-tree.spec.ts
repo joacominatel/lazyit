@@ -1,4 +1,8 @@
-import { expandFolderSubtrees, type FolderTreeEdge } from './folder-tree';
+import {
+  expandFolderSubtrees,
+  rollUpFolderCounts,
+  type FolderTreeEdge,
+} from './folder-tree';
 
 // root ─┬─ a ── a1 ── a1x
 //       └─ b
@@ -68,5 +72,48 @@ describe('expandFolderSubtrees (#1539)', () => {
 
   it('returns an empty list for no roots', () => {
     expect(expandFolderSubtrees([], TREE)).toEqual([]);
+  });
+});
+
+describe('rollUpFolderCounts (#1651)', () => {
+  const counts = (entries: Record<string, number>) =>
+    new Map(Object.entries(entries));
+
+  it("totals each folder's own count with every descendant's, at every depth", () => {
+    const totals = rollUpFolderCounts(
+      TREE,
+      counts({ root: 12, a: 3, a1: 2, a1x: 1, b: 3, other: 4 }),
+    );
+    expect(Object.fromEntries(totals)).toEqual({
+      root: 21,
+      a: 6,
+      a1: 3,
+      a1x: 1,
+      b: 3,
+      other: 4,
+    });
+  });
+
+  it('a folder with no own count still totals its descendants', () => {
+    const totals = rollUpFolderCounts(TREE, counts({ a1x: 5 }));
+    expect(totals.get('root')).toBe(5);
+    expect(totals.get('a')).toBe(5);
+    expect(totals.get('b')).toBe(0);
+  });
+
+  it('does not add past a folder missing from the list — a soft-deleted parent cuts the chain', () => {
+    const live = TREE.filter((f) => f.id !== 'a1');
+    const totals = rollUpFolderCounts(live, counts({ root: 1, a1x: 7 }));
+    expect(totals.get('root')).toBe(1);
+    expect(totals.get('a1x')).toBe(7);
+  });
+
+  it('is cycle-safe: a corrupt parentId loop counts each folder once per walk', () => {
+    const cyclic: FolderTreeEdge[] = [
+      { id: 'x', parentId: 'y' },
+      { id: 'y', parentId: 'x' },
+    ];
+    const totals = rollUpFolderCounts(cyclic, counts({ x: 1, y: 2 }));
+    expect(Object.fromEntries(totals)).toEqual({ x: 3, y: 3 });
   });
 });

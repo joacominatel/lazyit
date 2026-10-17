@@ -54,7 +54,7 @@ grupos.
   el interruptor que permite que agentes de IA externos como Claude Code se conecten por MCP. Todo
   empieza desactivado. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup).
 - **Tareas** — la bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento.
-  La automatización de cada aplicación se configura en su propia pestaña de Flujos.
+  La automatización de cada aplicación se configura en su propia pestaña de Automatización.
 
 **Sistema**
 

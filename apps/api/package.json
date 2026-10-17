@@ -24,7 +24,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:wire": "jest --config ./test/jest-wire.json --runInBand"
+    "test:wire": "jest --config ./test/jest-wire.json --runInBand",
+    "test:db": "node --experimental-vm-modules node_modules/.bin/jest --config ./test/jest-db.json --runInBand"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.63",

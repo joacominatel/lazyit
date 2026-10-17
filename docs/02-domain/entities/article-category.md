@@ -114,6 +114,10 @@ The list read shape carries a **computed `articleCount`** (`.nullish()`, ADR-009
 Prisma `_count` of that folder's **live** articles scoped to the caller's visibility (folder-access
 rules + own drafts), so it never reveals a count a viewer couldn't reach; it is **not a stored column**
 (no migration) and the UI **hides the number when absent** (older API / a folder the caller can't read).
+Beside it, **`totalArticleCount`** (`.nullish()`, #1651) is that count summed over the folder **and every
+live descendant**: what the folder rail shows. It is computed in memory from the same rows (no extra
+query), a descendant the caller cannot read adds 0 (so a restricted subfolder never shows through its
+parent), and it is `null` exactly where `articleCount` is.
 
 Both read shapes also carry a **derived `hasAccessRules` boolean** (`.optional()`, #1299 —
 [[0060-kb-folder-access-control]] §3 amendment): whether the folder carries an access restriction,

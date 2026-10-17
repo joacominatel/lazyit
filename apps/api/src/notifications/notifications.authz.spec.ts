@@ -5,7 +5,8 @@ import {
   INestApplication,
   Injectable,
 } from '@nestjs/common';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { APP_GUARD, APP_PIPE, Reflector } from '@nestjs/core';
+import { ZodValidationPipe } from 'nestjs-zod';
 import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import request from 'supertest';
 import { NotificationsController } from './notifications.controller';
@@ -78,6 +79,9 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
   const markAllRead = jest.fn();
   const dismiss = jest.fn();
   const dismissAll = jest.fn();
+  const findGroups = jest.fn();
+  const findGroupItems = jest.fn();
+  const markGroupRead = jest.fn();
 
   const findMany = jest.fn(({ where }: { where: { role: Role } }) =>
     Promise.resolve(
@@ -104,8 +108,12 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
             markAllRead,
             dismiss,
             dismissAll,
+            findGroups,
+            findGroupItems,
+            markGroupRead,
           },
         },
+        { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: PrismaService, useValue: prisma },
         PermissionResolverService,
         { provide: APP_GUARD, useClass: FakeAuthGuard },
@@ -127,6 +135,9 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
     markAllRead.mockReset();
     dismiss.mockReset();
     dismissAll.mockReset();
+    findGroups.mockReset();
+    findGroupItems.mockReset();
+    markGroupRead.mockReset();
   });
 
   it('a MEMBER now REACHES the service (200) and is forwarded as { userId, role: MEMBER } for scoping', async () => {
@@ -298,5 +309,132 @@ describe('Notification bell authZ — relaxed + service-scoped (ADR-0056 amendme
     const res = await request(app.getHttpServer()).get('/notifications');
     expect(res.status).toBe(403);
     expect(findPage).not.toHaveBeenCalled();
+  });
+  describe('grouped bell (#1649)', () => {
+    const empty = { items: [], total: 0, limit: 50, offset: 0 };
+
+    it('groups default to UTC and forward the caller, the zone and the page', async () => {
+      findGroups.mockResolvedValue(empty);
+      const plain = await request(app.getHttpServer())
+        .get('/notifications/groups')
+        .set('X-Test-Role', 'MEMBER')
+        .set('X-Test-User', 'member-uuid');
+      expect(plain.status).toBe(200);
+      expect(findGroups).toHaveBeenLastCalledWith(
+        { userId: 'member-uuid', role: 'MEMBER' },
+        'UTC',
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      );
+
+      const zoned = await request(app.getHttpServer())
+        .get('/notifications/groups')
+        .query({
+          tz: 'America/Argentina/Buenos_Aires',
+          limit: '20',
+          offset: '40',
+        })
+        .set('X-Test-Role', 'ADMIN')
+        .set('X-Test-User', 'admin-uuid');
+      expect(zoned.status).toBe(200);
+      expect(findGroups).toHaveBeenLastCalledWith(
+        { userId: 'admin-uuid', role: 'ADMIN' },
+        'America/Argentina/Buenos_Aires',
+        expect.objectContaining({ limit: 20, offset: 40 }),
+      );
+    });
+
+    it('groups reject a bad zone or page with 400 before the service', async () => {
+      for (const query of [
+        { tz: '+03:00' },
+        { tz: 'Mars/Olympus' },
+        { limit: '500' },
+      ]) {
+        const res = await request(app.getHttpServer())
+          .get('/notifications/groups')
+          .query(query)
+          .set('X-Test-Role', 'ADMIN')
+          .set('X-Test-User', 'admin-uuid');
+        expect(res.status).toBe(400);
+      }
+      expect(findGroups).not.toHaveBeenCalled();
+    });
+
+    it('group items forward the parsed key and reject a malformed one', async () => {
+      findGroupItems.mockResolvedValue(empty);
+      const ok = await request(app.getHttpServer())
+        .get('/notifications/groups/items')
+        .query({ type: 'critical_app_access', day: '2026-10-17' })
+        .set('X-Test-Role', 'VIEWER')
+        .set('X-Test-User', 'viewer-uuid');
+      expect(ok.status).toBe(200);
+      expect(findGroupItems).toHaveBeenCalledWith(
+        { userId: 'viewer-uuid', role: 'VIEWER' },
+        { type: 'critical_app_access', day: '2026-10-17', tz: 'UTC' },
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      );
+
+      for (const query of [
+        { day: '2026-10-17' },
+        { type: 'critical_app_access' },
+        { type: 'not_a_type', day: '2026-10-17' },
+        { type: 'critical_app_access', day: '2026-02-30' },
+      ]) {
+        const res = await request(app.getHttpServer())
+          .get('/notifications/groups/items')
+          .query(query)
+          .set('X-Test-Role', 'ADMIN')
+          .set('X-Test-User', 'admin-uuid');
+        expect(res.status).toBe(400);
+      }
+      expect(findGroupItems).toHaveBeenCalledTimes(1);
+    });
+
+    it('read-group validates its body and forwards it, never colliding with :id/read', async () => {
+      markGroupRead.mockResolvedValue({ marked: 312, unread: 4 });
+      const res = await request(app.getHttpServer())
+        .patch('/notifications/read-group')
+        .send({
+          type: 'critical_app_access',
+          day: '2026-10-17',
+          tz: 'Europe/Madrid',
+        })
+        .set('X-Test-Role', 'ADMIN')
+        .set('X-Test-User', 'admin-uuid');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ marked: 312, unread: 4 });
+      expect(markGroupRead).toHaveBeenCalledWith(
+        { userId: 'admin-uuid', role: 'ADMIN' },
+        { type: 'critical_app_access', day: '2026-10-17', tz: 'Europe/Madrid' },
+      );
+      expect(markRead).not.toHaveBeenCalled();
+
+      const bad = await request(app.getHttpServer())
+        .patch('/notifications/read-group')
+        .send({ type: 'critical_app_access', day: 'today' })
+        .set('X-Test-Role', 'ADMIN')
+        .set('X-Test-User', 'admin-uuid');
+      expect(bad.status).toBe(400);
+      expect(markGroupRead).toHaveBeenCalledTimes(1);
+    });
+
+    it('a SERVICE-ACCOUNT principal is 403 on every grouped route', async () => {
+      const groups = await request(app.getHttpServer())
+        .get('/notifications/groups')
+        .set('X-Test-Service', '1');
+      const items = await request(app.getHttpServer())
+        .get('/notifications/groups/items')
+        .query({ type: 'low_stock', day: '2026-10-17' })
+        .set('X-Test-Service', '1');
+      const mark = await request(app.getHttpServer())
+        .patch('/notifications/read-group')
+        .send({ type: 'low_stock', day: '2026-10-17' })
+        .set('X-Test-Service', '1');
+      expect([groups.status, items.status, mark.status]).toEqual([
+        403, 403, 403,
+      ]);
+      expect(findGroups).not.toHaveBeenCalled();
+      expect(findGroupItems).not.toHaveBeenCalled();
+      expect(markGroupRead).not.toHaveBeenCalled();
+    });
   });
 });

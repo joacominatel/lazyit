@@ -7,14 +7,14 @@ subcategory: building-a-workflow
 
 # Building a workflow
 
-You build workflows from an application's **Workflows** tab. A workflow needs two things: a
+You build workflows from an application's **Automation** tab. A workflow needs two things: a
 **connection** that says *how* lazyit reaches the external system, and a **sequence of steps** that
 says *what* to do when the trigger fires.
 
 ## 1. Add a connection
 
 A connection is the reusable transport-and-credential configuration for one external system. Open
-the Workflows tab and choose **Add connection**, then pick a **type**:
+the Automation tab and choose **Add connection**, then pick a **type**:
 
 - **API / HTTP** — call any HTTP/JSON API (for example, "create a Jira user").
 - **Webhook** — send a signed POST to a webhook URL (for example, to your own automation platform).

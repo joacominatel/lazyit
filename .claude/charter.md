@@ -111,6 +111,7 @@ bunx tsc --noEmit -p packages/shared/tsconfig.build.json
 bunx tsc --noEmit -p apps/api/tsconfig.json
 bunx tsc --noEmit -p apps/web/tsconfig.json
 bunx tsc --noEmit -p apps/agent/tsconfig.json  # compile does not typecheck it (ADR-0074 §7)
+bunx tsc --noEmit -p scripts/demo-data/tsconfig.json  # typed against shared's dist
 
 (cd apps/api && node node_modules/.bin/jest)   # Node, NOT bun — jest 30 does not run under Bun
 (cd packages/shared && bun test)

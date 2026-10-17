@@ -18,7 +18,7 @@ or feed to a script. Look for the **Export CSV** button at the top of the list.
 | **Reports** (activity) | One row per event: when, action, entity, actor and summary. |
 | **Reports → Audit log** | One row per event of the source tab you have open (Secrets, Permissions, Service accounts or Exports). |
 | **Users** | One row per person: name, email, role, whether the account is active, directory details, manager, and how many assets and grants they hold. |
-| **An application's page** | Its access grants, active and revoked: who, access level, granted and revoked by whom and when, expiry and notes. The button is on the *Active access* panel. |
+| **An application's page** | Its access grants: the active ones when the *Active* or *Expiring* view is selected, every grant including revoked ones under *Revoked* or *All*. Who, access level, granted and revoked by whom and when, expiry and notes. The button is on the *Access* tab. |
 | **A person's page** | The same grant columns for that person, active and revoked. The button is on the *Access* tab. |
 | **Consumables** | One row per item: name, SKU, category, unit, current stock, reorder threshold and whether it is low. |
 | **Purchases** | One row per purchase: reference, supplier, status, receipt state, dates, invoice numbers, units ordered, received and pending, total and currency. |
