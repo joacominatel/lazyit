@@ -39,12 +39,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
-import {
-  INFRA_LIVE_POLL_MS,
-  INFRA_NODE_EXPORT_PATH,
-  infraNodeFilterParams,
-  useInfraNodes,
-} from "@/lib/api/hooks/use-infra-nodes";
+import { INFRA_NODE_EXPORT_PATH, infraNodeFilterParams } from "@/lib/api/endpoints/infra";
+import { INFRA_LIVE_POLL_MS, useInfraNodes } from "@/lib/api/hooks/use-infra-nodes";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";

@@ -61,9 +61,6 @@ import {
   infraNodeIdBatches,
 } from "./infra-node-batches";
 
-// Re-exported so the Servers table can export without naming a path its "never hides endpoints" guard scans for.
-export { INFRA_NODE_EXPORT_PATH, infraNodeFilterParams } from "../endpoints/infra";
-
 /**
  * Query keys + read/write hooks for the infra topology canvas + drill-in panel (ADR-0070, issues
  * #741 + #742).
