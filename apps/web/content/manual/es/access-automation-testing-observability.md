@@ -50,7 +50,7 @@ destino y los nombres de los campos mapeados) y saltar a la **tarea manual** si 
 > *nombres* de los campos mapeados (no sus valores) y un resultado a grandes rasgos. Los secretos
 > nunca se registran.
 
-La pestaña Flujos de trabajo de la aplicación también muestra las **Ejecuciones recientes**, y cada
+La pestaña Automatización de la aplicación también muestra las **Ejecuciones recientes**, y cada
 concesión lleva una pequeña etiqueta — **Aprovisionado**, **Aprovisionando…** o **Requiere
 atención** — para que veas de un vistazo si la automatización de una concesión se completó.
 

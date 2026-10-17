@@ -8,7 +8,7 @@ subcategory: troubleshooting
 # Resolución de problemas de la automatización de accesos
 
 Cuando la automatización no hace lo que esperas, la cronología de la ejecución casi siempre te dice
-por qué. Empieza ahí: abre la pestaña **Flujos de trabajo** de la aplicación, busca la ejecución (o
+por qué. Empieza ahí: abre la pestaña **Automatización** de la aplicación, busca la ejecución (o
 fíjate en la etiqueta de la concesión — **Requiere atención** significa que una ejecución falló) y lee
 su [cronología](/help/access-automation-testing-observability).
 
