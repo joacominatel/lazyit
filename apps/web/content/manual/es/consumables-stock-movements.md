@@ -81,6 +81,9 @@ opcionales). Registra el mismo movimiento.
 Si no tienes permiso para ver personas, activos o ubicaciones, el destinatario de una entrega aparece
 como *restringido*: ves que las unidades fueron a alguien o a algún lugar, pero no a quién.
 
+**Exportar CSV**, en el panel *Consumibles entregados*, descarga las entregas que lista el panel, con sus
+filtros — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Ítems retornables y devoluciones
 
 Algunos insumos vuelven: unos auriculares en préstamo, el control de un proyector, un cargador de
@@ -131,3 +134,5 @@ El panel **Movimientos** de la página de detalle lista cada movimiento del más
 mostrando su tipo, la cantidad con signo (`+`, `−` o `=`), adónde fue una entrega (o qué entrega
 devuelve una devolución), el motivo si lo hay, **quién** lo realizó y cuándo. Un movimiento hecho por una persona muestra a esa persona; uno hecho automáticamente (por
 ejemplo, por una cuenta de servicio) aparece como **Sistema**.
+
+**Exportar CSV**, en el panel **Movimientos**, descarga todo el registro del ítem — mira [Exportar datos](/help/notifications-activity-data-export).

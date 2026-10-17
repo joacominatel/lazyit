@@ -22,6 +22,9 @@ Open **Locations** and create a new one. A location has:
 
 Floor is a **label, not a number** — values like "Ground", "Basement 1" or "Mezzanine" are fine.
 
+**Export CSV** on the Locations list downloads every location matching the current search and type
+filter — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Location types
 
 Each location is classified by a type, chosen from a fixed set:

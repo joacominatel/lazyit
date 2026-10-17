@@ -53,6 +53,8 @@ asking, which application, the requested level, any justification, and when it w
 Reviewing the queue needs the access-requests read permission; approving or denying needs the same
 permission as granting access. See [Roles & permissions](/help/permissions).
 
+**Export CSV** above the queue downloads every pending request — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Tracking your requests
 
 Open your **Profile** to see **My access requests** — every request you've raised and its current

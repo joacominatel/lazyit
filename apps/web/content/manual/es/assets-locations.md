@@ -22,6 +22,9 @@ Abre **Ubicaciones** y crea una nueva. Una ubicación tiene:
 
 El piso es una **etiqueta, no un número** — valores como "PB", "Subsuelo 1" o "Entrepiso" son válidos.
 
+**Exportar CSV**, en la lista de Ubicaciones, descarga todas las ubicaciones que coinciden con la búsqueda y
+el filtro de tipo actuales — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Tipos de ubicación
 
 Cada ubicación se clasifica con un tipo, elegido de un conjunto fijo:

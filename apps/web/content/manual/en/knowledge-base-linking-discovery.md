@@ -72,6 +72,9 @@ highlighted. On narrow screens the tree collapses behind a **Folders** toggle. S
 folder you are in appear as quiet rows at the top of the list, so you can drill down like a file
 explorer.
 
+**Export CSV**, next to the filters, downloads the article index you are browsing: metadata only, never
+the text, and only the articles you can open — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Search
 
 The search box searches the full **body** of published articles — not just their titles and excerpts

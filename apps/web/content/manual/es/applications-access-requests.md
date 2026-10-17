@@ -55,6 +55,8 @@ quién pide, qué aplicación, el nivel solicitado, la justificación (si hay) y
 Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar o rechazar requiere el
 mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
 
+**Exportar CSV**, sobre la cola, descarga todas las solicitudes pendientes — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Seguir tus solicitudes
 
 Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado

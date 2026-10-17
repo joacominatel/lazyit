@@ -64,6 +64,9 @@ there is no column on the server to order by. Sort by Name to group them predict
 
 Active filters appear as removable chips below the toolbar, and a **Clear** action resets them all.
 
+**Export CSV**, at the end of the filter bar, downloads every node matching the search and filters, not
+just the page — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Paging through the list
 
 The table shows a page at a time, with the **page controls at the bottom**: how many rows you are
