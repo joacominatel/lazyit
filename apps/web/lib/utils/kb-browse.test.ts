@@ -3,6 +3,7 @@ import {
   kbNarrowedBeyondView,
   DEFAULT_KB_SORT,
   kbActiveView,
+  kbArchivedListActive,
   kbBrowseMode,
   kbSortParam,
   kbViewHref,
@@ -104,6 +105,22 @@ describe("parseIncludeSubfolders", () => {
     expect(parseIncludeSubfolders("1")).toBe(false);
     expect(parseIncludeSubfolders("TRUE")).toBe(false);
     expect(parseIncludeSubfolders(null)).toBe(false);
+  });
+});
+
+describe("kbArchivedListActive", () => {
+  test("an administrator with archived=only gets the archived list", () => {
+    expect(kbArchivedListActive("only", true)).toBe(true);
+  });
+
+  test("a non-admin stays on the live list whatever the URL says", () => {
+    expect(kbArchivedListActive("only", false)).toBe(false);
+  });
+
+  test("any other value is the live list", () => {
+    expect(kbArchivedListActive(null, true)).toBe(false);
+    expect(kbArchivedListActive("ALL", true)).toBe(false);
+    expect(kbArchivedListActive("true", true)).toBe(false);
   });
 });
 

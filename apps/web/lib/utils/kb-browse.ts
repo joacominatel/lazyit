@@ -148,6 +148,10 @@ export function parseIncludeSubfolders(raw: string | null | undefined): boolean 
   return raw === "true";
 }
 
+export function kbArchivedListActive(raw: string | null | undefined, isAdmin: boolean): boolean {
+  return isAdmin && raw === "only";
+}
+
 /** The three positions of the status segmented control. */
 export type KbStatusSegment = "all" | ArticleStatus;
 
