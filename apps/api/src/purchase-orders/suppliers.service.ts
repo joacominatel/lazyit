@@ -109,7 +109,7 @@ export class SuppliersService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.supplier.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,

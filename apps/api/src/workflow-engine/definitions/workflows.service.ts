@@ -85,7 +85,7 @@ export class WorkflowsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.applicationWorkflow.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
       }),

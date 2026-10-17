@@ -10,6 +10,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
+import {
+  postgresLikeFindMany,
+  walkAllPages,
+} from '../../test/prisma/offset-window';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for the P2002 error class + erased types; the stand-in is defined INSIDE the factory
@@ -535,6 +539,25 @@ describe('AccessRequestsService', () => {
         applicationId: APP_ID,
         requesterId: REQUESTER,
       });
+    });
+
+    it('serves every request exactly once across pages when they share a createdAt (#1644)', async () => {
+      const createdAt = new Date('2026-10-01T00:00:00Z');
+      const rows = Array.from({ length: 23 }, (_, i) => ({
+        id: `req_${String(i).padStart(3, '0')}`,
+        createdAt,
+      }));
+      accessRequest.findMany.mockImplementation(postgresLikeFindMany(rows));
+      accessRequest.count.mockResolvedValue(rows.length);
+
+      const served = await walkAllPages(
+        (offset) =>
+          service.findPage({}, { limit: 5, offset, deleted: 'active' }),
+        5,
+      );
+
+      expect(served).toHaveLength(rows.length);
+      expect(new Set(served)).toEqual(new Set(rows.map((r) => r.id)));
     });
   });
 });

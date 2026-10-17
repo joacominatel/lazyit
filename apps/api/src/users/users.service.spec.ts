@@ -22,6 +22,10 @@ import {
   PasswordLifecycleService,
 } from '../auth/local/password-lifecycle.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import {
+  postgresLikeFindMany,
+  walkAllPages,
+} from '../../test/prisma/offset-window';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -2317,7 +2321,7 @@ describe('UsersService', () => {
       expect(user.findMany).toHaveBeenCalledWith({
         // The default `active` slice scopes the list to live users (ADR-0041).
         where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 50,
         skip: 0,
       });
@@ -2408,11 +2412,9 @@ describe('UsersService', () => {
         { limit: 50, offset: 0, sort: 'email', dir: 'asc', deleted: 'active' },
       );
       const call = (
-        user.findMany.mock.calls as Array<
-          [{ orderBy: Record<string, unknown> }]
-        >
+        user.findMany.mock.calls as Array<[{ orderBy: unknown }]>
       )[0][0];
-      expect(call.orderBy).toEqual({ email: 'asc' });
+      expect(call.orderBy).toEqual([{ email: 'asc' }, { id: 'desc' }]);
 
       await expect(
         service.findPage(
@@ -2428,6 +2430,27 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    it('serves every user exactly once across pages when they share a createdAt (#1644)', async () => {
+      const createdAt = new Date('2026-10-01T00:00:00Z');
+      const rows = Array.from({ length: 23 }, (_, i) => ({
+        id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        createdAt,
+        managerId: null,
+        managerName: null,
+      }));
+      user.findMany.mockImplementation(postgresLikeFindMany(rows));
+      user.count.mockResolvedValue(rows.length);
+
+      const served = await walkAllPages(
+        (offset) =>
+          service.findPage({}, { limit: 5, offset, deleted: 'active' }),
+        5,
+      );
+
+      expect(served).toHaveLength(rows.length);
+      expect(new Set(served)).toEqual(new Set(rows.map((r) => r.id)));
+    });
+
     it('deleted=only returns soft-deleted (offboarded) users via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
       user.findMany.mockResolvedValue([{ id: 'gone' }]);
       user.count.mockResolvedValue(1);
@@ -2439,7 +2462,7 @@ describe('UsersService', () => {
 
       expect(user.findMany).toHaveBeenCalledWith({
         where: { deletedAt: { not: null } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 50,
         skip: 0,
         includeSoftDeleted: true,

@@ -1152,7 +1152,7 @@ export class ArticlesService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         select: ARTICLE_LIST_SELECT,

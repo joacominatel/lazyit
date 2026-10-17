@@ -781,7 +781,7 @@ export class PurchaseReceivingService {
       this.prisma.$queryRaw<{ id: string }[]>`
         SELECT l."id" ${pending}
          ORDER BY po."orderDate" ASC NULLS LAST, po."createdAt" ASC, po."id" ASC,
-                  l."position" ASC, l."createdAt" ASC
+                  l."position" ASC, l."createdAt" ASC, l."id" ASC
          LIMIT ${take} OFFSET ${skip}`,
       this.prisma.$queryRaw<{ total: number }[]>`
         SELECT COUNT(*)::int AS "total" ${pending}`,

@@ -28,9 +28,7 @@ type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
 
 type DataCall = [{ data: Record<string, unknown> }];
 type UpdateCall = [{ where: { id: string }; data: Record<string, unknown> }];
-type FindManyCall = [
-  { where?: Record<string, unknown>; orderBy?: Record<string, unknown> },
-];
+type FindManyCall = [{ where?: Record<string, unknown>; orderBy?: unknown }];
 
 describe('ApplicationsService', () => {
   let service: ApplicationsService;
@@ -82,7 +80,7 @@ describe('ApplicationsService', () => {
     );
 
     const calls = application.findMany.mock.calls as FindManyCall[];
-    expect(calls[0][0].orderBy).toEqual({ name: 'asc' });
+    expect(calls[0][0].orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
     // The default `active` slice scopes the list to live rows (ADR-0041).
     expect(calls[0][0].where).toEqual({ deletedAt: null });
     // Each row carries the derived seatsUsed (#949) — 0 with no active grants.
@@ -150,7 +148,7 @@ describe('ApplicationsService', () => {
     );
 
     const calls = application.findMany.mock.calls as FindManyCall[];
-    expect(calls[0][0].orderBy).toEqual({ vendor: 'desc' });
+    expect(calls[0][0].orderBy).toEqual([{ vendor: 'desc' }, { id: 'desc' }]);
   });
 
   it('findPage rejects an unknown sort field with 400', async () => {

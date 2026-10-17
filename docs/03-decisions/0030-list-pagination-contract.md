@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-17
 deciders: [Joaquín Minatel]
 ---
 
@@ -115,11 +115,11 @@ Per-resource sortable-field allowlists:
 | Endpoint | `sort` keys | default order |
 | --- | --- | --- |
 | `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost` (the last three added for the list's purchase & warranty columns, #1511; empty values sort last in both directions) | `createdAt desc`; every order then `id desc` (§9 tiebreaker, #1511) |
-| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc` |
-| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
-| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
-| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc` |
-| `GET /asset-models` (§8, #199) | `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt` | `createdAt desc` |
+| `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc`; every order then `id desc` (§9, #1644) |
+| `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc`; every order then `id desc` (§9, #1644) |
+| `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
+| `GET /locations` | `name`, `type`, `createdAt`, `updatedAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
+| `GET /asset-models` (§8, #199) | `name`, `manufacturer`, `sku`, `createdAt`, `updatedAt` | `createdAt desc`; every order then `id desc` (§9, #1644) |
 
 ### 2. Four more lists migrated onto `Page<T>` + server-side `q` + sort
 
@@ -557,6 +557,19 @@ an explicit `createdAt < c OR (createdAt = c AND id < i)` predicate and no Prism
 inserted mid-export, and costs O(offset) on deep batches. An export also ignores `sort` / `dir`: its
 order is fixed so scripts and the importer see a stable file. The list keeps offset paging; moving the
 activity feed to keyset is possible later with the view's new `sourceKey` but is not decided here.
+
+## Amendment (2026-10-17) — the `id` tiebreaker on every offset list (#1644)
+
+§9 made the unique `id` tiebreaker a contract rule, but only the asset, infra node, purchase order and
+article lists followed it. A demo-data run that walked every page of `GET /users` and `GET /access-grants`
+missed rows that shared a bulk-created timestamp. Every offset-paginated list now ends its `ORDER BY`
+with `id`, allowlisted sort or default: users, applications, consumables, locations, asset models and
+suppliers (after the resolved sort); access grants (`grantedAt desc`), access requests and `/mine`,
+notifications, workflows, workflow connections, workflow secrets, workflow runs and manual tasks
+(`createdAt desc`); the KB reverse lookups (`updatedAt desc`); and the purchase pending-lines read (its
+raw `ORDER BY` gains the line `id`). Lists that already sort by a unique key (`id`, an article's
+`version`) or already break ties (the activity feed, AUD-032) are unchanged. A new list follows the same
+rule.
 
 ## References
 

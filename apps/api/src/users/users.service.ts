@@ -268,7 +268,13 @@ export class UsersService {
       ? { includeSoftDeleted }
       : {};
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({ where, orderBy, take, skip, ...escapeHatch }),
+      this.prisma.user.findMany({
+        where,
+        orderBy: [orderBy, { id: 'desc' }],
+        take,
+        skip,
+        ...escapeHatch,
+      }),
       this.prisma.user.count({ where, ...escapeHatch }),
     ]);
     // Resolve the manager descriptor for every row on the page in ONE batched query (ADR-0058), so the

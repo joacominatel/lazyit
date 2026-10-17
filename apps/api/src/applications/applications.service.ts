@@ -82,7 +82,7 @@ export class ApplicationsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.application.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,

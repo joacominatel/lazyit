@@ -118,7 +118,7 @@ export class AccessRequestsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.accessRequest.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
       }),
