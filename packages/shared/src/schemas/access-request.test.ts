@@ -14,6 +14,14 @@ describe("CreateAccessRequestSchema", () => {
     expect(parsed.requesterId).toBe(PERSON);
   });
 
+  test("lowercases requesterId so an uppercase self id still compares equal", () => {
+    const parsed = CreateAccessRequestSchema.parse({
+      applicationId: APP_ID,
+      requesterId: PERSON.toUpperCase(),
+    });
+    expect(parsed.requesterId).toBe(PERSON);
+  });
+
   test("rejects a requesterId that is not a uuid", () => {
     expect(
       CreateAccessRequestSchema.safeParse({ applicationId: APP_ID, requesterId: "ana" }).success,
