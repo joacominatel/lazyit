@@ -26,7 +26,10 @@ From top to bottom:
    identity, sign-in and instance-wide configuration — and a status stamp (**Pending**, **Done**,
    **Rejected**…).
 2. **What will happen**, in one sentence — for example *"Give Ana Ruiz Admin access to VPN. This triggers
-   automatic provisioning through the workflow set up for VPN."*
+   automatic provisioning through the workflow set up for VPN."* Words the assistant typed itself — the
+   name of something it is creating, an access level it chose — appear in quotes inside a small shaded
+   box, so you can tell them from the names lazyit read from its records. In the sentence they are kept to
+   one line and shortened if long; the full value is in the **Before → after** rows.
 3. **Applies to** — the item that changes, with a link.
 4. **Before → after** — each field that changes. Values such as passwords show as **Hidden**.
 5. **Also affects** — other items the change touches, such as "Also affects 3 assignments".

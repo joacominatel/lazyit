@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-21
 ---
 
 # AI assistant — Frontend surfaces
@@ -1152,7 +1152,10 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
     value, and the ICU formatter succeeds; anything else is `null` and the caller shows the English field
     (`localizedText`). A missing field is the English — a row stored before #1384 reads as before. Params:
     `text` has its `<untrusted_content>` wrappers stripped (and flags the value as quoted, like any
-    untrusted text); `date` is formatted in the user's locale (a `YYYY-MM-DD` day in UTC, so it never
+    untrusted text); `input` (a value the model supplied, #1687) is bounded again with the shared
+    `boundAiSentenceInput` (a row stored before the kind existed) and delimited through the ICU formatter
+    by two private-use characters (removed from every value first, so none can be forged), so the result
+    carries `segments` (`{ text, input }[]`) next to its plain `text`; `date` is formatted in the user's locale (a `YYYY-MM-DD` day in UTC, so it never
     shifts); the two list-valued enums printed as they are — `PreviewFieldList` (mapped through the
     approval-card field labels) and `TaxonomyDependentList` (`ai.sentenceValues.taxonomyDependents.*`) —
     are mapped item by item; every other enum is a `select` subject and passes raw.
@@ -1262,12 +1265,16 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   and `aria-required` on their triggers (additive optional props on `Combobox` and `EntityMultiSelect`),
   and an inline option checkbox's id comes from the option's index, never its model-authored value.
 - **Retry** re-sends the last user message; **read-only** replaces the composer with "Start a new chat".
-- **Known limitation — the `action` sentence (G4 review item 6, tracked by the coordinator).** The
-  preview's first row is written by the backend tool and can embed strings that came from the model's
-  tool input (a name, a label, a free-text reason). The web shows it as plain, escaped text — never
-  markup, never a link — but cannot tell which words the model chose. The card's structured rows, target
-  and warnings are the authoritative description; a backend follow-up should mark or quote model-supplied
-  values inside the sentence.
+- **Model-supplied words in the `action` sentence (resolved by #1687; was the "known limitation" of G4
+  review item 6).** The preview's first row is written by the backend tool and can embed strings that
+  came from the model's tool input (the name of something it creates, an access level it typed). Those
+  params are sentence kind `input` ([[ai-assistant/tools-and-execution|tools]] §9.1): bounded and quoted
+  on the server, and rendered by `ApprovalActionSentence` (`components/ai/ai-approval-card.tsx`, used by
+  the approval card and the auto-applied record) as a monospace chip with a muted background and the
+  tooltip `ai.approval.modelInput`, distinct from database names; still plain, escaped text — never markup,
+  never a link. The full value is in the card's structured rows. The English fallback (a code this build
+  cannot render) has no segments and shows the plain sentence, as an older web build does; `/copy` and the
+  live announcement read the plain `text`.
 
 ## 11b. As built — batch previews as a table (#1387)
 
