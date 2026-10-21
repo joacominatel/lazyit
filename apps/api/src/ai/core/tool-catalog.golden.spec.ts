@@ -917,7 +917,7 @@ const GOLDEN = {
     humans: true,
     serviceAccounts: true,
     class: 'elevated',
-    channels: ['CHAT'],
+    channels: ['CHAT', 'MCP'],
   },
   workflow_connection_archive: {
     route: 'DELETE /workflow-connections/:id',
@@ -962,7 +962,7 @@ const GOLDEN = {
     humans: true,
     serviceAccounts: true,
     class: 'elevated',
-    channels: ['CHAT'],
+    channels: ['CHAT', 'MCP'],
   },
   workflow_set_enabled: {
     route: 'PATCH /workflows/:id',
@@ -980,7 +980,7 @@ const GOLDEN = {
     humans: true,
     serviceAccounts: true,
     class: 'elevated',
-    channels: ['CHAT'],
+    channels: ['CHAT', 'MCP'],
   },
 } as const;
 

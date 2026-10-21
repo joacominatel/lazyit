@@ -12,6 +12,7 @@ import {
   WorkflowStepsSchema,
   WorkflowTriggerV1Schema,
   type AiActionPreview,
+  type AiChannel,
   type AiEntityRef,
   type AiPreviewWarningCode,
   type WorkflowStep,
@@ -64,10 +65,16 @@ import {
  * This is the highest-risk toolset of the catalog: a connection plus an enabled workflow is a persistent
  * outbound channel that fires on every future grant (T-40). What bounds it here:
  *
- *   - CHAT ONLY. Every tool is `elevated` and declares `channels: ['CHAT']`; core refuses to propose on any
- *     other channel and a Service Account never proposes. Each tool re-checks it in `preview` and `run`
- *     (defence in depth): MCP and headless authoring are deferred (#1344) and a Service Account never
- *     authors, connects or enables a workflow.
+ *   - CHAT, and MCP only while DISABLED. Every tool is `elevated` and human-only. Enabling or disabling,
+ *     archiving, and every connection tool declare `channels: ['CHAT']`. `workflow_create`,
+ *     `workflow_update` and `workflow_author_version` also declare `MCP` (CEO decision Q1 on #1344, #1688;
+ *     ADR-0097 decision 3 as amended 2026-10-21): over MCP they act only on a DISABLED workflow — a
+ *     version on an enabled one carries `OUTBOUND_INTEGRATION`, which core refuses over MCP
+ *     (`AI_CHANNEL_REFUSED_WARNINGS`), and a header change on an enabled one is refused here — and the
+ *     route re-checks the enabled state under the workflow row lock (`expectedEnabled`), so a workflow
+ *     enabled meanwhile is refused at execute. No tool lists `HEADLESS`: a Service Account never authors,
+ *     connects or enables a workflow (INV-AI-17). Core refuses to propose outside the chat; each tool
+ *     re-checks human + channel in `preview` (chat only) and `run` (defence in depth).
  *   - A plain-language, server-built card. Every preview says what the automation will do in words
  *     ("every time someone is granted access to Jira, lazyit will send … to https://…"), lists every
  *     outbound host and every mapped field → token, shows old → new host on a re-point, and names the
@@ -225,23 +232,62 @@ function hasUserinfo(url: unknown): boolean {
   }
 }
 
-/** Authoring is chat-only and human-only; core already enforces it — this is the tool's own check. */
-function assertChatHuman(rt: AiToolRuntime): void {
-  if (rt.ctx.channel !== 'CHAT' || rt.ctx.identity.kind !== 'human') {
+/** The channels of the tools that change only lazyit's own definitions, never a live integration. */
+const CHAT_ONLY: readonly AiChannel[] = ['CHAT'];
+/**
+ * `workflow_create`, `workflow_update`, `workflow_author_version`: the chat, and MCP on a DISABLED workflow
+ * only (CEO decision Q1 on #1344, #1688). Never `HEADLESS` (INV-AI-17).
+ */
+const CHAT_AND_MCP: readonly AiChannel[] = ['CHAT', 'MCP'];
+
+/**
+ * Authoring is human-only, on the tool's channels; core already enforces it — this is the tool's own check.
+ * Previews are built in the chat only (MCP runs without a card), so `preview` always passes CHAT_ONLY.
+ */
+function assertHumanOn(
+  rt: AiToolRuntime,
+  channels: readonly AiChannel[] = CHAT_ONLY,
+): void {
+  if (!channels.includes(rt.ctx.channel) || rt.ctx.identity.kind !== 'human') {
     throw new ForbiddenException(
-      'Workflow authoring happens only in the lazyit chat, confirmed by a person.',
+      channels.includes('MCP')
+        ? 'Workflow authoring happens in the lazyit chat, or over MCP for a disabled workflow, by a person.'
+        : 'Workflow authoring happens only in the lazyit chat, confirmed by a person.',
     );
   }
 }
 
+/** The preview check: the card is a chat surface, whatever channels the tool runs on. */
+function assertChatHuman(rt: AiToolRuntime): void {
+  assertHumanOn(rt, CHAT_ONLY);
+}
+
 /**
- * Before any side effect: the chat/human check, and the channel refusal core lists for critical
+ * Before any side effect: the human + channel check, and the channel refusal core lists for critical
  * applications (a no-op in the chat, where step-up applies instead).
  */
-function assertMayRun(rt: AiToolRuntime, app: Row): void {
-  assertChatHuman(rt);
+function assertMayRun(
+  rt: AiToolRuntime,
+  app: Row,
+  channels: readonly AiChannel[] = CHAT_ONLY,
+): void {
+  assertHumanOn(rt, channels);
   if (app.isCritical === true) {
     assertChannelAllows(rt.ctx.channel, ['CRITICAL_APPLICATION']);
+  }
+}
+
+/**
+ * Over MCP a workflow is changed only while it is DISABLED (CEO decision Q1 on #1344). A header change
+ * (name, description, deprovision policy) carries no `OUTBOUND_INTEGRATION` warning, so it is refused here;
+ * a version is refused by the warning itself (`assertChannelAllows`). The route's `expectedEnabled`
+ * re-checks it under the row lock, so a workflow enabled after this read is refused too.
+ */
+function assertDisabledOverMcp(rt: AiToolRuntime, workflow: Row): void {
+  if (rt.ctx.channel === 'MCP' && workflow.enabled === true) {
+    throw new ForbiddenException(
+      'This workflow is enabled: over MCP a workflow can be changed only while it is disabled. Change it from the lazyit chat, where you approve it on a card.',
+    );
   }
 }
 
@@ -786,7 +832,7 @@ const workflowCreate = defineTool({
   name: 'workflow_create',
   title: 'Create an access workflow',
   description:
-    'Create the automation of an application for one trigger (administrators, chat only): ACCESS_GRANTED ' +
+    'Create the automation of an application for one trigger (administrators; the chat, or MCP): ACCESS_GRANTED ' +
     'runs every time someone is granted access to it, ACCESS_REVOKED every time access is revoked. An ' +
     'application has at most one workflow per trigger. The workflow is ALWAYS created disabled and ' +
     'empty: add its steps with workflow_author_version, then turn it on with workflow_set_enabled (which ' +
@@ -794,7 +840,7 @@ const workflowCreate = defineTool({
   domain: 'access',
   class: 'elevated',
   externalEffects: true,
-  channels: ['CHAT'],
+  channels: CHAT_AND_MCP,
   input: z.strictObject({
     application: applicationRef,
     trigger: WorkflowTriggerV1Schema,
@@ -858,7 +904,7 @@ const workflowCreate = defineTool({
   async run(input, rt) {
     const resolved = await resolveApplication(rt, input.application);
     const app = await readApplication(rt, resolved.id);
-    assertMayRun(rt, app);
+    assertMayRun(rt, app, CHAT_AND_MCP);
     const created = asRow(
       await rt.call(WorkflowsController, 'create', {
         body: {
@@ -896,12 +942,13 @@ const workflowUpdate = defineTool({
   name: 'workflow_update',
   title: 'Rename or re-configure a workflow',
   description:
-    'Change a workflow’s name, description or deprovision policy (administrators, chat only). To turn it ' +
+    'Change a workflow’s name, description or deprovision policy (administrators; over MCP only while the ' +
+    'workflow is disabled, otherwise in the chat). To turn it ' +
     'on or off use workflow_set_enabled; to change its steps use workflow_author_version.',
   domain: 'access',
   class: 'elevated',
   externalEffects: true,
-  channels: ['CHAT'],
+  channels: CHAT_AND_MCP,
   input: z
     .strictObject({
       workflow: workflowRef,
@@ -949,8 +996,11 @@ const workflowUpdate = defineTool({
   },
   async run(input, rt) {
     const { workflow, app } = await readWorkflow(rt, input.workflow);
-    assertMayRun(rt, app);
-    const body: Row = {};
+    assertMayRun(rt, app, CHAT_AND_MCP);
+    assertDisabledOverMcp(rt, workflow);
+    // #1688: the route re-checks the enabled state just read under the workflow row lock (409 if it
+    // moved), so over MCP a workflow enabled after this read is never changed.
+    const body: Row = { expectedEnabled: workflow.enabled === true };
     if (input.name !== undefined) body.name = input.name;
     if (input.description !== undefined) body.description = input.description;
     if (input.deprovisionPolicy !== undefined) {
@@ -1051,7 +1101,8 @@ const workflowAuthorVersion = defineTool({
   name: 'workflow_author_version',
   title: 'Save a workflow’s steps',
   description:
-    'Save a new version of a workflow’s steps (administrators, chat only). The steps replace the whole ' +
+    'Save a new version of a workflow’s steps (administrators; over MCP only while the workflow is disabled, ' +
+    'otherwise in the chat). The steps replace the whole ' +
     'graph; the latest version is the one that runs, so on an ENABLED workflow it is live immediately. ' +
     'REST and WEBHOOK_OUT steps call a connection of the same application (by id — create one with ' +
     'workflow_connection_create); a MANUAL step pauses the run and asks a person. A `dataMapping` maps ' +
@@ -1063,7 +1114,7 @@ const workflowAuthorVersion = defineTool({
   domain: 'access',
   class: 'elevated',
   externalEffects: true,
-  channels: ['CHAT'],
+  channels: CHAT_AND_MCP,
   input: z.strictObject({
     workflow: workflowRef,
     steps: WorkflowStepsSchema,
@@ -1143,13 +1194,22 @@ const workflowAuthorVersion = defineTool({
   },
   async run(input, rt) {
     const { workflow, app, latest } = await readWorkflow(rt, input.workflow);
-    assertMayRun(rt, app);
+    assertMayRun(rt, app, CHAT_AND_MCP);
+    const enabled = workflow.enabled === true;
+    // A version on an ENABLED workflow is live at once: OUTBOUND_INTEGRATION, which MCP and headless
+    // refuse (AI_CHANNEL_REFUSED_WARNINGS; CEO decision Q1 on #1344) — a no-op in the chat.
+    if (enabled) assertChannelAllows(rt.ctx.channel, ['OUTBOUND_INTEGRATION']);
     // SEC-077: author on top of the version just read (the card's STALE anchor already pinned it); the
-    // route 409s if another version landed in between.
+    // route 409s if another version landed in between. #1688: and on the enabled state just read — the
+    // route re-checks it under the same row lock, so a workflow enabled after this read is refused.
     const version = asRow(
       await rt.call(WorkflowsController, 'authorVersion', {
         params: { id: String(workflow.id) },
-        body: { steps: input.steps, baseVersion: versionNumberOf(latest) },
+        body: {
+          steps: input.steps,
+          baseVersion: versionNumberOf(latest),
+          expectedEnabled: enabled,
+        },
       }),
     );
     return {

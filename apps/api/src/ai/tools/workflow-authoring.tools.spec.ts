@@ -178,6 +178,8 @@ let roleMatrix: Record<Role, readonly Permission[]>;
 let offboarded: Set<string>;
 /** Workflow runs (the run list route's rows). */
 let runs: Row[];
+/** Runs as the workflow row lock is taken: a concurrent commit landing just before it (#1688 race). */
+let beforeLock: (() => void) | undefined;
 
 const REST_STEPS = [
   {
@@ -191,6 +193,7 @@ const REST_STEPS = [
 ];
 
 function fresh() {
+  beforeLock = undefined;
   offboarded = new Set();
   runs = [];
   const user = (id: string, role: Role): Row => ({
@@ -589,8 +592,13 @@ const prisma = {
     if (Array.isArray(arg)) return Promise.all(arg);
     return (arg as (tx: unknown) => Promise<unknown>)(prisma);
   }),
-  // The SEC-077 workflow row lock (`SELECT … FOR UPDATE`) — a no-op in this in-memory fake.
-  $queryRaw: jest.fn().mockResolvedValue([]),
+  // The SEC-077 workflow row lock (`SELECT "id", "enabled" … FOR UPDATE`): answers the row's enabled
+  // state (#1688, `expectedEnabled`); `beforeLock` simulates a write another transaction commits first.
+  $queryRaw: jest.fn((_sql: TemplateStringsArray, id: unknown) => {
+    beforeLock?.();
+    const row = workflows.get(String(id));
+    return Promise.resolve(row ? [{ id: row.id, enabled: row.enabled }] : []);
+  }),
 };
 
 // ─── Stubbed services ────────────────────────────────────────────────────────────────────────────
@@ -1136,7 +1144,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
 
   // ─── Who sees and may use the tools ────────────────────────────────────────────────────────────
 
-  describe('reach: chat only, administrators only, never a Service Account', () => {
+  describe('reach: chat, MCP for three disabled-only tools, administrators only, never a Service Account', () => {
     it('lists the nine tools for an ADMIN in the chat, all elevated; none for MEMBER or VIEWER', async () => {
       const listed = await tools.list(chat(ADMIN));
       expect(listed.map((t) => t.name)).toEqual(AUTHORING_TOOLS);
@@ -1147,19 +1155,18 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       expect(await tools.list(chat(VIEWER))).toEqual([]);
     });
 
-    it('lists nothing over MCP or headless — not even to an SA holding workflow:manage', async () => {
-      expect(await tools.list(mcp(ADMIN))).toEqual([]);
+    it('lists nothing headless — not even to an SA holding workflow:manage (INV-AI-17)', async () => {
       expect(await tools.list(headless(SA_MANAGER))).toEqual([]);
     });
 
-    it('an SA or an MCP client cannot invoke or propose any of them', async () => {
+    it('an SA cannot invoke or propose any of them', async () => {
       const input = {
         application: APP.other,
         trigger: 'ACCESS_GRANTED',
         name: 'x',
       };
-      for (const ctx of [headless(SA_MANAGER), mcp(ADMIN)]) {
-        const result = await tools.invoke('workflow_create', input, ctx);
+      for (const name of AUTHORING_TOOLS) {
+        const result = await tools.invoke(name, input, headless(SA_MANAGER));
         expect(result).toMatchObject({
           ok: false,
           error: { code: 'NOT_AVAILABLE' },
@@ -1186,6 +1193,209 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       expect([...invocations.values()].map((r) => r.status)).toEqual([
         'DENIED',
       ]);
+    });
+  });
+
+  // ─── MCP: disabled workflows only (CEO decision Q1 on #1344, #1688) ──────────────────────────────
+
+  describe('over MCP: authoring only while the workflow is disabled (#1688)', () => {
+    const MCP_TOOLS = [
+      'workflow_author_version',
+      'workflow_create',
+      'workflow_update',
+    ];
+    const MANUAL_STEPS = [
+      {
+        kind: 'MANUAL',
+        key: 'ask',
+        prompt: 'Create the account',
+        inputFields: [{ name: 'done', label: 'Done', type: 'boolean' }],
+      },
+    ];
+    const mcpAdmin = (): AiExecutionContext => mcp(ADMIN);
+
+    it('lists exactly the three disabled-only tools under lazyit.admin, with conservative annotations', async () => {
+      const listed = await tools.list(mcpAdmin());
+      expect(listed.map((t) => t.name)).toEqual(MCP_TOOLS);
+      for (const tool of listed) {
+        expect(tool.class).toBe('elevated');
+        expect(tool.annotations).toMatchObject({
+          readOnlyHint: false,
+          destructiveHint: true,
+          openWorldHint: true,
+        });
+      }
+      // Without lazyit.admin (the elevated class), none of them.
+      expect(
+        await tools.list({ ...mcpAdmin(), ceiling: ['read', 'write'] }),
+      ).toEqual([]);
+      // MEMBER and VIEWER lack the route's workflow:manage.
+      expect(await tools.list(mcp(MEMBER))).toEqual([]);
+    });
+
+    it('everything else stays chat-only: enabling, archiving, every connection tool', async () => {
+      for (const name of AUTHORING_TOOLS.filter(
+        (n) => !MCP_TOOLS.includes(n),
+      )) {
+        const result = await tools.invoke(
+          name,
+          { workflow: { id: WF.jiraGrant }, enabled: false },
+          mcpAdmin(),
+        );
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: 'NOT_AVAILABLE' },
+        });
+      }
+      expect(workflowTable.update).not.toHaveBeenCalled();
+    });
+
+    it('workflow_create runs over MCP and creates the workflow DISABLED, ledgered', async () => {
+      const result = await tools.invoke(
+        'workflow_create',
+        {
+          application: 'Jira',
+          trigger: 'ACCESS_REVOKED',
+          name: 'Deprovision Jira',
+        },
+        mcpAdmin(),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { workflow: { enabled: false } },
+      });
+      expect(workflowTable.create).toHaveBeenCalledTimes(1);
+      expect(
+        (workflowTable.create.mock.calls[0] as [{ data: Row }])[0].data,
+      ).toMatchObject({ enabled: false, trigger: 'ACCESS_REVOKED' });
+      const [row] = [...invocations.values()];
+      expect(row).toMatchObject({ channel: 'MCP', status: 'SUCCEEDED' });
+      expect(events(row.id)).toEqual(['ATTEMPTED', 'EXECUTED']);
+    });
+
+    it('a critical application is still refused over MCP', async () => {
+      const result = await tools.invoke(
+        'workflow_create',
+        {
+          application: 'Payroll',
+          trigger: 'ACCESS_REVOKED',
+          name: 'Deprovision Payroll',
+        },
+        mcpAdmin(),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', message: /critical/ },
+      });
+      expect(workflowTable.create).not.toHaveBeenCalled();
+    });
+
+    it('workflow_author_version on a DISABLED workflow: allowed, the route checks it is still disabled', async () => {
+      const result = await tools.invoke(
+        'workflow_author_version',
+        { workflow: { id: WF.jiraGrant }, steps: MANUAL_STEPS },
+        mcpAdmin(),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { version: 2, enabled: false },
+      });
+      expect(versions).toHaveLength(2);
+      expect(prisma.$queryRaw).toHaveBeenCalled(); // checked under the row lock
+    });
+
+    it('workflow_author_version on an ENABLED workflow: refused (OUTBOUND_INTEGRATION), nothing written', async () => {
+      workflows.get(WF.jiraGrant)!.enabled = true;
+      const result = await tools.invoke(
+        'workflow_author_version',
+        { workflow: { id: WF.jiraGrant }, steps: MANUAL_STEPS },
+        mcpAdmin(),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: expect.stringMatching(
+            /only while it is disabled/,
+          ) as unknown,
+        },
+      });
+      expect(versions).toHaveLength(1);
+    });
+
+    it('race: a workflow enabled after the tool read it is refused at execute, under the row lock', async () => {
+      // Another transaction enables the workflow between the tool's read and the version write.
+      beforeLock = () => {
+        workflows.get(WF.jiraGrant)!.enabled = true;
+      };
+      const result = await tools.invoke(
+        'workflow_author_version',
+        { workflow: { id: WF.jiraGrant }, steps: MANUAL_STEPS },
+        mcpAdmin(),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'CONFLICT', status: 409 },
+      });
+      expect(versions).toHaveLength(1);
+      expect([...invocations.values()].map((r) => r.status)).toEqual([
+        'FAILED',
+      ]);
+    });
+
+    it('workflow_update: allowed on a disabled workflow, refused on an enabled one, and race-safe', async () => {
+      const ok = await tools.invoke(
+        'workflow_update',
+        { workflow: { id: WF.jiraGrant }, name: 'Renamed over MCP' },
+        mcpAdmin(),
+      );
+      expect(ok).toMatchObject({ ok: true });
+      expect(workflows.get(WF.jiraGrant)!.name).toBe('Renamed over MCP');
+
+      workflows.get(WF.jiraGrant)!.enabled = true;
+      const enabled = await tools.invoke(
+        'workflow_update',
+        { workflow: { id: WF.jiraGrant }, deprovisionPolicy: 'EACH_GRANT' },
+        mcpAdmin(),
+      );
+      expect(enabled).toMatchObject({
+        ok: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: expect.stringMatching(
+            /only while it is disabled/,
+          ) as unknown,
+        },
+      });
+
+      workflows.get(WF.jiraGrant)!.enabled = false;
+      beforeLock = () => {
+        workflows.get(WF.jiraGrant)!.enabled = true;
+      };
+      const raced = await tools.invoke(
+        'workflow_update',
+        { workflow: { id: WF.jiraGrant }, name: 'Too late' },
+        mcpAdmin(),
+      );
+      expect(raced).toMatchObject({
+        ok: false,
+        error: { code: 'CONFLICT', status: 409 },
+      });
+      expect(workflows.get(WF.jiraGrant)!.name).toBe('Renamed over MCP');
+    });
+
+    it('the chat path is unchanged: a version on an ENABLED workflow is still proposed and approved on a card', async () => {
+      workflows.get(WF.jiraGrant)!.enabled = true;
+      const { id, preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: MANUAL_STEPS,
+      });
+      expect(preview.warnings).toContain('OUTBOUND_INTEGRATION');
+      const approved = await tools.approve(id, chat(ADMIN));
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { data: { version: 2, enabled: true } },
+      });
     });
   });
 
