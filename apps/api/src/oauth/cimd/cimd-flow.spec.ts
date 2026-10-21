@@ -19,6 +19,7 @@ import {
   type Harness,
 } from '../../../test/oauth/oauth-harness';
 import { OAuthSweeper } from '../oauth.sweeper';
+import { AUTHORIZATION_CODE_RETENTION_MS } from '../oauth.constants';
 import {
   CIMD_BUNDLED_RETRY_MS,
   CIMD_CACHE_MAX_TTL_MS,
@@ -802,8 +803,11 @@ describe('the sweeper', () => {
     expect(h.prisma.tables.oAuthClient).toHaveLength(1);
     expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(1);
 
-    // Once the code has expired, the same pass removes it and then the stale unused row.
-    const later = new Date(now.getTime() + 2 * 60 * 1000);
+    // Once the code has expired and its replay-detection retention lapsed (#1683), the same pass removes
+    // it and then the stale unused row.
+    const later = new Date(
+      now.getTime() + AUTHORIZATION_CODE_RETENTION_MS + 2 * 60 * 1000,
+    );
     expect(await sweeper.sweep(later)).toMatchObject({ codes: 1, clients: 1 });
   });
 

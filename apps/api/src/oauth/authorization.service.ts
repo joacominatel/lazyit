@@ -197,6 +197,8 @@ export class AuthorizationService {
         scopes: granted,
         resource: config.resource,
         expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
+        // The exchange is refused if this moved in between (a password change during the code's 60 s).
+        mcpCredentialEpoch: user.mcpCredentialEpoch,
       },
     });
     return { redirectTo };

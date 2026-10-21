@@ -7,6 +7,12 @@
 /** Authorization codes are single-use and live 60 seconds (INV-AI-9). */
 export const AUTHORIZATION_CODE_TTL_MS = 60 * 1000;
 
+/**
+ * How long the sweeper keeps a code row past its expiry (#1683). A redeemed row is what recognizes a
+ * replay — and revokes the grant it produced — so it is kept a while instead of collected at the next pass.
+ */
+export const AUTHORIZATION_CODE_RETENTION_MS = 15 * 60 * 1000;
+
 /** Access tokens (`lzit_oat_`) live one hour. */
 export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 
