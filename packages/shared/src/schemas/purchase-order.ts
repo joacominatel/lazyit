@@ -72,7 +72,7 @@ export const DEFAULT_PURCHASE_ORDER_LINE_KIND = "ASSET";
  *   - `SUPPLIER_MERGED`  { from: { id, name }, to: { id, name }, filledFields } — the purchase's supplier was
  *                        merged into another one, which the purchase now points at (#1496)
  *   - `LINKED_VALUES_APPLIED` { lineId, fields, assetIds, applied } — purchase values re-applied to assets
- *                        already linked to a line, by a person, after the line changed (#1502): `fields` the
+ *                        already linked to a line, explicitly, after the line changed (#1502): `fields` the
  *                        fields asked for, `assetIds` the assets actually changed, `applied` the fields each
  *                        one received
  */
