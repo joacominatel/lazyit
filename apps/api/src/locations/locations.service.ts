@@ -280,7 +280,15 @@ export class LocationsService {
     const location = await this.prisma.$transaction(
       async (tx) => {
         await this.lockLocationTree(tx);
-        await this.assertLocationLive(tx, id);
+        // Own row FOR UPDATE before the dependents (#1604): a write pointing a row here holds it FOR SHARE,
+        // so it commits first and is scanned below, or waits and then finds the location archived.
+        const live = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "locations"
+         WHERE "id" = ${id} AND "deletedAt" IS NULL
+         FOR UPDATE`;
+        if (live.length === 0) {
+          throw new NotFoundException(`Location ${id} not found`);
+        }
         const assets = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "assets"
          WHERE "locationId" = ${id} AND "deletedAt" IS NULL
