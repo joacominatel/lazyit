@@ -31,8 +31,11 @@ export function isZipImport(filename: string): boolean {
 
 /**
  * mammoth@1.x still ships a markdown writer and exposes `convertToMarkdown` at runtime, but it is
- * deprecated and absent from the published types — so we declare its shape locally. If a future
- * mammoth removes it, switch to `convertToHtml` + an HTML→markdown step (turndown). See ADR-0021.
+ * deprecated and absent from the published types — so we declare its shape locally. Because this is a
+ * cast, `tsc` cannot see the function disappear: mammoth is therefore pinned EXACTLY in package.json
+ * (#1290) and `article-import.spec.ts` guards the call against the real `sample.docx` fixture. If a
+ * future mammoth removes it, switch to `convertToHtml` + an HTML→markdown step (turndown). See ADR-0021
+ * and docs/02-domain/entities/article.md.
  */
 type MammothMarkdown = {
   convertToMarkdown(input: { buffer: Buffer }): Promise<{ value: string }>;
