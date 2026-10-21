@@ -274,6 +274,46 @@ describe('GET /assets/export (ADR-0103)', () => {
     });
   });
 
+  it('the acquisition window (#1503): asset:read alone, the same clause on the list and the export, beside q', async () => {
+    const window =
+      'acquiredFrom=2026-01-01T00:00:00.000Z&acquiredTo=2026-06-30T00:00:00.000Z&q=dell';
+    await request(app.getHttpServer())
+      .get(`/assets?role=VIEWER&${window}`)
+      .expect(200);
+    await exportCsv(`role=VIEWER&${window}`);
+
+    const range = {
+      gte: new Date('2026-01-01T00:00:00.000Z'),
+      lte: new Date('2026-06-30T00:00:00.000Z'),
+    };
+    const listWhere = whereOf(0) as Record<string, unknown>;
+    expect(listWhere).toMatchObject({
+      // The purchase date, or the creation date when there is none — an OR of its own in the AND list, so
+      // the text search's top-level OR stays intact.
+      AND: [
+        {
+          OR: [
+            { purchaseDate: range },
+            { purchaseDate: null, createdAt: range },
+          ],
+        },
+      ],
+      OR: expect.any(Array) as unknown,
+    });
+    expect(whereOf(1)).toEqual(listWhere);
+  });
+
+  it('400 on an acquisition window that is not ISO datetimes, or ends before it starts — list and export', async () => {
+    for (const bad of [
+      'acquiredFrom=2026-01-01',
+      'acquiredTo=soon',
+      'acquiredFrom=2026-07-01T00:00:00.000Z&acquiredTo=2026-06-30T00:00:00.000Z',
+    ]) {
+      await get(`/assets?role=VIEWER&${bad}`).expect(400);
+      await get(`/assets/export?role=VIEWER&${bad}`).expect(400);
+    }
+  });
+
   it('takes the purchase filters with the list’s purchaseOrder:read check', async () => {
     await exportCsv(`role=MEMBER&purchaseOrderId=${PO}`);
     expect(whereOf(0)).toMatchObject({
