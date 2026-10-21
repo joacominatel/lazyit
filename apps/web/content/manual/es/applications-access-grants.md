@@ -26,6 +26,9 @@ Abre una aplicación y elige **Otorgar acceso** arriba de la página. Eliges:
 
 Otorgar (y revocar) acceso es una acción solo de administrador de forma predeterminada.
 
+Solo puedes otorgar acceso a una persona **activa** con cuenta para iniciar sesión. lazyit rechaza
+una concesión para alguien desactivado (reactívalo antes) o para una persona solo de directorio.
+
 > Hoy el acceso se **otorga directamente** — no hay cola de aprobación. Está planificado un flujo
 > formal de solicitud y aprobación; ver [Solicitudes de acceso](/help/applications-access-requests).
 

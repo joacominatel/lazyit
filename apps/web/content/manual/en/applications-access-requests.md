@@ -69,6 +69,9 @@ request filed on someone's behalf, who filed it.
   create by hand (it runs any access workflows and is recorded in the application's access history).
 - **Deny** asks for a **reason**, which is required. The reason is shown to the requester so they know
   why.
+- If the person has been **deactivated or offboarded** since the request was filed, lazyit refuses to
+  approve it and the request stays pending. Deny it with a reason, or reactivate the person first if
+  they should get the access.
 
 Reviewing the queue needs the access-requests read permission; approving or denying needs the same
 permission as granting access. See [Roles & permissions](/help/permissions).
