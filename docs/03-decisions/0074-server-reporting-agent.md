@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-10-15
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -273,6 +273,49 @@ host keeps arriving PENDING until a human confirms it. The bulk routes are new e
 confirm, merge and discard routes are unchanged, so an operator who never opens the new affordances
 sees exactly the tray they had, plus a filter bar. Nothing in the report path changes for an instance
 with no rules beyond one indexed read that returns nothing.
+
+**Amendment (2026-10-21, #1684 — epic #1146 item 4) — the software inventory gets one cross-host read:
+a watchlist, distribution only.** §1 made installed software part of what the agent reports, and until
+now the only way to read it was one host at a time. An operator now keeps a short list of package names
+(the [[software-watch]] entity — a normalized name, created and soft-deleted, nothing else, at most 100
+live) and each one is answered with **one fleet-wide distribution** computed on read from the package
+lists agents already store in `InfraNode.specs.software`: package → versions → host counts, the hosts
+**missing** it, and the hosts we cannot speak for. The CEO's call (Q12 on #1146) fixes the scope:
+
+- **Distribution only.** No version comparison, no "outdated", no EOL flag. A version is an opaque
+  string that is counted; the buckets are ordered by host count and then as plain text, never as
+  versions.
+- **No CVE matching** — §6's air-gapped promise rules out the continuously-updated feed it needs — and
+  **no product normalization**: a watch matches by exact name after whitespace-collapse, trim and
+  lower-case, and nothing folds architecture suffixes, versions or vendor spellings together.
+- **MISSING is never a guess.** It is only said of a host that **stores** a package list without the
+  name. A host storing no list is **UNKNOWN** (`NOT_COLLECTED`) — the stored absence is exactly what
+  `collect.software: false` at any of the three #1140 scopes, or a host's local veto, leaves behind,
+  because a report with `softwareState: 'disabled'` clears the list (the §2/§3 #1142 amendment). The
+  read uses that evidence instead of re-resolving the policy, because a node carries no reporter
+  attribution (§8, #1136) and so the service-account layer cannot be resolved per node. A host whose
+  list lacks the name but whose resolvable policy (instance default + node override) excludes it by
+  glob is UNKNOWN too (`EXCLUDED_BY_POLICY`); an exclusion set only at the service-account scope or in
+  the host's local config is the stated residual.
+- **The population** is the fleet view's: live agent-reported hosts, container and guest children
+  excluded, PENDING and OFFLINE included. Retired hosts leave it when #1146 Q11 ships.
+- **Gates.** Reads `infra:read` — the same gate the per-node `specs` drill-in already sits behind, so
+  nothing new is exposed; writes `infra:manage` + human-only, like every other operator-authored infra
+  configuration. The AI tool registry leaves the routes unexposed.
+
+Nothing travels toward a host: no new collector, no policy change, no contract change on the wire. The
+contract change is `@lazyit/shared` read shapes only (in `agent-fleet.ts`, beside the fleet view).
+
+**Rejected.** *An on-demand query by name with no stored list* — it would work, but the point is the
+Patch-Tuesday glance at the same 10–30 packages, and a list everyone on the team shares is the cheap way
+to get it. *Glob or substring watches* — a pattern turns a distribution into a search and reopens the
+normalization question by the back door. *Treating "no list" as "missing"* — it would report every host
+whose operator turned software collection off as lacking every watched package.
+
+**Upgrade safety.** One **additive** migration: a new table (`software_watches`) with a live-only
+partial unique index on the name; no existing table touched, nothing to backfill. An upgraded instance
+has an empty watchlist, and because the distribution is computed on read, the first watch an operator
+adds is complete immediately over every host's already-stored list.
 
 ### §2 — The report contract (`@lazyit/shared`)
 
@@ -2396,3 +2439,5 @@ would be a separate ADR and arguably a separate product).
   the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's
   raised body limit with #1134's bounded-but-nonzero refresh cost, and closes the gap the #1139
   container work left: `syncAssetSpecs` ran on the host path only.
+- The software watchlist (distribution only, MISSING vs UNKNOWN, `infra:read`): §1 Amendment
+  (2026-10-21), issue #1684 — epic #1146 item 4, CEO decision Q12. Entity: [[software-watch]].
