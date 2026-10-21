@@ -42,6 +42,12 @@ y **asigna** al nuevo.
 > Un responsable que dejó la empresa sigue figurando como responsable activo hasta que liberes
 > explícitamente la asignación — lazyit nunca descarta registros de pertenencia en silencio.
 
+**Quien puede ver los activos ve el nombre y el correo de cada responsable**, también los Lectores, en
+la lista de activos, la página de un activo y su historial de pertenencia. Quién tiene un equipo, y cómo
+contactarlo, es parte del registro del inventario. Es deliberado, y no equivale a recorrer el directorio
+de usuarios, que sigue oculto para los Lectores por defecto. Las páginas de **Servidores** son la
+excepción: allí el correo de un responsable aparece solo si tu rol puede ver el directorio de usuarios.
+
 ## Confirmar la recepción
 
 Asignar un activo registra **quién es responsable** de él, pero no prueba que la persona realmente lo
