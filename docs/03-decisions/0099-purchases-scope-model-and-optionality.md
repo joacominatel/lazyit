@@ -372,7 +372,8 @@ deferred by the CEO; the purchase's documents panel warns that the files are not
 [[backups]] item 7 carries the manual workaround.
 
 *Delivered (2026-10-21, #1467):* the backup sidecar archives the attachments volume on every run, right
-after the app DB dump and under the same timestamp, with the dump's schedule, retention and offsite hook
+after the app DB dump and under the same timestamp, with the dump's schedule and offsite hook and its own
+7-day retention
 ([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
 backup from the first run after an update. The documents panel still shows its "not in the backup" notice;
 retiring that copy is a frontend follow-up.

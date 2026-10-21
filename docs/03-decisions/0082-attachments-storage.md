@@ -43,10 +43,15 @@ SEC-003).
 >   tarball; the reverse order would let an upload land between the two as a row without bytes.
 >   Restore is the mirror: DB, then attachments, **then** the api — the GC (§6 pass 3) removes row-less
 >   blobs past the 24 h grace, and restored blobs keep their mtime.
-> - **A full `tar.gz` per run, same retention as the dumps**, verified (`gzip -t` + `tar -t`) and promoted
->   by an atomic rename like the dump; `tmp/` is left out. Cost: about the volume's size per run, so ~15 ×
->   the volume at the 14-day default — up to ~75 GB at a full 5 GB budget. Incremental/dedup copies
->   (blobs are immutable and content-addressed) are not built.
+> - **A full `tar.gz` per run**, verified (`gzip -t` + `tar -t`) and promoted by an atomic rename like
+>   the dump; `tmp/` is left out. Incremental/dedup copies (blobs are immutable and content-addressed)
+>   are not built.
+> - **Its own retention and an opt-out (CEO decision 2026-10-21).** Each tarball costs about the volume's
+>   size, so it does not share the dumps' window: `BACKUP_ATTACHMENTS_RETENTION_DAYS` (default 7, ~8
+>   tarballs — up to ~40 GB at a full 5 GB budget) beside `BACKUP_RETENTION_DAYS` (dumps, 14, unchanged),
+>   and `BACKUP_ATTACHMENTS=false` skips the tarball for operators who back the volume up another way.
+>   The sidecar itself stays always on (its profiles are unchanged). Cost: past 7 days a dump has no
+>   matching tarball, so older restores come back without their files.
 > - **A free-space guard** (`BACKUP_MIN_FREE_MB`, default 1024) refuses the tarball before writing rather
 >   than fill the disk Postgres shares; a failed tarball keeps that run's dump, its retention and its
 >   offsite copy, and fails the run loud.

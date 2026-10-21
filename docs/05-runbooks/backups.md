@@ -128,8 +128,12 @@ right order. lazyit holds sensitive inventory/access data on a single host
 >   files uploaded after that dump have no row in it, so the GC removes them after the grace — the same
 >   uploads the older dump has no record of.
 > - The tarball is a **full copy each run** (blobs are mostly PDFs, images and Office files that are
->   already compressed, so it is about the size of the volume). See [[#Disk space and run time]]
->   before you rely on the default retention.
+>   already compressed, so it is about the size of the volume), so it has its **own, shorter retention**
+>   — `BACKUP_ATTACHMENTS_RETENTION_DAYS`, default 7 against the dumps' 14. A restore needs the pair, so
+>   only the last 7 days of runs are full pairs; older dumps restore without their files. See
+>   [[#Disk space and run time]].
+> - **Opting out** (`BACKUP_ATTACHMENTS=false`) — for an operator who backs the volume up another way
+>   (host or volume snapshots). The dump still runs; the files are then **your** responsibility.
 
 > [!info] `SESSION_SIGNING_SECRET` (local-auth mode) is rotatable and LOW-DR — not a linchpin (ADR-0086)
 > In **local-auth mode** (`AUTH_MODE=local`) the API signs its first-party session tokens (HMAC) with
@@ -239,7 +243,9 @@ Tune via `.env.prod` (all optional — sane defaults shown):
 
 ```sh
 BACKUP_CRON="30 2 * * *"     # when to run (crontab syntax). Default: daily 02:30.
-BACKUP_RETENTION_DAYS=14     # prune dumps AND attachments tarballs older than this many days. Default: 14.
+BACKUP_RETENTION_DAYS=14     # prune DB dumps older than this many days. Default: 14.
+BACKUP_ATTACHMENTS=true      # archive the attachments volume each run; false (0/no/off) skips it. Default: true.
+BACKUP_ATTACHMENTS_RETENTION_DAYS=7   # prune attachments tarballs older than this many days. Default: 7.
 BACKUP_MIN_FREE_MB=1024      # the attachments tarball must leave this much free on the ./backups disk,
                              # or the run refuses it before writing (loud). Default: 1024.
 # OPTIONAL offsite copy — OFF unless set. Runs once per file of a run (the dump, then the tarball)
@@ -252,6 +258,9 @@ BACKUP_OFFSITE_CMD=
 # Example: BACKUP_ON_FAILURE_CMD='curl -fsS -d "$1" https://hooks.example/lazyit-backup'
 BACKUP_ON_FAILURE_CMD=
 ```
+
+None of these needs a line in `.env.prod`: an install updated in place gets the defaults above —
+attachments on, tarballs kept 7 days, dumps kept 14 days as before.
 
 **It does NOT back up `.env.prod`** — copy that off-host yourself. Offsite is OFF by default
 (respects the "no mandatory cloud" stance, [[0028-secrets-and-config]]); wire `BACKUP_OFFSITE_CMD`
@@ -269,14 +278,15 @@ an encrypted bucket, an encrypted disk).
 ### Disk space and run time
 
 The tarball is a **full copy every run**, and it is about the size of the volume (the blobs are mostly
-PDFs, images and Office files, which are already compressed). With the daily default and
-`BACKUP_RETENTION_DAYS=14`, `./backups` holds about **15 tarballs** — 15 × the volume:
+PDFs, images and Office files, which are already compressed). That is why it has its own retention:
+with the daily default and `BACKUP_ATTACHMENTS_RETENTION_DAYS=7`, `./backups` holds about **8
+tarballs** — 8 × the volume (a tarball is pruned once it is more than 7 full days old):
 
-| Attachments on the volume | Tarballs kept (14 days, daily) |
-| --- | --- |
-| 300 MB | ~4.5 GB |
-| 1 GB | ~15 GB |
-| 5 GB (the default `ATTACHMENTS_MAX_TOTAL_MB` budget, full) | ~75 GB |
+| Attachments on the volume | Tarballs kept (7 days, daily — the default) | At 14 days, for comparison |
+| --- | --- | --- |
+| 300 MB | ~2.4 GB | ~4.5 GB |
+| 1 GB | ~8 GB | ~15 GB |
+| 5 GB (the default `ATTACHMENTS_MAX_TOTAL_MB` budget, full) | ~40 GB | ~75 GB |
 
 …plus the DB dumps, as before. See where you stand:
 
@@ -290,9 +300,11 @@ du -ch backups/attachments-*.tar.gz | tail -1
   `./backups` filesystem and refuses the tarball if less than `BACKUP_MIN_FREE_MB` would be left —
   `./backups` usually sits on the disk Postgres uses, and filling it would take the database down. The
   refusal is a `FAILED` run like any other (below); the DB dump of that run is kept.
-- **Need less?** Lower `BACKUP_RETENTION_DAYS` (it applies to the dumps too), give `./backups` a bigger
-  disk (mount one there), or ship each run off-host with `BACKUP_OFFSITE_CMD` and keep a shorter local
-  window.
+- **Need less?** Lower `BACKUP_ATTACHMENTS_RETENTION_DAYS` (the dumps keep their own
+  `BACKUP_RETENTION_DAYS`), give `./backups` a bigger disk (mount one there), or ship each run off-host
+  with `BACKUP_OFFSITE_CMD` and keep a shorter local window. If you back the volume up some other way,
+  `BACKUP_ATTACHMENTS=false` stops the tarballs; the ones already there still age out after
+  `BACKUP_ATTACHMENTS_RETENTION_DAYS`.
 - **Run time.** Measured under the sidecar's limits (0.5 CPU, 256 MB): about 26 s to write and 14 s to
   verify 400 MB, so roughly **10 minutes for a full 5 GB volume**. Memory stays flat — tar and gzip
   stream. The DB dump is taken first, so the run time only widens the dump-to-tarball window item #7
@@ -313,8 +325,10 @@ whole stream — it fails on truncation or corruption) and `tar -t` (every heade
 - **A failing tarball** (not enough free space, a tar error after one retry, or an archive that does
   not verify) leaves no `*.partial` and keeps the **last good tarball**. It does not cost you the
   dump: that run's dump is kept, pruned and copied offsite as usual, and the run then fails.
-- **Retention prunes a kind only after it succeeded.** A run whose tarball failed does not prune old
-  tarballs, so a string of failures never leaves you with none. Only `app-*.dump` and
+- **Retention prunes a kind only after it succeeded** (or was deliberately skipped with
+  `BACKUP_ATTACHMENTS=false`). A run whose tarball failed does not prune old tarballs, so a string of
+  failures never leaves you with none. A `BACKUP_ATTACHMENTS` that is not true/false, or a
+  non-numeric `BACKUP_ATTACHMENTS_RETENTION_DAYS`, fails the run loud (the dump is still written). Only `app-*.dump` and
   `attachments-*.tar.gz` are ever pruned — `update.sh`'s `pre-update-*` dumps and anything else you keep
   in `./backups` are left alone.
 - **A failed run logs a distinct, greppable line** — `[lazyit-backup] FAILED run <ts>: <reason>`
