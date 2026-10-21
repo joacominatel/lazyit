@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # InfraNode
@@ -247,7 +247,8 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
     is not, so for a caller without `user:read` each owner keeps `userId` and its names and carries
     `email: null`. The same gate applies to the deprecated `GET /infra/nodes` array, the drill-in
     below (and every write route that returns it), and therefore to the AI infra tools, which read
-    through these routes as the caller.
+    through these routes as the caller. The asset itself does **not** gate them: on the asset reads
+    every `asset:read` holder sees owners' emails, by decision (#1636, see [[asset]]).
     **Minus `specs`** (#1135): a lean `select` projection omits the blob, because on an agent-reported
     host it is the whole inventory (installed-software list included) and this endpoint is polled —
     every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`

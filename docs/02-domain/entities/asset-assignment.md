@@ -3,7 +3,7 @@ title: AssetAssignment
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-21
 ---
 
 # AssetAssignment
@@ -161,6 +161,16 @@ Plus the natural sub-resource endpoints on the related entities:
 - `GET /assets/:id/assignments?activeOnly=` — assignments of one [[asset]] (`404` if the asset is
   missing/soft-deleted).
 - `GET /users/:id/assignments?activeOnly=` — assignments of one [[user]].
+
+> [!important] Who sees an owner's email
+> The asset-side reads inline each assignment's `user` through the public column allowlist
+> (`PUBLIC_USER_SELECT`), email included, behind `asset:read` alone: `GET /assets/:id/assignments`,
+> the asset detail's `activeAssignments`, and the asset list row. VIEWER holds `asset:read` and not
+> `user:read`, so a VIEWER sees owners' emails here. That is a **decision**, not an oversight
+> (2026-10-21, #1636): the holder of an asset is part of the inventory record. The reasoning, and
+> the contrast with the servers reads that gate the same email behind `user:read` (#1627), are in
+> [[asset]]. The user-side read, `GET /users/:id/assignments`, starts from a person and is
+> directory-relational, so it needs `user:read` ([[user]]).
 
 All documented via Swagger ([[0018-api-documentation-swagger]]).
 

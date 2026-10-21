@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # RolePermission
@@ -76,6 +76,17 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   role matrix (`PUT /config/permissions`) — but it is never *seeded* to them. This closed the
   long-standing read-authz gap (the old DEF-001 residual). See [[user]] and
   [[0046-roles-permissions-v2]] §4.
+- **`user:read` guards the directory, not every email.** It gates listing and browsing people
+  (`/users`, the users search facet, the user-keyed nested reads) and, per surface, a few embedded
+  emails. It is **not** a rule that a person's email is visible only with `user:read`:
+  - **Asset owners — visible with `asset:read` (decided 2026-10-21, #1636).** The asset list,
+    detail and assignment reads carry each active owner's email to every `asset:read` holder,
+    VIEWER included. The holder of an asset is part of the inventory record; see [[asset]] for the
+    reasoning.
+  - **Server owners — need `user:read` (#1627).** The infra node reads, which only borrow the linked
+    asset's owners, return `email: null` without `user:read` ([[infra-node]]).
+  - So granting a role `user:read` from the matrix reveals server owners' emails to it; revoking
+    it does not hide asset owners' emails from an `asset:read` holder.
 - **Default grants are applied once per instance; revocations are durable** (issue #1314). The seed
   runs on every deploy, but it grants a default pair only when the seed-once ledger
   (`AppliedRolePermissionDefault`, below) has never recorded it, and it records the pair in the same
