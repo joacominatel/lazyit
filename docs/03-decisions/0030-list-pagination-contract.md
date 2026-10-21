@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -196,6 +196,13 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   > `GET /users?ids=a,b,c` filter (bounded by `MAX_RESOLVE_USER_IDS` = the page cap) — so names
   > resolve past the 200-row window the truncated directory silently dropped. The interactive user
   > pickers were already server-searched (#937). `useAssetModels` still uses the flat-directory pattern.
+  > **Amendment (#1659, 2026-10-21).** An id lookup sent **without** an explicit `deleted` slice also
+  > returns **offboarded** (soft-deleted) people, through the ADR-0032 escape hatch, so a history row
+  > or a grantee chip shows the name of someone who has left instead of "Unknown person". The row is
+  > the same allowlisted public shape a live row has and carries its non-null `deletedAt` as the
+  > offboarded marker; nothing new is exposed beyond what the same caller saw while the person was
+  > live. `deleted=active` keeps the lookup live-only, `deleted=only` stays the ADMIN-only archived
+  > slice, and the open list (no `ids`) is live-only as before.
 - **Server sort is wired to the UI.** Sortable column headers (`SortableHeader` →
   `toggleSort(field)`) only expose the per-resource allowlist (§1); the order is recomputed by the
   API over the **full** result set, not the page. Non-allowlisted columns (model/owners/category,

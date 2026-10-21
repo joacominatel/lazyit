@@ -168,6 +168,48 @@ describe('UsersController GET /users?ids= (batch resolver, #961)', () => {
     expect(findPage).not.toHaveBeenCalled();
   });
 
+  // Issue #1659: an id lookup without an explicit slice resolves offboarded people too.
+  it('asks findPage for offboarded people too when ids come without a deleted slice', async () => {
+    findPage.mockResolvedValue({ items: [], total: 0, limit: 1, offset: 0 });
+    const a = '11111111-1111-4111-8111-111111111111';
+    const res = await request(app.getHttpServer()).get(
+      `/users?ids=${a}&limit=1`,
+    );
+    expect(res.status).toBe(200);
+    const [filters, page] = (
+      findPage.mock.calls as Array<
+        [Record<string, unknown>, { deleted: string }]
+      >
+    )[0];
+    expect(filters).toEqual(
+      expect.objectContaining({ ids: [a], includeOffboarded: true }),
+    );
+    expect(page.deleted).toBe('active');
+  });
+
+  it('keeps an id lookup live-only when deleted=active is explicit', async () => {
+    findPage.mockResolvedValue({ items: [], total: 0, limit: 1, offset: 0 });
+    const a = '11111111-1111-4111-8111-111111111111';
+    const res = await request(app.getHttpServer()).get(
+      `/users?ids=${a}&deleted=active`,
+    );
+    expect(res.status).toBe(200);
+    const call = (
+      findPage.mock.calls as Array<[Record<string, unknown>]>
+    )[0][0];
+    expect(call).toEqual(expect.objectContaining({ includeOffboarded: false }));
+  });
+
+  it('never resolves offboarded people on the open list (no ids)', async () => {
+    findPage.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+    const res = await request(app.getHttpServer()).get('/users?q=ana');
+    expect(res.status).toBe(200);
+    const call = (
+      findPage.mock.calls as Array<[Record<string, unknown>]>
+    )[0][0];
+    expect(call).toEqual(expect.objectContaining({ includeOffboarded: false }));
+  });
+
   it('omits the ids filter when the param is absent (plain directory read)', async () => {
     findPage.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
     const res = await request(app.getHttpServer()).get('/users');
