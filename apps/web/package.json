@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "bun test",
+    "test": "bun test --isolate",
     "check:manual-parity": "bun scripts/check-manual-parity.ts",
     "check:message-parity": "bun scripts/check-message-parity.ts"
   },
