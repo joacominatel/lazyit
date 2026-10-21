@@ -112,7 +112,8 @@ Backups: `docs/05-runbooks/backups.md`.
   service can't OOM the single host.
 - **Backups**: the `backup` sidecar (profiles `prod` + `backup`, so the `--profile prod` bring-up runs it)
   runs cron: a `pg_dump` of the app database plus a tarball of the attachments volume, as a matched
-  `app-<ts>.dump` + `attachments-<ts>.tar.gz` pair in a host-mounted `./backups`, with retention on both.
+  `app-<ts>.dump` + `attachments-<ts>.tar.gz` pair in a host-mounted `./backups` — dumps kept 14 days,
+  tarballs 7 (`BACKUP_ATTACHMENTS_RETENTION_DAYS`), tarball switchable off with `BACKUP_ATTACHMENTS=false`.
   Full DR procedure (what to back up, restore order): `docs/05-runbooks/backups.md`.
 
 ## Not configured yet (reserved)
