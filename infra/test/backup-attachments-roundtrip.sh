@@ -18,9 +18,14 @@
 #   4. Disk guard: a run that would leave less than BACKUP_MIN_FREE_MB free refuses the tarball
 #      (loud FAILED line, non-zero exit, on-failure hook fired), keeps the DB dump of that run and the
 #      last good tarball, and leaves no partial file. A non-numeric BACKUP_MIN_FREE_MB fails the same way.
-#   5. Retention prunes old app-*.dump and attachments-*.tar.gz, keeps anything else in ./backups, and
-#      a failed attachments step does not prune old tarballs.
+#   5. Retention: each kind has its own window — with the defaults a 10-day-old tarball is pruned
+#      (BACKUP_ATTACHMENTS_RETENTION_DAYS=7) while a 10-day-old dump is kept (BACKUP_RETENTION_DAYS=14);
+#      anything else in ./backups is kept, and a failed attachments step does not prune old tarballs.
 #   6. The offsite hook receives both files of a run, in the documented "$1" form.
+#   7. Opt-out: BACKUP_ATTACHMENTS=false writes the dump and no tarball, exits 0, keeps the last good
+#      tarball and still ages old tarballs out; an unknown BACKUP_ATTACHMENTS or a non-numeric
+#      BACKUP_ATTACHMENTS_RETENTION_DAYS fails the run loud and keeps the dump. The defaults (on, 7 days)
+#      apply with neither variable set — what an existing install gets on update.
 #
 # Isolation: its own compose project name, temp directory, env file and volumes. It never reads or
 # writes infra/env/.env.prod, ./backups or any lazyit-prod_* volume of the checkout it runs from.
@@ -88,6 +93,9 @@ until $DC exec -T backup test -x /usr/local/bin/lazyit-backup 2>/dev/null; do
   i=$((i + 1)); [ "$i" -lt 60 ] || die "the backup sidecar never installed lazyit-backup"; sleep 1
 done
 pass "db + backup sidecar up from the real compose.yaml"
+$DC logs backup 2>/dev/null | grep -q "attachments=true, retention 7d" \
+  || { $DC logs backup >&2 || true; die "defaults: an env without BACKUP_ATTACHMENTS* did not schedule attachments on, 7 days"; }
+pass "defaults with no new variable set: attachments on, 7-day tarball retention, 14-day dumps"
 
 # --- 1. empty attachments volume --------------------------------------------------------------------
 psql_q "CREATE TABLE attachments (id text PRIMARY KEY, sha256 text NOT NULL, \"deletedAt\" timestamptz)" >/dev/null
@@ -187,15 +195,37 @@ echo "$OUT" | grep -q "BACKUP_MIN_FREE_MB must be a whole number" || { echo "$OU
 pass "disk guard: refuses before writing, keeps the dump and the last good tarball, fires the alert hook"
 
 # --- 5 + 6. retention and the offsite hook ----------------------------------------------------------
-in_backups 'mkdir -p /b/offsite'
+# DAYS10: evaluated by the container shell — a touch -d timestamp 10 days ago (busybox date).
+DAYS10='$(date -d @$(( $(date +%s) - 10 * 86400 )) "+%Y-%m-%d %H:%M:%S")'
+in_backups "mkdir -p /b/offsite && touch -d \"$DAYS10\" /b/attachments-old10.tar.gz /b/app-old10.dump"
 OUT=$(run_backup -e 'BACKUP_OFFSITE_CMD=cp "$1" /backups/offsite/') || { echo "$OUT" >&2; die "offsite: the run failed"; }
 TS4=$(ts_of "$OUT")
 in_backups "test -s /b/offsite/app-$TS4.dump && test -s /b/offsite/attachments-$TS4.tar.gz" \
   || { echo "$OUT" >&2; die "offsite: the hook did not receive both files of the run"; }
 pass "offsite hook: both files of the run copied, documented \"\$1\" form"
 in_backups 'test ! -e /b/attachments-20000101-000000.tar.gz && test ! -e /b/app-20000101-000000.dump' \
-  || die "retention: files past BACKUP_RETENTION_DAYS were not pruned"
+  || die "retention: files past their retention were not pruned"
+in_backups 'test ! -e /b/attachments-old10.tar.gz' || die "retention: a 10-day-old tarball survived the 7-day attachments retention"
+in_backups 'test -e /b/app-old10.dump' || die "retention: a 10-day-old dump was pruned (the dumps keep 14 days)"
 in_backups 'test -e /b/keep-me.txt' || die "retention: a file that is not a backup was pruned"
-pass "retention: old dumps and tarballs pruned, other files kept"
+pass "retention: tarballs 7 days, dumps 14 days (a 10-day-old tarball pruned, a 10-day-old dump kept), other files kept"
+
+# --- 7. opt-out and bad values ----------------------------------------------------------------------
+in_backups "touch -d \"$DAYS10\" /b/attachments-old10b.tar.gz"
+OUT=$(run_backup -e BACKUP_ATTACHMENTS=false) || { echo "$OUT" >&2; die "opt-out: a run with BACKUP_ATTACHMENTS=false failed"; }
+TS5=$(ts_of "$OUT")
+echo "$OUT" | grep -q "attachments: skipped (BACKUP_ATTACHMENTS=false)" || { echo "$OUT" >&2; die "opt-out: no skip line in the log"; }
+in_backups "test -s /b/app-$TS5.dump" || die "opt-out: the DB dump was not written"
+in_backups "test ! -e /b/attachments-$TS5.tar.gz" || die "opt-out: a tarball was written anyway"
+in_backups "test -s /b/attachments-$TS4.tar.gz" || die "opt-out: the last good tarball is gone"
+in_backups 'test ! -e /b/attachments-old10b.tar.gz' || die "opt-out: old tarballs no longer age out"
+pass "opt-out: BACKUP_ATTACHMENTS=false writes the dump only, exits 0, keeps the last tarball, old ones still age out"
+if OUT=$(run_backup -e BACKUP_ATTACHMENTS=maybe); then die "opt-out: BACKUP_ATTACHMENTS=maybe was accepted"; fi
+TS6=$(ts_of "$OUT")
+echo "$OUT" | grep -q "FAILED run $TS6: BACKUP_ATTACHMENTS must be true or false" || { echo "$OUT" >&2; die "opt-out: no reason for a bad BACKUP_ATTACHMENTS"; }
+in_backups "test -s /b/app-$TS6.dump && test ! -e /b/attachments-$TS6.tar.gz" || die "opt-out: bad value — dump missing or tarball written"
+if OUT=$(run_backup -e BACKUP_ATTACHMENTS_RETENTION_DAYS=week); then die "retention: a non-numeric BACKUP_ATTACHMENTS_RETENTION_DAYS was accepted"; fi
+echo "$OUT" | grep -q "BACKUP_ATTACHMENTS_RETENTION_DAYS must be a whole number" || { echo "$OUT" >&2; die "retention: no reason for a bad BACKUP_ATTACHMENTS_RETENTION_DAYS"; }
+pass "bad values: unknown BACKUP_ATTACHMENTS / non-numeric retention fail loud, the dump is kept"
 
 echo "all $PASS checks passed"

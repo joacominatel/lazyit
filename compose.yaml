@@ -293,7 +293,8 @@ services:
   #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
   # Each run dumps the app DB, then archives the attachments volume (#1467) under the SAME timestamp
   # (app-<ts>.dump + attachments-<ts>.tar.gz — a matched pair) to the host-mounted ./backups dir,
-  # prunes both kinds past the retention window, and (optional, OFF by default) runs an offsite hook
+  # prunes each kind past its own retention window (dumps 14 d, tarballs 7 d by default; the tarball
+  # can be switched off with BACKUP_ATTACHMENTS=false), and (optional, OFF by default) runs an offsite hook
   # on each file. DB first, then blobs: attachments are written blob-first (ADR-0082 §3), so every
   # row in the dump already has its blob on disk when the tarball is taken.
   # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
@@ -311,9 +312,16 @@ services:
     environment:
       # Cron schedule (crontab syntax). Default: daily at 02:30.
       BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
-      # Keep dumps (and attachments tarballs) newer than this many days; older ones are pruned after
-      # each successful run of that kind.
+      # Keep DB dumps newer than this many days; older ones are pruned after each successful dump.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # Archive the attachments volume on every run (#1467). Default ON; `false` (or 0/no/off) skips the
+      # tarball — for an operator who backs the volume up another way (host snapshots, …). The DB dump
+      # is unaffected either way. Any other value fails the attachments step loud.
+      BACKUP_ATTACHMENTS: ${BACKUP_ATTACHMENTS:-true}
+      # Keep attachments tarballs newer than this many days — its OWN window, shorter than the dumps'
+      # by default because each tarball is a full copy of the volume (CEO decision 2026-10-21, #1467).
+      # Existing tarballs keep ageing out by it even with BACKUP_ATTACHMENTS=false.
+      BACKUP_ATTACHMENTS_RETENTION_DAYS: ${BACKUP_ATTACHMENTS_RETENTION_DAYS:-7}
       # Free space (MB) the attachments tarball must leave on the ./backups filesystem. The run checks
       # `du` of the volume against `df` of /backups BEFORE writing and refuses (loud FAILED line, last
       # good tarball kept, the DB dump unaffected) rather than fill the disk the database lives on.
@@ -484,20 +492,38 @@ services:
         ERRS=""
         ATT_ERR=""
         ATT_FILE="/backups/attachments-$${TS}.tar.gz"
-        if ! tar_attachments "$$ATT_FILE"; then
+        ATT_PRUNE=1
+        case "$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}" in
+          ''|*[!0-9]*)
+            ATT_ERR="BACKUP_ATTACHMENTS_RETENTION_DAYS must be a whole number of days (got '$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}'); no attachments tarball written or pruned"
+            ATT_PRUNE=0 ;;
+        esac
+        if [ -z "$$ATT_ERR" ]; then
+          case "$$(echo "$${BACKUP_ATTACHMENTS:-true}" | tr 'A-Z' 'a-z')" in
+            true|1|yes|on)
+              if ! tar_attachments "$$ATT_FILE"; then ATT_PRUNE=0; fi ;;
+            false|0|no|off)
+              echo "[lazyit-backup] attachments: skipped (BACKUP_ATTACHMENTS=$${BACKUP_ATTACHMENTS}); the DB dump is NOT paired with a tarball" ;;
+            *)
+              ATT_ERR="BACKUP_ATTACHMENTS must be true or false (got '$${BACKUP_ATTACHMENTS}'); no attachments tarball written"
+              ATT_PRUNE=0 ;;
+          esac
+        fi
+        if [ -n "$$ATT_ERR" ]; then
           echo "[lazyit-backup] attachments step failed: $$ATT_ERR" >&2
           ERRS="$$ATT_ERR"
         fi
 
-        # Retention sweep — delete files older than BACKUP_RETENTION_DAYS, each kind only after a
-        # successful run of that kind (a failing step never prunes its last good copies). Only ever
+        # Retention sweep — dumps older than BACKUP_RETENTION_DAYS, tarballs older than
+        # BACKUP_ATTACHMENTS_RETENTION_DAYS, each kind only after a successful (or deliberately skipped)
+        # run of that kind (a failing step never prunes its last good copies). Only ever
         # matches app-*.dump / attachments-*.tar.gz (verified, promoted) files, so nothing else an
         # operator keeps here (e.g. an old zitadel-*.dump, an update.sh pre-update-*.dump) is pruned;
         # *.partial temp files are never left behind on the happy path and are removed on failure, so
         # a corrupt run can never be retained as a "real" backup.
         find /backups -name 'app-*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
-        if [ -z "$$ATT_ERR" ]; then
-          find /backups -name 'attachments-*.tar.gz' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        if [ "$$ATT_PRUNE" = 1 ]; then
+          find /backups -name 'attachments-*.tar.gz' -type f -mtime "+$${BACKUP_ATTACHMENTS_RETENTION_DAYS}" -print -delete || true
         fi
 
         # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs once per file this run
@@ -527,7 +553,7 @@ services:
         # byte-for-byte). env_file + the `environment:` block above populate this shell, and
         # `exec crond` below replaces it while keeping that env.
         echo "$$BACKUP_CRON /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
-        echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups (app DB + attachments)"
+        echo "[lazyit-backup] scheduled: $$BACKUP_CRON -> /backups (app DB, retention $${BACKUP_RETENTION_DAYS}d; attachments=$${BACKUP_ATTACHMENTS}, retention $${BACKUP_ATTACHMENTS_RETENTION_DAYS}d)"
         exec crond -f -d 8
     networks: [internal]
 
