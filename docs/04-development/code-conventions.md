@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Code Conventions
@@ -38,6 +38,12 @@ Conventions for application code. Data-model conventions live in [[conventions]]
   `apps/api/src/common/money.ts`) and every body it writes (`…MoneyToDb`). A new money column gets the
   same pair of helpers there, and a test that reads it back over HTTP; there is no global
   `BigInt.prototype.toJSON`.
+- **Secret columns are omitted by default** ([[0105-prisma-global-omit-for-secret-columns]]): the
+  Prisma client leaves the columns in `PRISMA_GLOBAL_OMIT` (`apps/api/src/prisma/prisma-omit.ts`) out of
+  every result. A read that genuinely needs one opts in with `omit: { col: false }`,
+  `omit: includeOmitted('<model>')` or a `select` naming it, and never returns that row unprojected. A new
+  hash, token, ciphertext or key column goes into the constant in the same change (a schema spec fails
+  otherwise). Type a `tx` parameter as `AppTransactionClient`, not `Prisma.TransactionClient`.
 - **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
   reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
   guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
