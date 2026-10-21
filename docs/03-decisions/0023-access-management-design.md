@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -214,6 +214,27 @@ Rows archived before this change keep their dangling reference; nothing is backf
 - A model's `move` target may sit in any category.
 - A model write that names an archived category is a `400`, and restoring a model whose category is
   archived is a `409`.
+
+**Amended 2026-10-21 (#1604): writes racing the delete.** A writer used to check that the parent was
+live with a plain read and write after it, so a delete committing in between left the new row on an
+archived parent. Writes and deletes now serialize on the parent row:
+- **Writers** lock the parent they name `FOR SHARE` inside their transaction, with the liveness test in the
+  locking statement (READ COMMITTED re-reads a row that changed while the lock waited). That covers asset
+  create, move and receive (each unit) and a purchase's delivery location ([[location]]); application and
+  consumable create and re-categorisation; and asset-model create and re-categorisation
+  ([[asset-category]]). Which writes are checked is unchanged: an update that keeps a legacy archived
+  parent still goes through.
+- **Deletes** lock their own row `FOR UPDATE` before they read the rows that point at it. The category
+  deletes already did; the location delete now does too, after the tree lock.
+- **Lock order:** the parent first, then the rows that point at it, on both sides. A writer takes its
+  parent rows (custom status, location, category) before its own row; a delete takes its own row, then
+  its dependents in id order. No transaction waits for a parent while it holds a child, so the two cannot
+  deadlock. Where one write names two parents they are different tables, and no delete locks more than
+  one parent table.
+- **Cost:** a parent rename or delete waits for in-flight writes that name the parent, and those writes
+  wait for it. Concurrent writes never wait on each other, since shared locks do not conflict.
+
+Nothing is migrated or backfilled. Rows already left on an archived parent stay as they are.
 
 Related: [[application]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

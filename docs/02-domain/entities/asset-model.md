@@ -3,7 +3,7 @@ title: AssetModel
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # AssetModel
@@ -54,7 +54,9 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
   Restoring one brings those links back; deleting it again goes through the resolution.
 - **A live category on write (SEC-041).** A create with a `categoryId`, or an update that changes it, is
   a `400` when the category is missing or archived. An update that leaves a legacy archived category in
-  place is accepted, so such a model stays editable.
+  place is accepted, so such a model stays editable. The named category is locked `FOR SHARE` in the
+  write's transaction, before the model row, so a concurrent category delete cannot strand the model
+  there (#1604).
 - `sku` is unique among **live** rows when present (a live duplicate returns `409`); a soft-deleted
   sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 

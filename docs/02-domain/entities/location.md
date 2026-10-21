@@ -3,7 +3,7 @@ title: Location
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Location
@@ -64,12 +64,20 @@ employee". Answers half of the core audit question "what do we have and **where 
 
   Without a resolution the delete is a `409` with code `DELETE_RESOLUTION_REQUIRED` and the counts,
   so an older client, a script or the AI never strands rows silently. The resolution and the soft
-  delete run in **one transaction** under the tree lock (30 s timeout; the assets and purchases are
-  locked `FOR UPDATE` in id order, the order every other purchase lock takes). Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
+  delete run in **one transaction** under the tree lock (30 s timeout). The location's own row is locked
+  `FOR UPDATE` first, then the assets and purchases `FOR UPDATE` in id order, the order every other
+  purchase lock takes. Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
   (`{ from, to }`, `to: null` on detach), all written in one insert, and each purchase an `UPDATED`
   activity row for `deliveryLocationId`. History keeps its reference: consumable deliveries (an
   append-only ledger), closed purchases, and archived assets and child locations still point at the
   archived location. Restoring the location re-links nothing.
+- **Writes that point a row here serialize with the delete (#1604).** An asset create, a move, a
+  receive (each unit), and a purchase create or update naming this location as its delivery location
+  lock the location row `FOR SHARE` inside their transaction, before their own row. The delete's
+  `FOR UPDATE` conflicts with it: either the write commits first and the delete finds and resolves the
+  new row, or the delete commits first and the write sees the location archived (`400`). Lock order
+  everywhere is the parent first, then the rows that point at it, so neither side waits for a parent
+  while holding a child. See [[0023-access-management-design]].
 - **Restore needs a live parent (AUD-080).** Restoring a location whose parent is still soft-deleted
   is a `409`: restore the parent first. Restores do not cascade
   ([[0041-soft-delete-reuse-and-restore]]). Locations already left under an archived parent keep
