@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -380,6 +380,35 @@ CEO decision, closing SEC-088. Two more `settings:manage` surfaces reached past 
   hand" rule as the user clone ([[0058-user-manager-and-clone-actions]]).
 
 `settings:manage` stays delegable for the rest of instance configuration. No data change.
+
+### Amendment — write implies read (#1518, 2026-10-21)
+
+CEO decision on #1518: the matrix cannot hold a write without its read. A role holding any non-read verb
+on a domain (`X:write`, `X:delete`, `X:manage`, `accessGrant:grant`, the `workflow` verbs, …) also holds
+that domain's `X:read`, because a write route answers with the row it wrote, and a role allowed to change
+something it cannot see is incoherent. The mapping is derived from the catalog (`IMPLIED_READS` in
+`permission.ts`: every non-read verb of a domain that has a `:read`). Three verbs are exempt because
+their read is something else: `accessRequest:create` (self-service; its read is the requester's own
+`GET /access-requests/mine`, and `accessRequest:read` stays pre-tightened away from VIEWER),
+`secret:fetch` (the service-account fetch is its own read) and `infra:report` (the agent's ingestion verb,
+which confers no read). Verbs of a read-less domain (`import:run`, `ai:use`, `ai:connect`) imply nothing.
+
+- **The editor enables the read automatically.** Ticking a permission ticks the read it needs; clearing a
+  read clears what needs it, and the save's consequential confirm names those permissions. P7's "warn,
+  never client-block" rule holds: the un-tick is not blocked.
+- **The server enforces it on save.** `PUT /config/permissions` refuses with **400**
+  `PERMISSION_READ_REQUIRED` (`violations: [{ role, permission, requires }]`) a body that grants a non-read
+  permission without its read or revokes a read a kept permission needs.
+- **Legacy matrices are tolerated and self-heal.** `GET /config/permissions` and the resolver read stored
+  rows as they are. A write-without-read the stored matrix already held is healed on the next save by
+  adding the read — never by removing the write — and audited as a GRANT. That widens what the role can
+  see for that domain; it never narrows what it can do.
+- **Defaults and presets already obey the rule** (a shared test pins it), so neither the seed nor an
+  upgrade adds anything by itself.
+- **Not extended to service accounts.** Their grants are a separate, least-privilege set
+  ([[0048-service-accounts]]); whether the rule should apply there is an open question on #1518.
+
+The P5 sentence "the only guardrails are ADMIN-immutable + catalog-membership" now has a third guardrail.
 
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 
