@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -247,7 +247,7 @@ Legend:
 | workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | ✅ built, W2-13 (every channel) |
 | workflow-engine | retry / replay | workflow:run | W + ext | ✅ built, W2-13 (every channel; no `overrides`) |
 | workflow-engine | task submit / skip / fail | workflow:task + assignee | W + ext | ✅ built, W2-13 (every channel; the assignee guard decides) |
-| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | ✅ built (W2-14), `elevated`, **chat only** (MCP/headless deferred, #1344); the dry-run is embedded in the enable card (§7 W13) |
+| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | ✅ built (W2-14), `elevated`; **chat**, plus **MCP for disabled workflows only** (W10–W12, #1688); never headless (INV-AI-17); the dry-run is embedded in the enable card (§7 W13) |
 | workflow-engine | workflow secrets | workflow:secrets | W | EXCL (the secret value would enter model context, INV-AI-5) |
 | imports (Migrator) | multi-step upload / plan / commit | import:run, human-only | W | EXCL v1 (upload; later) |
 | config | `my-permissions` | open | R | v1 `session_context` |
@@ -560,9 +560,9 @@ domain. W3 was folded out of W2 as its own tool, and W8 is two tools.
 | W7 | `workflow_run_replay` ✅ | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
 | W8 | `workflow_task_list` ✅ / `workflow_task_get` ✅ | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
 | W9 | `workflow_task_resolve` ✅ (submit\|skip\|fail) | ManualTasksController.submit (primary) / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
-| W10 | `workflow_create` ✅ built (W2-14) — always created disabled; the input has no `enabled` | WorkflowsController.create (+findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
-| W11 | `workflow_author_version` ✅ built (W2-14) | WorkflowsController.authorVersion (+findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
-| W12 | `workflow_update` ✅ built (W2-14) — name, description, deprovision policy. Executed-as is **not** exposed: the route accepts only the engine Service Account, already the default (CSEC-3) | WorkflowsController.update (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W10 | `workflow_create` ✅ built (W2-14) — always created disabled; the input has no `enabled` | WorkflowsController.create (+findAll, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
+| W11 | `workflow_author_version` ✅ built (W2-14) — over MCP only on a **disabled** workflow: on an enabled one it carries `OUTBOUND_INTEGRATION`, refused over MCP (`AI_CHANNEL_REFUSED_WARNINGS`); sends `baseVersion` and `expectedEnabled` (checked under the row lock, 409 if the workflow was enabled meanwhile) | WorkflowsController.authorVersion (+findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
+| W12 | `workflow_update` ✅ built (W2-14) — name, description, deprovision policy. Executed-as is **not** exposed: the route accepts only the engine Service Account, already the default (CSEC-3). Over MCP only on a **disabled** workflow (refused by the tool otherwise); sends `expectedEnabled` | WorkflowsController.update (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
 | W13 | `workflow_set_enabled` ✅ built (W2-14) — enabling takes `sampleAccessGrantId`; the card embeds the dry-run | WorkflowsController.update (+ WorkflowDryRunController.run, findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
 | W14 | `workflow_archive` ✅ built (W2-14) | WorkflowsController.remove (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated·D | chat | W2-14 |
 | W15 | `workflow_connection_create` / `_update` / `_archive` ✅ built (W2-14) | WorkflowConnectionsController.create / .update (+ConfigController.myPermissions for the CSEC-1 pre-check) / .remove (+Workflows findAll/findOne for "used by") | workflow:manage (+workflow:secrets, CSEC-1) | elevated | chat | W2-14 |
