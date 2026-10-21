@@ -593,3 +593,24 @@ rule.
 - [[0070-infra-topology-graph]] (the node list + the canvas that got its own read, §§9/12) ·
   [[0095-hypervisor-guest-inventory]] (`AGENT_GUESTS_MAX` = 500, the ceiling that sizes both caps) ·
   [[0074-server-reporting-agent]] (the PENDING review tray that renders `total`) · [[infra-node]].
+
+## Amendment (2026-10-21) — the per-application grant page (#1660)
+
+`GET /applications/:id/access-grants` stays the unpaged `AccessGrant[]` compatibility read, like §9's
+historical node route, so a web client that predates the change keeps working. Its first-party
+successor is `GET /applications/:id/access-grants/page`, returning the house `Page<AccessGrant>`
+envelope (`AccessGrantListPageSchema`) with `status`, `accessLevel` / `noAccessLevel` and a person `q`
+filter run server-side — the browser no longer filters a whole application's grants. The headline
+numbers the tab needs without reading every row come from
+`GET /applications/:id/access-grants/summary`.
+
+The route takes **no `sort`**: its order is derived from `status` (by person for `active` / `all`,
+soonest expiry for `expiring`, newest revocation for `revoked`), always ending on the unique `id` (§9).
+A person is a joined relation, which the scalar sort allowlist cannot express, and the three orders
+are the ones the tab already used. A `sort` value is a `400`, not ignored (§11's posture).
+
+`q` searches the grantee's name and email, so it also needs `user:read`; without it the request is a
+`403` rather than an oracle on directory data. No deprecation header is set on the old route yet —
+that is for when the web has moved. Accent folding is not applied (`ILIKE` only), unlike the old
+in-browser search: "jose" no longer finds "José".
+
