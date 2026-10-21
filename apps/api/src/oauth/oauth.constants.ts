@@ -38,10 +38,14 @@ export const DCR_MAX_REDIRECT_URIS = 10;
 export const DCR_UNNAMED_CLIENT = 'Unnamed client';
 
 /**
- * Global cap on dynamically registered clients created in the last 24 h that never obtained a grant.
- * Past it, registration answers 429 until the sweeper collects the unused ones (DCR abuse, security §6.3).
+ * Global cap on dynamically registered clients created in the last 24 h that never obtained a grant. At
+ * it, a new registration evicts the oldest UNUSED pending one (no grant, no authorization code) and
+ * answers 429 only when none is evictable (DCR abuse, security §6.3; #1683).
  */
 export const DCR_MAX_PENDING_REGISTRATIONS = 500;
+
+/** How many times one registration retries the eviction when a concurrent one took the same row. */
+export const DCR_EVICTION_ATTEMPTS = 3;
 
 /** Unused DCR clients (never exchanged a code, no grant) are hard-deleted after this long. */
 export const DCR_UNUSED_CLIENT_TTL_MS = 24 * 60 * 60 * 1000;
