@@ -36,12 +36,16 @@ import type {
   Prisma as PrismaTypes,
   SecretItem,
   SecretVault,
-  ServiceAccount,
   ServiceAccountKeypair,
   ServiceAccountVaultMembership,
   UserKeypair,
   VaultMembership,
 } from '../../generated/prisma/client';
+import {
+  includeOmitted,
+  type OmittedRow,
+  type ServiceAccountRow,
+} from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   type Principal,
@@ -89,7 +93,11 @@ export class SecretManagerService {
     principal: Principal | undefined,
   ): Promise<UserKeypairWire> {
     const userId = this.requireHumanId(principal);
-    const row = await this.prisma.userKeypair.findFirst({ where: { userId } });
+    const row = await this.prisma.userKeypair.findFirst({
+      where: { userId },
+      // The caller's OWN wrapped private-key copies, returned for client-side unlock (ADR-0105 opt-in).
+      omit: includeOmitted('userKeypair'),
+    });
     if (!row) {
       throw new NotFoundException('No keypair found for the current user');
     }
@@ -118,6 +126,7 @@ export class SecretManagerService {
     const created = await this.prisma.$transaction(async (tx) => {
       const row = await tx.userKeypair.create({
         data: { userId, ...this.keypairData(dto) },
+        omit: includeOmitted('userKeypair'), // echoed to its owner (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'KEYPAIR_CREATED',
@@ -149,6 +158,7 @@ export class SecretManagerService {
         where: { userId },
         create: { userId, ...data },
         update: { ...data, deletedAt: null },
+        omit: includeOmitted('userKeypair'), // echoed to its owner (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'KEYPAIR_RESET',
@@ -201,6 +211,7 @@ export class SecretManagerService {
           passphraseIv: dto.passphraseIv,
           kdfParams: dto.kdfParams,
         },
+        omit: includeOmitted('userKeypair'), // echoed to its owner (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'PASSWORD_CHANGED',
@@ -407,6 +418,8 @@ export class SecretManagerService {
     const rows = await this.prisma.secretItem.findMany({
       where: { vaultId },
       orderBy: { label: 'asc' },
+      // Client-side decrypt needs the envelope; membership was just asserted (ADR-0105 opt-in).
+      omit: includeOmitted('secretItem'),
     });
     return rows.map((r) => this.itemToWire(r));
   }
@@ -450,6 +463,7 @@ export class SecretManagerService {
           // Server-visible METADATA only (ADR-0075); GENERIC when omitted (back-compat default).
           kind: dto.kind ?? 'GENERIC',
         },
+        omit: includeOmitted('secretItem'), // echoed to the member (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'ITEM_CREATED',
@@ -523,6 +537,7 @@ export class SecretManagerService {
       const row = await tx.secretItem.update({
         where: { id: itemId },
         data,
+        omit: includeOmitted('secretItem'), // echoed to the member (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'ITEM_UPDATED',
@@ -549,6 +564,7 @@ export class SecretManagerService {
       const row = await tx.secretItem.update({
         where: { id: itemId },
         data: { deletedAt: new Date() },
+        omit: includeOmitted('secretItem'), // echoed to the member (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'ITEM_DELETED',
@@ -667,6 +683,8 @@ export class SecretManagerService {
     await this.getLiveVaultOr404(vaultId);
     const row = await this.prisma.vaultMembership.findUnique({
       where: { vaultId_userId: { vaultId, userId } },
+      // The caller's OWN wrapped DEK, for client-side unwrap (ADR-0105 opt-in).
+      omit: includeOmitted('vaultMembership'),
     });
     if (!row) {
       throw new NotFoundException('You are not a member of this vault');
@@ -724,6 +742,7 @@ export class SecretManagerService {
           wrappedDek: dto.wrappedDek,
           wrapVersion: dto.wrapVersion,
         },
+        omit: includeOmitted('vaultMembership'), // echoes the granter's own upload (ADR-0105 opt-in)
       });
       await this.writeAudit(tx, {
         action: 'MEMBERSHIP_GRANTED',
@@ -822,10 +841,12 @@ export class SecretManagerService {
         saved = await tx.serviceAccountKeypair.update({
           where: { serviceAccountId },
           data: this.saKeypairData(dto),
+          omit: includeOmitted('serviceAccountKeypair'), // echoes the upload (ADR-0105 opt-in)
         });
       } else {
         saved = await tx.serviceAccountKeypair.create({
           data: { serviceAccountId, ...this.saKeypairData(dto) },
+          omit: includeOmitted('serviceAccountKeypair'), // echoes the upload (ADR-0105 opt-in)
         });
       }
       await this.writeAudit(tx, {
@@ -911,6 +932,8 @@ export class SecretManagerService {
           wrappedDek: dto.wrappedDek,
           wrapVersion: dto.wrapVersion,
         },
+        // Echoes the granter's own upload (ADR-0105 opt-in).
+        omit: includeOmitted('serviceAccountVaultMembership'),
       });
       await this.writeAudit(tx, {
         action: 'MEMBERSHIP_GRANTED',
@@ -1001,6 +1024,9 @@ export class SecretManagerService {
     const membership =
       await this.prisma.serviceAccountVaultMembership.findUnique({
         where: { vaultId_serviceAccountId: { vaultId, serviceAccountId } },
+        // The headless fetch returns the SA's wrapped DEK, private key and the item envelopes for
+        // client-side decrypt (ADR-0080); all three opt back in (ADR-0105).
+        omit: includeOmitted('serviceAccountVaultMembership'),
       });
     if (!membership) {
       throw new ForbiddenException(
@@ -1009,6 +1035,7 @@ export class SecretManagerService {
     }
     const keypair = await this.prisma.serviceAccountKeypair.findFirst({
       where: { serviceAccountId },
+      omit: includeOmitted('serviceAccountKeypair'),
     });
     if (!keypair) {
       // Defensive: a granted SA always has a keypair (the grant wraps to its public key). Guard anyway.
@@ -1017,6 +1044,7 @@ export class SecretManagerService {
     const items = await this.prisma.secretItem.findMany({
       where: { vaultId },
       orderBy: { handle: 'asc' },
+      omit: includeOmitted('secretItem'),
     });
     // GUARANTEE the audit trail: write it (awaited) BEFORE returning — a programmatic read is never
     // unaudited. If the audit insert fails, the whole request fails and no ciphertext is served.
@@ -1066,7 +1094,11 @@ export class SecretManagerService {
     handle: string,
   ): Promise<ResolvedHandle> {
     const userId = this.requireHumanId(principal);
-    const item = await this.prisma.secretItem.findFirst({ where: { handle } });
+    // The chip resolve returns the envelope + the caller's own wrapped DEK (ADR-0061 §8, ADR-0105 opt-in).
+    const item = await this.prisma.secretItem.findFirst({
+      where: { handle },
+      omit: includeOmitted('secretItem'),
+    });
     if (!item) {
       throw new NotFoundException('No secret found for that handle');
     }
@@ -1081,6 +1113,7 @@ export class SecretManagerService {
     }
     const membership = await this.prisma.vaultMembership.findUnique({
       where: { vaultId_userId: { vaultId: item.vaultId, userId } },
+      omit: includeOmitted('vaultMembership'),
     });
     if (!membership) {
       throw new ForbiddenException(
@@ -1329,7 +1362,7 @@ export class SecretManagerService {
   private async getLiveItemOr404(
     vaultId: string,
     itemId: string,
-  ): Promise<SecretItem> {
+  ): Promise<OmittedRow<'secretItem', SecretItem>> {
     const item = await this.prisma.secretItem.findFirst({
       where: { id: itemId, vaultId },
     });
@@ -1346,7 +1379,7 @@ export class SecretManagerService {
    */
   private async getLiveServiceAccountOr404(
     serviceAccountId: string,
-  ): Promise<ServiceAccount> {
+  ): Promise<ServiceAccountRow> {
     const account = await this.prisma.serviceAccount.findFirst({
       where: { id: serviceAccountId },
     });

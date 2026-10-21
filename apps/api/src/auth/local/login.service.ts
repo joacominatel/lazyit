@@ -85,6 +85,8 @@ export class LoginService {
             where: {
               OR: [{ email: normalized }, { username: normalized }],
             },
+            // The one login read that needs the hash (ADR-0105 global omit); it never leaves this method.
+            omit: { passwordHash: false },
           });
     // Soft-deleted rows are already excluded by the live-filtered client, so `user` is null for them too.
 

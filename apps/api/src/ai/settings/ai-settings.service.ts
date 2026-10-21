@@ -43,6 +43,7 @@ import {
   isAllowlistableCategory,
   isPublicCategory,
 } from '../../common/egress/ip-rules';
+import { includeOmitted } from '../../prisma/prisma-omit';
 import { PrismaService } from '../../prisma/prisma.service';
 import type {
   AiSettingsReader,
@@ -528,6 +529,8 @@ export class AiSettingsService implements AiSettingsReader {
       }
       return tx.aiSettings.findUniqueOrThrow({
         where: { id: AI_SETTINGS_SINGLETON_ID },
+        // `apiKeySet` is derived from it (ADR-0105 global omit); toWire drops it.
+        omit: { apiKeyCiphertext: false },
       });
     });
     return this.toWire(saved);
@@ -535,9 +538,14 @@ export class AiSettingsService implements AiSettingsReader {
 
   /* ─────────────────────────────── internals ─────────────────────────────── */
 
+  /**
+   * The whole row, key envelope included (ADR-0105 opt-in): every caller either decrypts it in memory or
+   * projects it through {@link toWire}, which drops it.
+   */
   private findRow(): Promise<AiSettingsRow | null> {
     return this.prisma.aiSettings.findUnique({
       where: { id: AI_SETTINGS_SINGLETON_ID },
+      omit: includeOmitted('aiSettings'),
     });
   }
 

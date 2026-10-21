@@ -14,6 +14,7 @@ import {
 } from '@lazyit/shared';
 import type { AiRun, Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AppTransactionClient } from '../../prisma/prisma-omit';
 import { AiToolService } from '../core/ai-tool.service';
 import { toPendingAction } from '../core/pending-action';
 import {
@@ -144,7 +145,7 @@ export class AiRunLifecycle {
 
   /** Append rows after the conversation's last `seq` (append-only; `@@unique(conversationId, seq)`). */
   async append(
-    tx: Prisma.TransactionClient,
+    tx: AppTransactionClient,
     conversationId: string,
     runId: string | null,
     rows: readonly AppendRow[],
@@ -189,7 +190,7 @@ export class AiRunLifecycle {
    */
   async openStep(
     conversationId: string,
-    db: Prisma.TransactionClient = this.prisma,
+    db: AppTransactionClient = this.prisma,
   ): Promise<StepRecord | null> {
     const rows = await db.aiMessage.findMany({
       where: { conversationId },
@@ -219,7 +220,7 @@ export class AiRunLifecycle {
   async outcomesOf(
     record: StepRecord,
     fallback: FallbackAnswer = NOT_EXECUTED,
-    db: Prisma.TransactionClient = this.prisma,
+    db: AppTransactionClient = this.prisma,
   ): Promise<ChatModelToolOutcome[]> {
     const byCall = new Map<string, StepOutcome>();
     for (const outcome of record.outcomes) {
@@ -278,9 +279,9 @@ export class AiRunLifecycle {
     conversationId: string,
     runId: string | null,
     fallback: FallbackAnswer = NOT_EXECUTED,
-    tx?: Prisma.TransactionClient,
+    tx?: AppTransactionClient,
   ): Promise<boolean> {
-    const answer = async (db: Prisma.TransactionClient): Promise<boolean> => {
+    const answer = async (db: AppTransactionClient): Promise<boolean> => {
       await db.$queryRaw`SELECT "id" FROM "ai_conversations" WHERE "id" = ${conversationId} FOR UPDATE`;
       const record = await this.openStep(conversationId, db);
       if (!record) return false;

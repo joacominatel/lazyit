@@ -1017,11 +1017,26 @@ export class FakeLoader {
     }
     if (!this.user.isActive)
       return Promise.resolve({ ok: false, reason: 'inactive' });
+    // Like the real loader, the principal's row carries no passwordHash (ADR-0105 global omit).
+    const row: Partial<typeof this.user> = { ...this.user };
+    delete row.passwordHash;
     return Promise.resolve({
       ok: true,
-      principal: { kind: 'human', user: { ...this.user } },
+      principal: { kind: 'human', user: row },
     });
   }
+
+  /** The step-up verifier's dedicated credential read (`select: { passwordHash }`), over the same row. */
+  readonly credentialStore = {
+    user: {
+      findFirst: ({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          where.id === this.user.id
+            ? { passwordHash: this.user.passwordHash }
+            : null,
+        ),
+    },
+  };
 
   loadServiceAccount(id: string) {
     if (id !== this.sa.id || !this.sa.active) {
@@ -1138,7 +1153,10 @@ export function buildRuntime() {
     queue as unknown as AiRunQueue,
     loop,
   );
-  const stepUp = new PasswordStepUpVerifier(credentials as any);
+  const stepUp = new PasswordStepUpVerifier(
+    credentials as any,
+    loader.credentialStore as any,
+  );
   const approvals = new AiApprovalService(
     p,
     tools as unknown as AiToolService,

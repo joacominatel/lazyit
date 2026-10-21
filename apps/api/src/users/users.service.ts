@@ -28,7 +28,8 @@ import type {
 } from '@lazyit/shared';
 import { canManageRole, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
+// The default row carries no passwordHash (ADR-0105 global omit).
+import type { UserRow as User } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import { pickPublicUserColumns } from './public-user';
 import type { PublicUserColumns } from './public-user';

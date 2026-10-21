@@ -94,6 +94,8 @@ export class McpExposedTokenService {
     const rows = await this.prisma.oAuthToken.findMany({
       where: { tokenHash: { in: hashes } },
       include: { grant: { include: { client: true } } },
+      // Re-compared below in constant time; globally omitted otherwise (ADR-0105 opt-in).
+      omit: { tokenHash: false },
     });
     const seen = new Set<string>();
     let revoked = 0;

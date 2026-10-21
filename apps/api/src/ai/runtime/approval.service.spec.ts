@@ -21,6 +21,7 @@ import { HttpException, Logger } from '@nestjs/common';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import type { LocalCredentialService } from '../../auth/local/local-credential.service';
 import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
+import type { PrismaService } from '../../prisma/prisma.service';
 import {
   buildRuntime,
   HUMAN,
@@ -259,6 +260,13 @@ describe('who decides', () => {
   });
 });
 
+/** A Prisma stand-in for the verifier's dedicated credential read (ADR-0105). */
+function hashStore(passwordHash: string | null): PrismaService {
+  return {
+    user: { findFirst: jest.fn(() => Promise.resolve({ passwordHash })) },
+  } as unknown as PrismaService;
+}
+
 describe('PasswordStepUpVerifier under a burst', () => {
   it('lets one verification per user reach the KDF; concurrent attempts are refused', async () => {
     let release: () => void = () => undefined;
@@ -269,10 +277,11 @@ describe('PasswordStepUpVerifier under a burst', () => {
       await gate;
       return { valid: false, needsRehash: false };
     });
-    const verifier = new PasswordStepUpVerifier({
-      verify,
-    } as unknown as LocalCredentialService);
-    const user = { id: 'u1', passwordHash: 'hash:x' } as never;
+    const verifier = new PasswordStepUpVerifier(
+      { verify } as unknown as LocalCredentialService,
+      hashStore('hash:x'),
+    );
+    const user = { id: 'u1' };
 
     const burst = Array.from({ length: 200 }, () =>
       verifier.verify(user, 'guess'),
@@ -290,10 +299,11 @@ describe('PasswordStepUpVerifier under a burst', () => {
 
   it('counts an attempt before the KDF answers', async () => {
     const verify = jest.fn(() => new Promise<never>(() => undefined)); // the KDF never returns
-    const verifier = new PasswordStepUpVerifier({
-      verify,
-    } as unknown as LocalCredentialService);
-    const user = { id: 'u1', passwordHash: 'hash:x' } as never;
+    const verifier = new PasswordStepUpVerifier(
+      { verify } as unknown as LocalCredentialService,
+      hashStore('hash:x'),
+    );
+    const user = { id: 'u1' };
     void verifier.verify(user, 'guess');
     await Promise.resolve();
     expect(

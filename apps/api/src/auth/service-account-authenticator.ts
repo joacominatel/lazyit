@@ -46,14 +46,17 @@ export class ServiceAccountAuthenticator {
       throw invalid();
     }
 
-    const account = await this.principals.findServiceAccountIncludingRevoked(
-      parsed.serviceAccountId,
-    );
-    if (!account) {
+    const found =
+      await this.principals.findServiceAccountCredentialIncludingRevoked(
+        parsed.serviceAccountId,
+      );
+    if (!found) {
       throw invalid();
     }
+    // The hash is read for this comparison only and never rides on the principal (ADR-0105).
+    const { tokenHash, ...account } = found;
 
-    if (!verifySecret(parsed.secret, account.tokenHash)) {
+    if (!verifySecret(parsed.secret, tokenHash)) {
       throw invalid();
     }
 
