@@ -1214,7 +1214,7 @@ const purchaseLineAdd = defineTool({
         field: 'action',
         ...afterPhrase(
           phrase('purchase_line_add.action', {
-            line: clip(input.line.description),
+            line: input.line.description,
             purchase: label,
           }),
         ),
