@@ -353,13 +353,25 @@ services:
         TS="$$(date +%Y%m%d-%H%M%S)"
         echo "[lazyit-backup] starting run $$TS"
 
+        # run_hook CMD ARG: run an operator hook (BACKUP_OFFSITE_CMD / BACKUP_ON_FAILURE_CMD) with ARG
+        # as $$1. The documented form names "$$1" inside the command (`rclone copy "$$1" offsite:lazyit/`)
+        # and runs as written. A command that does not mention $$1 keeps the original behaviour: ARG is
+        # appended as its last argument. (Before this, ARG was ALWAYS appended, so the documented form
+        # ran as `rclone copy FILE offsite:lazyit/ FILE` and failed.)
+        run_hook() {
+          case "$$1" in
+            *'$$1'*|*'$${1}'*) sh -c "$$1" _ "$$2" ;;
+            *) sh -c "$$1 \"\$$1\"" _ "$$2" ;;
+          esac
+        }
+
         # fail REASON: loud, greppable, actionable. Stderr + non-zero exit so the failure is never
         # mistaken for success; runs the optional alert hook (its own failure must not mask the
         # original reason). A failed run intentionally aborts here — a partial dump is never promoted.
         fail() {
           echo "[lazyit-backup] FAILED run $$TS: $$1" >&2
           if [ -n "$${BACKUP_ON_FAILURE_CMD:-}" ]; then
-            sh -c "$$BACKUP_ON_FAILURE_CMD \"\$$1\"" _ "[lazyit-backup] run $$TS: $$1" \
+            run_hook "$$BACKUP_ON_FAILURE_CMD" "[lazyit-backup] run $$TS: $$1" \
               || echo "[lazyit-backup] on-failure hook itself failed for run $$TS" >&2
           fi
           exit 1
@@ -402,7 +414,7 @@ services:
         # loud + non-zero (the local dump is safe, but the offsite copy didn't happen).
         if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
           f="/backups/app-$${TS}.dump"
-          sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" \
+          run_hook "$$BACKUP_OFFSITE_CMD" "$$f" \
             || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
         fi
         echo "[lazyit-backup] run $$TS complete"
