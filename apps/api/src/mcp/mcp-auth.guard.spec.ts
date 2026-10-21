@@ -711,6 +711,27 @@ describe('/mcp authentication matrix', () => {
   });
 
   describe('abuse controls', () => {
+    it('counts a human caller against a per-user budget across connections, an SA never (#1683)', async () => {
+      const userRequest = jest.spyOn(McpRateLimiter.prototype, 'userRequest');
+      const user = seedUser(h);
+      const first = await oauthAccessToken(user);
+      const second = await oauthAccessToken(user);
+      await list(first).expect(200);
+      await list(second).expect(200);
+      expect(userRequest.mock.calls.map(([key]) => key)).toEqual([
+        `user:${user.id}`,
+        `user:${user.id}`,
+      ]);
+      // Over the user's overall budget, every connection of that user gets 429.
+      userRequest.mockReturnValue(false);
+      await list(first).expect(429);
+      await list(second).expect(429);
+      userRequest.mockClear();
+      await list('lzit_sa_connect_x').expect(200);
+      expect(userRequest).not.toHaveBeenCalled();
+      userRequest.mockRestore();
+    });
+
     it('rate-limits refused authentications per client IP (429)', async () => {
       for (let i = 0; i < 30; i += 1) {
         await list('lzit_oat_wrong').expect(401);

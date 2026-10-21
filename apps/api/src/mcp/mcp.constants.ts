@@ -23,6 +23,16 @@ export const MCP_WRITE_RATE_LIMIT = { max: 60, windowMs: 60_000 };
 /** Per caller: every authenticated `/mcp` HTTP request (listings included) — a coarse HTTP backstop. */
 export const MCP_REQUEST_RATE_LIMIT = { max: 600, windowMs: 60_000 };
 
+/**
+ * Per USER, across every connection they own (OAuth grants and personal tokens), on top of the per-caller
+ * limits above (CEO decision Q8 on #1344; #1683): twice one connection's budget, same one-minute windows. A
+ * user can run two busy agents side by side at full speed, but ten connections no longer multiply their
+ * throughput tenfold. Service Accounts are not users: they keep their own per-SA keying only.
+ */
+export const MCP_USER_REQUEST_RATE_LIMIT = { max: 1200, windowMs: 60_000 };
+export const MCP_USER_CALL_RATE_LIMIT = { max: 600, windowMs: 60_000 };
+export const MCP_USER_WRITE_RATE_LIMIT = { max: 120, windowMs: 60_000 };
+
 /** The rolling window of a Service Account's `maxMutationsPerRun` cap over MCP (G3 review F2). */
 export const MCP_SA_WRITE_CAP_WINDOW_MS = 60 * 60_000;
 

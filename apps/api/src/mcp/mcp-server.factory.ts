@@ -188,6 +188,18 @@ export class McpServerFactory {
         { hint: 'Wait a minute, then retry.' },
       );
     }
+    if (
+      caller.userRateKey &&
+      !this.rateLimiter.userCall(caller.userRateKey, mutation)
+    ) {
+      return toolError(
+        'RATE_LIMITED',
+        mutation
+          ? 'Too many changes across all your AI connections in the last minute.'
+          : 'Too many tool calls across all your AI connections in the last minute.',
+        { hint: 'Wait a minute, then retry.' },
+      );
+    }
     const capRefusal = mutation
       ? await this.serviceAccountWriteCapRefusal(caller, tool.name, args)
       : null;
