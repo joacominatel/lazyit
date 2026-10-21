@@ -22,11 +22,13 @@ antes de confiar datos reales a una instancia.
 | --- | --- | --- |
 | **Archivo de entorno** (`infra/env/.env.prod`) | un archivo en el servidor | **Sí — fuera del servidor, cifrado.** Irremplazable: guarda la contraseña de la base de datos y las claves de cifrado. |
 | **Base de datos de la aplicación** | el servicio `db` | **Sí.** Tus datos — y, con cuentas locales, las credenciales de inicio de sesión de todos. |
+| **Archivos subidos** | el volumen de adjuntos | **Sí.** Documentos de activos y compras (facturas, órdenes, remitos) e imágenes de la base de conocimiento. La base de datos solo los registra; los archivos en sí están aquí. |
 | Índice de búsqueda | el servicio `meilisearch` | No — reconstruible reindexando desde la base de datos. |
 | Certificados TLS | el servicio `caddy` | No — se reemiten automáticamente. |
 
-El archivo de entorno es tu responsabilidad copiarlo fuera del servidor. La base de datos puede
-volcarse automáticamente con el contenedor de copias opcional (más abajo).
+El archivo de entorno es tu responsabilidad copiarlo fuera del servidor. La base de datos y los
+archivos subidos se respaldan automáticamente con el contenedor de copias (más abajo), como un par:
+consérvalos y restáuralos juntos.
 
 ## La clave que no puedes perder
 
@@ -59,11 +61,17 @@ Qué significa esto para la recuperación:
   administrador pueden recuperar el texto en claro. Mantén las bóvedas sensibles con varios miembros
   para que un compañero pueda restaurar el acceso. Consulta [Gestor de Secretos](/help/secret-manager).
 
-## Copias de seguridad automáticas (contenedor opcional)
+## Copias de seguridad automáticas (el contenedor de copias)
 
-Un servicio de **copia** opcional vuelca la base de datos de la aplicación según una programación a una
-carpeta del servidor, con retención, y un enganche opcional de copia externa. Está desactivado por
-defecto. Levántalo junto a la pila en marcha:
+Un servicio de **copia** se ejecuta según una programación. En cada ejecución vuelca la base de datos de
+la aplicación, luego archiva los archivos subidos, y escribe ambos en `./backups` con la misma marca de
+tiempo — `app-<hora>.dump` y `attachments-<hora>.tar.gz` —; después elimina las copias más antiguas que
+la ventana de retención. Tiene un enganche opcional de copia externa y otro opcional de alerta ante fallos.
+
+Arranca con la pila de producción: el levantamiento estándar (`./infra/start.sh`, `./infra/update.sh`)
+ya lo ejecuta, diga lo que diga la pregunta sí/no del instalador sobre copias. Compruébalo con
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod ps backup`. Para
+levantarlo por separado:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --env-file infra/env/.env.prod \
@@ -74,25 +82,46 @@ Ajústalo en el archivo de entorno (valores por defecto mostrados):
 
 ```sh
 BACKUP_CRON="30 2 * * *"     # cuándo ejecutar (sintaxis de crontab) — por defecto, diario a las 02:30
-BACKUP_RETENTION_DAYS=14     # elimina volcados con más de estos días
-BACKUP_OFFSITE_CMD=          # enganche de copia externa opcional — apagado salvo que lo definas
+BACKUP_RETENTION_DAYS=14     # elimina volcados y archivos de adjuntos con más de estos días
+BACKUP_MIN_FREE_MB=1024      # omite el archivo de adjuntos si dejaría menos disco libre que esto
+BACKUP_OFFSITE_CMD=          # copia externa opcional, se ejecuta por cada archivo con su ruta como "$1"
+BACKUP_ON_FAILURE_CMD=       # alerta opcional, se ejecuta con el motivo como "$1" cuando falla una ejecución
 ```
 
-El contenedor escribe volcados con marca de tiempo de la base de datos de la aplicación en `./backups`.
-**No** respalda el archivo de entorno: cópialo fuera del servidor tú mismo.
+Por ejemplo, `BACKUP_OFFSITE_CMD='rclone copy "$1" offsite:lazyit/'` envía los dos archivos de cada
+ejecución a un remoto de rclone. El contenedor **no** respalda el archivo de entorno —cópialo fuera del
+servidor tú mismo— y no cifra nada: cifra la copia externa.
+
+**Planifica el espacio en disco.** El archivo de adjuntos es una copia completa en cada ejecución, del
+tamaño aproximado de todos los archivos subidos. Con los valores por defecto son unas 15 copias: 300 MB
+de adjuntos ocupan unos 4,5 GB en `./backups`; 5 GB de adjuntos, unos 75 GB. Si el disco está demasiado
+lleno, la ejecución omite el archivo de adjuntos e informa un fallo en lugar de llenar el disco que usa
+la base de datos; el volcado de la base de datos se escribe igual. Reduce la retención, dale a `./backups`
+un disco más grande, o copia cada ejecución fuera del servidor y conserva menos días en local.
+
+Una ejecución fallida nunca pasa en silencio: el registro muestra
+`[lazyit-backup] FAILED run <hora>: <motivo>`, y tu enganche de alerta se dispara si lo definiste.
+Compruébalo con
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs backup | grep lazyit-backup`.
 
 ## Copia manual
 
 La base de datos permanece en la red interna, así que el volcado se ejecuta dentro de la red de
-compose. El formato personalizado (`-Fc`) está comprimido y admite restauración selectiva:
+compose. El formato personalizado (`-Fc`) está comprimido y admite restauración selectiva. Primero la
+base de datos, luego los archivos:
 
 ```sh
-DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod"
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
 $DC exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "app-$(date +%Y%m%d-%H%M%S).dump"
+$DC run --rm --no-deps -T backup \
+  sh -c 'tar -czf - -C /attachments --exclude ./tmp .' > "attachments-$(date +%Y%m%d-%H%M%S).tar.gz"
 ```
 
-Copia el volcado **y** `infra/env/.env.prod` fuera del servidor, a una ubicación segura y con
-control de acceso.
+Con el contenedor de copias en marcha, `$DC exec -T backup lazyit-backup` toma en su lugar un par
+completo y verificado ahora mismo en `./backups`.
+
+Copia el volcado, el archivo de adjuntos **y** `infra/env/.env.prod` fuera del servidor, a una ubicación
+segura y con control de acceso.
 
 ## Restauración
 
@@ -103,14 +132,33 @@ Para una recuperación completa sobre un servidor reconstruido, restaura en este
 
 1. **Pon primero el archivo de entorno.** Debe contener las **mismas claves** que cuando se volcó la
    base de datos. `chmod 600 infra/env/.env.prod`.
-2. **Restaura la base de datos de la aplicación** desde su volcado.
-3. **Levanta la pila.**
-4. **Reindexa la búsqueda** — el índice es reconstruible:
+2. **Restaura la base de datos de la aplicación** desde su volcado. Levanta solo el servicio `db` para
+   esto.
+3. **Restaura los archivos subidos** desde el archivo **de la misma ejecución** (misma marca de tiempo),
+   antes de que arranque la API. Pon el archivo en `./backups` y luego:
+
+   ```sh
+   DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
+   $DC stop api
+   $DC run --rm --no-deps -T -v lazyit-prod_attachments_data:/restore backup \
+     sh -c 'find /restore -mindepth 1 -delete && tar -xzf /backups/attachments-20260530-120000.tar.gz -C /restore --numeric-owner'
+   ```
+
+   Esto vacía el volumen de adjuntos y desempaqueta el archivo en él, conservando el propietario y las
+   fechas de cada archivo.
+4. **Levanta la pila.**
+5. **Reindexa la búsqueda** — el índice es reconstruible:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
   --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 ```
+
+> **Mantén la base de datos y los archivos en sintonía.** lazyit limpia periódicamente los archivos
+> guardados a los que ningún registro apunta. Arranca la API contra una base de datos que no corresponde
+> a los archivos restaurados —una vacía, o un volcado mucho más antiguo— y esa limpieza borra los
+> archivos restaurados. Restaura ambos de la misma ejecución, primero la base de datos, antes de que
+> arranque la API.
 
 > **Nunca restablezcas la base de datos con `down -v`.** Ese comando elimina **todos** los volúmenes con
 > nombre — también los adjuntos subidos, no solo la base de datos. Para restablecer solo la base de
@@ -118,7 +166,7 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
 > limpio y luego carga el volcado.
 
 Verifica la restauración de principio a fin iniciando sesión a través de la web y comprobando que tus
-registros están ahí. Si usas el motor de flujos de aplicaciones, ejecuta también **Probar conexión** en
+registros están ahí, y abre un documento de un activo o de una compra. Si usas el motor de flujos de aplicaciones, ejecuta también **Probar conexión** en
 una conexión: demuestra que la clave de secretos de flujos de trabajo coincide con la base de datos
 restaurada.
 

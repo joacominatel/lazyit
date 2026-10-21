@@ -351,9 +351,10 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
   usados. Complétalo antes de subir, o ponlo, cámbialo o quítalo después con el lápiz del documento. Se
   ve junto al nombre del archivo.
 
-> **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
-> **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el
-> soporte de copias, conserva una copia independiente de todo lo irremplazable.
+> **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor. La copia de
+> seguridad de lazyit archiva ese volumen junto con cada copia de la base de datos, así que una
+> restauración recupera los documentos con sus registros. Consulta
+> [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Editar, clonar y desactivar
 
