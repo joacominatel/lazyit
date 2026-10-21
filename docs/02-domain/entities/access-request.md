@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-10-21
 ---
 
 # AccessRequest
@@ -43,6 +43,12 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 - **Approval is atomic:** the [[access-grant]] is created and the request flipped to `APPROVED` in **one
   transaction**, via `AccessGrantsService.createWithinApproval` — the grant inherits the request's
   `accessLevel`. The workflow engine fires AFTER the grant commits ([[0054-applications-workflow-engine]]).
+- **Approval re-checks the person (#1661):** the grant write path refuses a person who is no longer
+  live, active and account-holding, so approving a request whose person was deactivated after filing is
+  a **400** (`ACCESS_GRANT_PERSON_INACTIVE` for a deactivated person) and the request stays `PENDING`
+  for the approver to deny. Pending requests are **not** closed automatically when the person is
+  deactivated or offboarded: deciding is human-only ([[0085-access-request-flow]]), and a system
+  denial is an open decision for the CEO.
 - **On behalf of someone else (#1645, CEO 2026-10-17):** `POST /access-requests` takes an optional
   `requesterId`. Omitted or the caller's own id, nothing changes. Another person's id needs
   `accessGrant:grant`, the permission that decides requests (otherwise **403**

@@ -132,7 +132,11 @@ describe('AccessGrantsService', () => {
   /** user.findFirst echoes the queried id back as a live user (grantee/application lookups pass). */
   const allUsersLive = () =>
     user.findFirst.mockImplementation((args: { where: { id: string } }) =>
-      Promise.resolve({ id: args.where.id }),
+      Promise.resolve({
+        id: args.where.id,
+        isActive: true,
+        directoryOnly: false,
+      }),
     );
 
   // --- create -------------------------------------------------------------
@@ -243,13 +247,57 @@ describe('AccessGrantsService', () => {
   it('rejects (400) when the grantee is a DIRECTORY person (INV-2, ADR-0069 REDESIGN §7)', async () => {
     // A directory-only person has no account → it must NEVER be the subject of an AccessGrant (orphan,
     // irrevocable access). The block lifts the moment they sign in (directoryOnly flips to false).
-    user.findFirst.mockResolvedValue({ id: USER_ID, directoryOnly: true });
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: true,
+      isActive: true,
+    });
     application.findFirst.mockResolvedValue({ id: APP_ID });
 
     await expect(
       service.create({ userId: USER_ID, applicationId: APP_ID }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(accessGrant.create).not.toHaveBeenCalled();
+  });
+
+  // Issue #1661: a deactivated (live but inactive) person cannot sign in, so no grant may open for them.
+  it('rejects (400 ACCESS_GRANT_PERSON_INACTIVE) when the grantee is deactivated', async () => {
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: false,
+      isActive: false,
+    });
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+
+    const error = await service
+      .create({ userId: USER_ID, applicationId: APP_ID })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'ACCESS_GRANT_PERSON_INACTIVE' }),
+    );
+    expect(accessGrant.create).not.toHaveBeenCalled();
+  });
+
+  it('the approval path refuses a deactivated grantee too, before any write', async () => {
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: false,
+      isActive: false,
+    });
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+    const extra = jest.fn();
+
+    await expect(
+      service.createWithinApproval(
+        { userId: USER_ID, applicationId: APP_ID },
+        HUMAN_PRINCIPAL,
+        extra,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(accessGrant.create).not.toHaveBeenCalled();
+    expect(extra).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   // --- findAll ------------------------------------------------------------

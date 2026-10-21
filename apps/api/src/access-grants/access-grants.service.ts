@@ -150,8 +150,9 @@ export class AccessGrantsService {
   /**
    * Open a grant (give a user access to an application). `userId` and `applicationId` must reference
    * **live** (non-soft-deleted) rows → 400 otherwise (don't grant access to a decommissioned app or
-   * a departed user). Multi-grant is allowed: no uniqueness check. `grantedById` is set from the
-   * authenticated User when present (null = system/unknown).
+   * a departed user), and the user must be active (issue #1661). Multi-grant is allowed: no
+   * uniqueness check. `grantedById` is set from the authenticated User when present (null =
+   * system/unknown).
    */
   async create(data: CreateAccessGrant, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
@@ -631,12 +632,22 @@ export class AccessGrantsService {
   private async assertUserUsable(userId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId },
-      select: { id: true, directoryOnly: true },
+      select: { id: true, directoryOnly: true, isActive: true },
     });
     if (!user) {
       throw new BadRequestException(
         `userId ${userId} does not reference a live user`,
       );
+    }
+    // A deactivated person cannot sign in, so access granted to them is access nobody should hold.
+    // Covers POST /access-grants and every request approval, whoever filed it (issue #1661).
+    if (!user.isActive) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'ACCESS_GRANT_PERSON_INACTIVE',
+        message:
+          'This person is deactivated. Reactivate them before granting access.',
+      });
     }
     if (user.directoryOnly) {
       throw new BadRequestException(

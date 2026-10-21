@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # AccessGrant
@@ -57,6 +57,12 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
   rows, or the API returns `400` — don't grant access to a decommissioned app or a departed user.
+  The person must also be **active**: a deactivated person (`isActive = false`) cannot sign in, so
+  a grant to them is refused with `400 ACCESS_GRANT_PERSON_INACTIVE` (#1661). The check lives in the
+  one grant write path, so it covers `POST /access-grants` **and** every [[access-request]] approval,
+  self-filed or filed on someone's behalf — a request filed while the person was active and approved
+  after they were deactivated is refused and stays `PENDING`. A directory-only person is refused too
+  (they have no account).
 - **Referential integrity:** the required FKs are `onDelete: Restrict` — a [[user]] or
   [[application]] with grant rows **cannot be hard-deleted**.
 
@@ -132,8 +138,8 @@ Indexes: `@@index([userId])`, `@@index([applicationId])`. **No uniqueness constr
 `apps/api/src/access-grants/` (`AccessGrantsModule`). The authenticated principal is the actor on
 create/revoke (see the note above). Documented via Swagger ([[0018-api-documentation-swagger]]).
 
-- `POST /access-grants` — open a grant. `userId`/`applicationId` must be live → else `400` (FK
-  errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
+- `POST /access-grants` — open a grant. `userId`/`applicationId` must be live and the person active
+  → else `400` (FK errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
 - `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=&limit=&offset=&page=` —
   list, newest first, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to true**
   (`revokedAt = null`); `includeExpired` **defaults to true** (pass `false` to hide active grants
