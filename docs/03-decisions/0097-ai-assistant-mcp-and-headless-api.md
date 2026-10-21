@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -672,6 +672,8 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 - A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
   sessions* option does).
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
+  *Done 2026-10-21 (#1687): the `input` sentence param kind, bounded on the server and set apart on the
+  card ([[ai-assistant/tools-and-execution|tools]] §9.1).*
 - A route-level expected version on writes (assets, consumables, users, KB, access) to close the
   approve→execute window rather than narrow it.
 - Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.
