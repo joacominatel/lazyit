@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Article
@@ -142,10 +142,24 @@ deferred.
 > `metadata` (jsonb) accepts **any JSON object** (`z.record(z.string(), z.unknown())`), exactly
 > like `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]). Typed per-use validation is deferred.
 
-> [!note] `.docx` conversion uses a deprecated mammoth API
+> [!note] `.docx` conversion uses a deprecated mammoth API — so mammoth is pinned exactly
 > `.docx → markdown` uses `mammoth.convertToMarkdown`, which still ships in mammoth 1.x but is
-> absent from its published types (declared locally). If a future mammoth removes it, switch to
-> `convertToHtml` + an HTML→markdown step. See `apps/api/src/articles/article-import.ts`.
+> deprecated upstream ("generate HTML and convert it separately") and absent from its published
+> types, so `article-import.ts` reaches it through a locally declared cast. The type checker therefore
+> cannot see it disappear: under a caret range a routine dependency update could remove it, CI would
+> stay green, and the first operator to import a Word document after upgrading would get a 400.
+>
+> That is why `apps/api/package.json` pins `mammoth` to an **exact** version (no `^`, #1290): the
+> removal can only arrive through a deliberate, reviewed bump. Two tests in
+> `apps/api/src/articles/article-import.spec.ts` are the guard — one asserts `convertToMarkdown` is
+> still a function, the other runs the real `apps/api/test/fixtures/sample.docx` through
+> `parseImportFile` and asserts the exact markdown it yields.
+>
+> **To bump mammoth:** set the new exact version in `apps/api/package.json`, run `bun install` (never
+> edit `bun.lock` by hand), and run the API tests. Green means the markdown path still works. If the
+> guard fails because `convertToMarkdown` is gone, switch the `.docx` branch to `convertToHtml` + an
+> HTML→markdown step (e.g. turndown) — a new dependency, so it is decided in its own change. Re-check
+> the XML/ZIP posture noted in the knowledge-base security sweep on any bump.
 
 ## Conventions
 
