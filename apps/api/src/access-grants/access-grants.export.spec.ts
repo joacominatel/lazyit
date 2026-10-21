@@ -287,6 +287,151 @@ describe('Access-grant CSV exports (ADR-0103)', () => {
     },
   );
 
+  // #1660: the paged per-application list filters server-side, and its export follows the same filters.
+  const [ANA_ACTIVE, , BEN_EXPIRED, , BEN_EXPIRING, ANA_REVOKED] = GRANTS.map(
+    (g) => g.id,
+  );
+
+  it.each([
+    ['', [ANA_ACTIVE, BEN_EXPIRED, BEN_EXPIRING]],
+    ['status=active', [ANA_ACTIVE, BEN_EXPIRED, BEN_EXPIRING]],
+    // Soonest expiry first; an already-expired, not yet swept grant is the most urgent.
+    ['status=expiring', [BEN_EXPIRED, BEN_EXPIRING]],
+    ['status=revoked', [ANA_REVOKED]],
+    ['status=all&accessLevel=admin', [ANA_ACTIVE, BEN_EXPIRED, BEN_EXPIRING]],
+    ['status=all&noAccessLevel=true', [ANA_REVOKED]],
+    ['status=all&q=ben', [BEN_EXPIRED, BEN_EXPIRING]],
+    // Token-wise across columns; by person, active before revoked.
+    ['status=all&q=ana%20DIAZ', [ANA_ACTIVE, ANA_REVOKED]],
+    ['status=expiring&q=ana', []],
+  ] as const)(
+    "GET /applications/:id/access-grants/page?%s returns that application's matching grants, and the export holds the same",
+    async (query, expected) => {
+      const list = await get(
+        `/applications/${APP1}/access-grants/page?limit=200&${query}`,
+        'ADMIN',
+      );
+      expect(list.status).toBe(200);
+      const body = list.body as { items: { id: string }[]; total: number };
+      expect(body.items.map((g) => g.id)).toEqual(expected);
+      expect(body.total).toBe(expected.length);
+
+      const res = await get(
+        `/applications/${APP1}/access-grants/export?${query}`,
+        'ADMIN',
+      );
+      expect(res.status).toBe(200);
+      expect(new Set(exportedIds(res.text))).toEqual(new Set(expected));
+      expect(exportedIds(res.text)).toHaveLength(expected.length);
+    },
+  );
+
+  it('pages the per-application list with a stable total', async () => {
+    const first = await get(
+      `/applications/${APP1}/access-grants/page?status=all&limit=2`,
+      'ADMIN',
+    );
+    const second = await get(
+      `/applications/${APP1}/access-grants/page?status=all&limit=2&offset=2`,
+      'ADMIN',
+    );
+    const ids = [
+      ...(first.body as { items: { id: string }[] }).items,
+      ...(second.body as { items: { id: string }[] }).items,
+    ].map((g) => g.id);
+    expect((first.body as { total: number }).total).toBe(4);
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it.each([
+    ['status=expired'],
+    ['accessLevel=admin&noAccessLevel=true'],
+    ['accessLevel=%20'],
+    [`q=${'x'.repeat(201)}`],
+    ['sort=grantedAt'],
+    ['limit=201'],
+  ])('the per-application page rejects "%s" with 400', async (query) => {
+    const res = await get(
+      `/applications/${APP1}/access-grants/page?${query}`,
+      'ADMIN',
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('the per-application export refuses mixing status with activeOnly/includeExpired (400), auditing nothing', async () => {
+    for (const query of [
+      'status=active&activeOnly=false',
+      'status=all&includeExpired=false',
+    ]) {
+      const res = await get(
+        `/applications/${APP1}/access-grants/export?${query}`,
+        'ADMIN',
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  it('a person search needs user:read on top of accessGrant:read (403 on the page and the export)', async () => {
+    const asGrantReader = (path: string) =>
+      request(app.getHttpServer())
+        .get(path)
+        .set('X-Test-Sa-Permissions', 'accessGrant:read');
+    expect(
+      (await asGrantReader(`/applications/${APP1}/access-grants/page?q=ana`))
+        .status,
+    ).toBe(403);
+    expect(
+      (await asGrantReader(`/applications/${APP1}/access-grants/export?q=ana`))
+        .status,
+    ).toBe(403);
+    expect(auditCreate).not.toHaveBeenCalled();
+    // Without a search the same caller still pages and filters.
+    const page = await asGrantReader(
+      `/applications/${APP1}/access-grants/page?status=revoked`,
+    );
+    expect(page.status).toBe(200);
+    expect(
+      (page.body as { items: { id: string }[] }).items.map((g) => g.id),
+    ).toEqual([ANA_REVOKED]);
+  });
+
+  it('the per-application page 404s on an unknown application and refuses a VIEWER', async () => {
+    expect(
+      (
+        await get(
+          '/applications/cmissingaaaaaaaaaaaaaaaaa/access-grants/page',
+          'ADMIN',
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await get(`/applications/${APP1}/access-grants/page`, 'VIEWER')).status,
+    ).toBe(403);
+    expect(
+      (await get(`/applications/${APP1}/access-grants/summary`, 'VIEWER'))
+        .status,
+    ).toBe(403);
+  });
+
+  it('audits a filtered per-application export with its filters', async () => {
+    await get(
+      `/applications/${APP1}/access-grants/export?status=expiring&accessLevel=admin&q=ben`,
+      'ADMIN',
+    );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        resource: 'ACCESS_GRANTS',
+        filters: expect.objectContaining({
+          applicationId: APP1,
+          status: 'expiring',
+          accessLevel: 'admin',
+          q: 'ben',
+        }) as unknown,
+      }) as unknown,
+    });
+  });
+
   it('the per-application export 404s on an unknown application and audits nothing', async () => {
     const res = await get(
       '/applications/cmissingaaaaaaaaaaaaaaaaa/access-grants/export',
