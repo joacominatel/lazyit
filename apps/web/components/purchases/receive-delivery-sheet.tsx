@@ -504,6 +504,10 @@ function DeliveryLineRow({
       scanButtonRef.current?.focus();
     }
   }, [scanning]);
+  // Stepping the row back to 0 hides its serials box, and the camera with it.
+  useEffect(() => {
+    if (scanning && quantity === 0) onScan(false);
+  }, [scanning, quantity, onScan]);
 
   const modelPicker = (
     <AssetModelCombobox
