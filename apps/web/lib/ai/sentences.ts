@@ -1,4 +1,4 @@
-import { AI_SENTENCES, isAiSentenceCode, type AiSentenceParamKind } from "@lazyit/shared";
+import { AI_SENTENCES, boundAiSentenceInput, isAiSentenceCode, type AiSentenceParamKind } from "@lazyit/shared";
 import { stripUntrusted, type CleanText } from "./untrusted-text";
 
 /**
@@ -13,7 +13,66 @@ import { stripUntrusted, type CleanText } from "./untrusted-text";
  * English field. A missing field is the English, too. The result is plain text — `<untrusted_content>`
  * wrappers in text params are stripped here, like everywhere else in the chat — and is rendered as escaped
  * React text, never HTML.
+ *
+ * MODEL-SUPPLIED VALUES (#1687). A param of kind `input` is a value the model typed in its tool input (the
+ * name of something it creates, an access level). The API already bounds it (one line, no quotes, capped);
+ * it is bounded again here, for a row stored before the kind existed, and the result carries `segments` so
+ * the card can show it visibly distinct from the names lazyit read from its database. An unknown kind
+ * passes as plain text, so a web build that predates a kind degrades to the plain sentence.
  */
+
+/** A piece of a rendered sentence: `input` marks a value the model supplied (#1687). */
+export interface SentenceSegment {
+  text: string;
+  input: boolean;
+}
+
+/** A rendered sentence list: the plain text, and its pieces when it embeds a model-supplied value. */
+export interface RenderedSentence extends CleanText {
+  /** Present only when at least one piece is an `input` value; `text` is these joined. */
+  segments?: SentenceSegment[];
+}
+
+/**
+ * Private-use characters that delimit an `input` value through the ICU formatter (which passes argument
+ * values through untouched) so the formatted text can be cut back into segments. Removed from every value
+ * first, so no value can forge one.
+ */
+const INPUT_OPEN = "\uE000";
+const INPUT_CLOSE = "\uE001";
+const MARKERS = /[\uE000\uE001]/g;
+
+/** A formatted sentence cut at the markers; null when they do not pair up (then: plain text). */
+function splitSegments(text: string): SentenceSegment[] | null {
+  const segments: SentenceSegment[] = [];
+  let buffer = "";
+  let inInput = false;
+  for (const ch of text) {
+    if (ch === INPUT_OPEN || ch === INPUT_CLOSE) {
+      if ((ch === INPUT_OPEN) === inInput) return null;
+      if (buffer !== "" || inInput) segments.push({ text: buffer, input: inInput });
+      buffer = "";
+      inInput = !inInput;
+      continue;
+    }
+    buffer += ch;
+  }
+  if (inInput) return null;
+  if (buffer !== "") segments.push({ text: buffer, input: false });
+  return segments;
+}
+
+/** Adjacent plain pieces merged, empty ones dropped (an empty `input` value stays: it is still a value). */
+function mergeSegments(segments: readonly SentenceSegment[]): SentenceSegment[] {
+  const out: SentenceSegment[] = [];
+  for (const segment of segments) {
+    const last = out[out.length - 1];
+    if (!segment.input && segment.text === "") continue;
+    if (!segment.input && last && !last.input) last.text += segment.text;
+    else out.push({ ...segment });
+  }
+  return out;
+}
 
 /** Renders one code's template with prepared values; THROWS when it cannot (unknown code, bad params). */
 export type SentenceFormat = (code: string, values: Record<string, string | number>) => string;
@@ -65,11 +124,13 @@ function prepare(
       continue;
     }
     if (typeof raw !== "string" && !(typeof raw === "number" && Number.isFinite(raw))) return null;
-    const value = String(raw);
+    const value = String(raw).replace(MARKERS, "");
     if (kind === "text") {
       const clean = stripUntrusted(value);
       untrusted ||= clean.untrusted;
       values[name] = clean.text;
+    } else if (kind === "input") {
+      values[name] = `${INPUT_OPEN}${boundAiSentenceInput(value)}${INPUT_CLOSE}`;
     } else if (kind === "date") {
       values[name] = value !== "" && options.date ? options.date(value) : value;
     } else if ((LIST_ENUM_KINDS as readonly string[]).includes(kind) && options.enumItem) {
@@ -90,7 +151,7 @@ function prepare(
  * A sentence list in the user's language, or null when it cannot be rendered whole (then the caller shows
  * the English). Anything that is not a well-formed list of 1–20 known sentences is null. Pure.
  */
-export function renderAiSentences(sentences: unknown, options: SentenceRenderOptions): CleanText | null {
+export function renderAiSentences(sentences: unknown, options: SentenceRenderOptions): RenderedSentence | null {
   if (!Array.isArray(sentences) || sentences.length === 0 || sentences.length > MAX_SENTENCES) return null;
   const has = options.has ?? isAiSentenceCode;
   const texts: string[] = [];
@@ -110,18 +171,24 @@ export function renderAiSentences(sentences: unknown, options: SentenceRenderOpt
     untrusted ||= prepared.untrusted;
     texts.push(text);
   }
-  return { text: texts.join(" "), untrusted };
+  const joined = texts.join(" ");
+  const segments = splitSegments(joined);
+  if (segments === null || !segments.some((segment) => segment.input)) {
+    return { text: joined.replace(MARKERS, ""), untrusted };
+  }
+  const merged = mergeSegments(segments);
+  return { text: merged.map((segment) => segment.text).join(""), untrusted, segments: merged };
 }
 
 /** Renders a list; null when it cannot (the caller falls back to the English). */
-export type SentenceRenderer = (sentences: unknown) => CleanText | null;
+export type SentenceRenderer = (sentences: unknown) => RenderedSentence | null;
 
 /** The localized sentence list, else the English field (wrappers stripped), else null when there is neither. */
 export function localizedText(
   english: string | undefined,
   sentences: unknown,
   render: SentenceRenderer | undefined,
-): CleanText | null {
+): RenderedSentence | null {
   const localized = sentences !== undefined && render ? render(sentences) : null;
   if (localized !== null) return localized;
   return english === undefined ? null : stripUntrusted(english);

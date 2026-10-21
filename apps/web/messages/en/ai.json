@@ -134,6 +134,7 @@
     "yes": "Yes",
     "no": "No",
     "quoted": "Written by someone else — shown as plain text.",
+    "modelInput": "Typed by the assistant. The full value is in the rows below.",
     "warningsTitle": "Before you approve",
     "warnings": {
       "EXTERNAL_PROVISIONING": "Creates access in an outside system through an automation.",
