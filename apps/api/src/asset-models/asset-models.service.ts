@@ -23,6 +23,14 @@ import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { Principal } from '../auth/principal';
 import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
 import { receivedUnitsSql } from '../purchase-orders/purchase-order-line-receipt';
+import { lockLiveParent } from '../common/parent-row-lock';
+
+/** 400 for a model write that names a missing or archived category; the FK alone cannot tell them apart. */
+function categoryNotLive(categoryId: string): BadRequestException {
+  return new BadRequestException(
+    `AssetCategory ${categoryId} not found (missing or archived)`,
+  );
+}
 
 /** Optional filters for listing asset models. */
 export interface AssetModelFilters {
@@ -163,34 +171,59 @@ export class AssetModelsService {
 
   /** Create. A missing or archived categoryId is a 400. */
   async create(data: CreateAssetModel) {
-    await this.assertCategoryLive(data.categoryId);
     const { specs, ...rest } = data;
-    return this.prisma.assetModel.create({
-      // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
-      data: {
-        ...rest,
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      // The category stays locked FOR SHARE until the commit, so a concurrent category delete cannot strand it.
+      if (
+        data.categoryId &&
+        !(await lockLiveParent(tx, 'asset_categories', data.categoryId))
+      ) {
+        throw categoryNotLive(data.categoryId);
+      }
+      return tx.assetModel.create({
+        // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
+        data: {
+          ...rest,
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
     });
   }
 
+  /**
+   * Partial update. A named category is locked `FOR SHARE` before the model row is read or written (#1604), so a
+   * concurrent category delete (category `FOR UPDATE`, then its models) either waits for this write and moves
+   * the model with the rest, or commits first and the change is a 400.
+   */
   async update(id: string, data: UpdateAssetModel) {
-    const existing = await this.findOne(id); // 404 if missing or already soft-deleted
-    // Only a changed category is checked, so a model already filed under an archived one stays editable.
-    if (data.categoryId !== existing.categoryId) {
-      await this.assertCategoryLive(data.categoryId);
-    }
     const { specs, ...rest } = data;
-    return this.prisma.assetModel.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const categoryLive = data.categoryId
+        ? await lockLiveParent(tx, 'asset_categories', data.categoryId)
+        : true;
+      const existing = await tx.assetModel.findFirst({ where: { id } });
+      if (!existing) {
+        throw new NotFoundException(`AssetModel ${id} not found`);
+      }
+      // Only a changed category is checked, so a model already filed under an archived one stays editable.
+      if (
+        data.categoryId &&
+        data.categoryId !== existing.categoryId &&
+        !categoryLive
+      ) {
+        throw categoryNotLive(data.categoryId);
+      }
+      return tx.assetModel.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
     });
   }
 
@@ -384,21 +417,5 @@ export class AssetModelsService {
          AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0
        ORDER BY po."createdAt" ASC, l."position" ASC, l."id" ASC
        ${lock ? Prisma.sql`FOR UPDATE OF l` : Prisma.empty}`;
-  }
-
-  /** 400 unless the category a write names is live; the FK alone cannot tell an archived one from a live one. */
-  private async assertCategoryLive(
-    categoryId: string | null | undefined,
-  ): Promise<void> {
-    if (!categoryId) return;
-    const category = await this.prisma.assetCategory.findFirst({
-      where: { id: categoryId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!category) {
-      throw new BadRequestException(
-        `AssetCategory ${categoryId} not found (missing or archived)`,
-      );
-    }
   }
 }
