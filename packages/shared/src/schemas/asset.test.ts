@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AssetAcquiredWindowQuerySchema,
   ASSET_SPECS_MAX_ARRAY_LENGTH,
   ASSET_SPECS_MAX_DEPTH,
   ASSET_SPECS_MAX_KEYS,
@@ -210,5 +211,36 @@ describe("Asset purchase currency label and purchase line (ADR-0099 §2, §5)", 
       CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL", purchaseOrderLineId: line }).success,
     ).toBe(false);
     expect(UpdateAssetSchema.safeParse({ purchaseOrderLineId: line }).success).toBe(false);
+  });
+});
+
+describe("Asset acquisition window query (#1503)", () => {
+  test("both bounds optional, ISO datetimes", () => {
+    expect(AssetAcquiredWindowQuerySchema.parse({})).toEqual({});
+    expect(
+      AssetAcquiredWindowQuerySchema.parse({
+        acquiredFrom: "2026-01-01T00:00:00.000Z",
+        acquiredTo: "2026-06-30T00:00:00.000Z",
+      }),
+    ).toEqual({ acquiredFrom: "2026-01-01T00:00:00.000Z", acquiredTo: "2026-06-30T00:00:00.000Z" });
+    expect(AssetAcquiredWindowQuerySchema.safeParse({ acquiredTo: "2026-06-30T00:00:00.000Z" }).success).toBe(true);
+  });
+
+  test("a date-only or garbage bound, and a window that ends before it starts, are refused", () => {
+    expect(AssetAcquiredWindowQuerySchema.safeParse({ acquiredFrom: "2026-01-01" }).success).toBe(false);
+    expect(AssetAcquiredWindowQuerySchema.safeParse({ acquiredFrom: "soon" }).success).toBe(false);
+    expect(
+      AssetAcquiredWindowQuerySchema.safeParse({
+        acquiredFrom: "2026-07-01T00:00:00.000Z",
+        acquiredTo: "2026-06-30T00:00:00.000Z",
+      }).success,
+    ).toBe(false);
+    // A one-instant window is a valid window.
+    expect(
+      AssetAcquiredWindowQuerySchema.safeParse({
+        acquiredFrom: "2026-06-30T00:00:00.000Z",
+        acquiredTo: "2026-06-30T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
   });
 });
