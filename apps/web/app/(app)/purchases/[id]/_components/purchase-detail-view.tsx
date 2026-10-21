@@ -4,7 +4,6 @@ import {
   ChevronDownIcon,
   DocumentMagnifyingGlassIcon,
   EllipsisVerticalIcon,
-  ExclamationTriangleIcon,
   InboxArrowDownIcon,
   KeyIcon,
   PencilSquareIcon,
@@ -18,7 +17,6 @@ import { useRouter } from "next/navigation";
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/breadcrumb";
-import { Callout } from "@/components/callout";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
@@ -653,11 +651,10 @@ export function PurchaseDetailView({ id }: { id: string }) {
         canWrite={canWrite}
         notice={
           <>
-            {/* ADR-0099 §12: purchase documents are financial evidence, and the attachments volume is not in
-                the backup yet (docs/05-runbooks/backups.md, item #7). Say so where the files are uploaded. */}
-            <Callout tone="warning" icon={<ExclamationTriangleIcon />} className="mb-3">
-              <p className="text-sm">{t("detail.documentsBackupNotice")}</p>
-            </Callout>
+            {/* ADR-0099 §12: purchase documents are financial evidence. The backup archives the attachments
+                volume with every database dump (#1467, docs/05-runbooks/backups.md item 7) — say so, quietly,
+                where the files are uploaded. */}
+            <p className="mb-3 text-xs text-muted-foreground">{t("detail.documentsBackupNotice")}</p>
             {extractionHint ? (
               <p className="mb-3 text-xs text-muted-foreground">
                 {t.rich(`extraction.hint.${extractionHint}`, {
