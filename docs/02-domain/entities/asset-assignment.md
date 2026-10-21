@@ -3,7 +3,7 @@ title: AssetAssignment
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-21
 ---
 
 # AssetAssignment
@@ -66,6 +66,9 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   double-click / concurrent call flips the row at most once (mirrors `release()`'s conditional write),
   and already-acknowledged / released / not-yours all return `409`. On success a **targeted**
   notification (`asset_assignment.acknowledged`) nudges the human who assigned the device.
+  The route has no permission gate, so its response is the **self-read shape** (`id`, `userId` and
+  the trimmed owner, `AssetListAssignmentSchema` — what `GET /assets/mine` inlines), never `notes` or
+  who assigned / released the device (#1518).
 - **Referential integrity ([[0019-asset-assignment-integrity]]):** the required FKs are
   `onDelete: Restrict` — an [[asset]] or [[user]] with assignment rows **cannot be hard-deleted**.
 

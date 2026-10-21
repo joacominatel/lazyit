@@ -2,6 +2,7 @@ import { createZodDto } from 'nestjs-zod';
 import {
   AcknowledgeAssignmentSchema,
   AssetAssignmentSchema,
+  AssetListAssignmentSchema,
   CreateAssetAssignmentSchema,
   ReleaseAssetAssignmentSchema,
   UpdateAssetAssignmentNotesSchema,
@@ -25,4 +26,9 @@ export class UpdateAssetAssignmentNotesDto extends createZodDto(
 // comes from the authenticated principal, never the body.
 export class AcknowledgeAssignmentDto extends createZodDto(
   AcknowledgeAssignmentSchema,
+) {}
+// The acknowledge RESPONSE (#1518): the self-read's assignment shape (`GET /assets/mine`), never the
+// admin-side columns.
+export class AcknowledgedAssignmentDto extends createZodDto(
+  AssetListAssignmentSchema,
 ) {}
