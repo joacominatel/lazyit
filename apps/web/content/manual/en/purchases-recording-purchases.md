@@ -180,6 +180,38 @@ serial in it. And a code that won't read can always be typed.
 The camera needs your browser's permission and a secure (HTTPS) connection. Without a camera, or if you
 deny access, the form says so and you type or paste the serials as before.
 
+### Receiving a whole delivery
+
+When one delivery brings units for **several lines** — the laptops and the docks in the same courier run —
+receive it in one go with **Receive delivery**, the main part of the **Receive** button at the top of the
+purchase (its arrow lists the lines one by one, for the full single-line form). On *Pending units*, each
+purchase has its own **Receive delivery** button.
+
+The sheet has one row for each **asset** or **consumable** line still waiting for units that you may
+receive — receiving assets needs permission to edit purchases and assets, and receiving into stock to edit
+purchases and consumables. License and *Other* lines are never in it.
+
+- Every row **starts at 0**: count what actually arrived with **−** and **+** (or type the number). Rows
+  left at 0 are not received.
+- On an asset row with at least one unit, a **Serial numbers** box opens. As in a single receive, the
+  **count follows the serials** you paste or scan. **Scan** opens the camera under that row and fills
+  **that line** — on a phone, scan the line you are on, choose **Done**, then move to the next.
+- A line with **no model** (or a consumable line with no consumable) asks for one in its row; it is saved
+  on the line before its units are received, so the next delivery already has it.
+- **Every unit in this delivery** sets the values all asset units share: the **purchase date** (the
+  invoice date, or today when there is none), the **status** (*In storage*) and the **location** (where the
+  purchase is delivered). The cost, company and warranty come from each line, exactly as when you receive
+  one line, and the warranty end follows the date you choose. Consumable lines only add their count to
+  stock.
+- **Delivery note photo** is optional. On a phone it offers the camera; the photo (or a PDF) is added to the
+  purchase's [documents](#documents) with the type *Delivery note*.
+
+**Receive** then receives each line **on its own**, one after the other, so a delivery can **partly**
+succeed. The result shows every line: the units received, the units that could not be created and why, or
+that the line was not received at all (for example, if it was changed meanwhile) — fix that line and receive
+it again; nothing else is undone. Receiving more than a line expects shows the usual warning and
+**Raise the line** offer in its row.
+
 ## Receiving into stock
 
 A **consumable** line is received into its consumable's stock, not as assets. Choose **Receive** on the
@@ -310,7 +342,8 @@ Each line shows "x of y received" and what is still pending, with **Receive** an
 existing assets** and **Cancel remaining units**. On a consumable line, **Receive** opens
 [Receive into stock](#receiving-into-stock), and there is nothing to link. A license line offers
 [Apply license](#applying-a-license) instead. A purchase whose **expected delivery** date has passed is
-marked **Overdue**.
+marked **Overdue**. **Receive delivery** on a purchase receives several of its lines at once — see
+[Receiving a whole delivery](#receiving-a-whole-delivery).
 
 **Export CSV** on the tab downloads every pending line, filtered by supplier when one is set — see
 [Exporting data](/help/notifications-activity-data-export).
