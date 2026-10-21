@@ -18,6 +18,7 @@ import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/a
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { type ReceiveLineTarget, useLoadLineTarget } from "@/components/purchases/pending-line-picker";
+import { ReceiveDeliverySheet, useDeliveryAccess } from "@/components/purchases/receive-delivery-sheet";
 import { ErrorState, Pagination } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,7 @@ import {
   localToday,
   pendingTotals,
 } from "@/lib/purchases/pending";
+import { deliveryLines } from "@/lib/purchases/receive-delivery";
 import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { usePurchaseTitle } from "../../_components/purchase-display";
@@ -64,6 +66,7 @@ export function PendingUnitsView() {
   const t = useTranslations("purchases.pending");
   const tList = useTranslations("purchases.list");
   const tr = useTranslations("purchases.receipt");
+  const tDelivery = useTranslations("purchases.receiveDelivery");
   const { date } = useFormatters();
   const titleOf = usePurchaseTitle();
   const canWrite = useCan("purchaseOrder:write");
@@ -71,6 +74,7 @@ export function PendingUnitsView() {
   const canReceive = canWrite && canWriteAssets;
   const canReceiveStock = useCanReceiveStock();
   const canApplyLicense = useCanApplyLicense();
+  const deliveryAccess = useDeliveryAccess();
   const { offset, limit, filters, setFilter, setOffset, clearFilters } = useListParams(PENDING_LIST_OPTIONS);
   const supplierId = filters.supplier !== "ALL" ? filters.supplier : undefined;
   const { data: page, isLoading, isFetching, isError, error, refetch } = usePendingLines({
@@ -85,6 +89,8 @@ export function PendingUnitsView() {
   const [applyingLicense, setApplyingLicense] = useState<PendingPurchaseLine | null>(null);
   const [linking, setLinking] = useState<PendingPurchaseLine | null>(null);
   const [cancelling, setCancelling] = useState<PendingPurchaseLine | null>(null);
+  // A whole delivery for one purchase (#1497): the sheet reads the purchase itself.
+  const [deliveryFor, setDeliveryFor] = useState<string | null>(null);
 
   const groups = groupPendingLines(page?.items ?? []);
   const totals = pendingTotals(groups);
@@ -175,6 +181,17 @@ export function PendingUnitsView() {
                     <span className="ml-auto text-muted-foreground">
                       {tr("pending", { count: group.pending })}
                     </span>
+                    {deliveryLines(group.lines, deliveryAccess).length > 0 ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeliveryFor(group.purchase.id)}
+                        aria-label={tDelivery("actionFor", { purchase: titleOf(group.purchase) })}
+                      >
+                        <InboxArrowDownIcon />
+                        {tDelivery("action")}
+                      </Button>
+                    ) : null}
                   </div>
                   <ul className="divide-y">
                     {group.lines.map((line) => (
@@ -225,6 +242,9 @@ export function PendingUnitsView() {
         </>
       )}
 
+      {deliveryFor ? (
+        <ReceiveDeliverySheet purchaseId={deliveryFor} onClose={() => setDeliveryFor(null)} />
+      ) : null}
       {receiving ? <ReceiveStockDialog line={receiving} onClose={() => setReceiving(null)} /> : null}
       {receivingStock ? (
         <ReceiveIntoStockDialog

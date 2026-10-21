@@ -38,6 +38,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -67,11 +68,13 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
 import { canAskAiToFill, canExtract, documentNameForPrompt, unavailableHint } from "@/lib/purchases/extraction";
 import { lineReceiveAction } from "@/lib/purchases/pending";
+import { deliveryLines } from "@/lib/purchases/receive-delivery";
 import { formatMoney } from "@/lib/utils/money";
 import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
+import { ReceiveDeliverySheet, useDeliveryAccess } from "@/components/purchases/receive-delivery-sheet";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
 import { useAiAssistant } from "@/components/ai/ai-assistant-root";
@@ -183,6 +186,8 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const canReceiveStock = useCanReceiveStock();
   // Applying a license line changes its application: purchase and application write (#1477).
   const canApplyLicense = useCanApplyLicense();
+  // Receiving one delivery across several lines (#1497): the asset and consumable lines this viewer may receive.
+  const deliveryAccess = useDeliveryAccess();
   // Reading a document into a reviewed draft (#1477): offered only where the status says so; only an admin,
   // who can change Settings → AI, is told why it is not.
   const isAdmin = useCan("settings:manage");
@@ -202,6 +207,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
   const [receivingStock, setReceivingStock] = useState<PurchaseOrderLine | null>(null);
+  const [receivingDelivery, setReceivingDelivery] = useState(false);
   const [applyingLicense, setApplyingLicense] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
@@ -269,6 +275,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
   }
 
   const currency = purchase.currency ?? "";
+  const deliverable = deliveryLines(purchase.lines, deliveryAccess);
   const cancellable = canCancelPurchase(purchase.status, purchase.receipt);
   const statusItems: { status: PurchaseOrderStatus; label: string }[] = [
     { status: "DRAFT" as const, label: t("detail.markDraft") },
@@ -291,6 +298,38 @@ export function PurchaseDetailView({ id }: { id: string }) {
         actions={
           canWrite || canDelete ? (
             <>
+              {deliverable.length > 0 ? (
+                // *Receive* is a split button (UX proposal §3.a): the main action receives a delivery across
+                // lines; the menu receives one line with the full single-line form (#1497).
+                <div className="flex items-center">
+                  <Button size="sm" className="rounded-r-none" onClick={() => setReceivingDelivery(true)}>
+                    <InboxArrowDownIcon />
+                    {t("receiveDelivery.action")}
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                        aria-label={t("receiveDelivery.moreActions")}
+                      >
+                        <ChevronDownIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-w-80">
+                      <DropdownMenuLabel>{t("receiveDelivery.receiveOne")}</DropdownMenuLabel>
+                      {deliverable.map((line) => (
+                        <DropdownMenuItem
+                          key={line.id}
+                          onSelect={() => (line.kind === "ASSET" ? setReceiving(line) : setReceivingStock(line))}
+                        >
+                          <span className="truncate">{line.description}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ) : null}
               {canWrite ? (
                 <>
                   <Button variant="outline" size="sm" asChild>
@@ -678,6 +717,10 @@ export function PurchaseDetailView({ id }: { id: string }) {
           line={{ purchase, line: receiving }}
           onClose={() => setReceiving(null)}
         />
+      ) : null}
+
+      {receivingDelivery ? (
+        <ReceiveDeliverySheet purchaseId={purchase.id} onClose={() => setReceivingDelivery(false)} />
       ) : null}
 
       {receivingStock ? (
