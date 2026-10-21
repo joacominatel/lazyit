@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-10-15
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -845,6 +845,34 @@ surfacing for repair rather than a state anyone lives in. **The guarantee that m
 to revisit — a colliding host's report never retires its peer's container children — is asserted by
 test** (`infra.service.spec.ts`, `#1158`), not left as a comment. Revisit if
 `infra.identity_conflict` turns out to fire often in practice.
+
+*(2026-10-21, #1158 — the gap is closed:)* the deferral's cost turned out not to exist. On every
+ordinary ingest branch the node is found or created by **exact equality** on the reported key, so the
+node's `externalId` and the reported one are the same string, and deriving the container key from the
+**node** leaves every existing child key byte-identical. And because the collision branch never
+reconciled containers, nothing was ever written under a clone's prefix — there is nothing to re-key.
+So the container key is now derived from the **node's** `externalId` everywhere, and the collision
+branch reconciles containers under the clone's own key, `<externalId>#<discriminator>/container/<name>`.
+The peer's prefix (`<externalId>/container/`) and the clone's cannot select each other's rows, so the
+guarantee above still holds and is still pinned by test — now with reconciliation running. Three
+deliberate limits:
+
+- **Two cases keep the old behaviour** (no reconcile, nothing retired), because the derived key would
+  not be unique to one machine: a discriminator ending in `/container`, whose child keys would parse
+  back to a shorter key (AUD-102 only swaps a full separator); and a report whose MACs share nothing
+  with the ones the clone node last held — two clones sharing a first serial land on ONE clone node,
+  and reconciling there would bring the thrash back. A genuine NIC swap on a clone costs one skipped
+  tick.
+- **A clone's children are not offered to the auto-confirm rules.** They land PENDING, like the
+  clone's own node: a host under suspicion is for a human to look at.
+- **Guests are unchanged**: the collision branch still reconciles no `/guest/` children and runs no
+  identity join ([[0095-hypervisor-guest-inventory]], "Known limitations").
+
+**What an operator sees on upgrade:** a clone that reports containers gets them as new PENDING
+proposals under the clone's entry on its next report (each one charged to the enrollment budget like
+any new child). Nothing already in the inventory changes. When the clone's machine-id is later fixed it
+reports as a new host, as before, and so do its containers; the clone's old entry and its children stop
+checking in and go OFFLINE through the staleness sweep — discard them, or **Merge into…** the host.
 
 **`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
 `detectedAt` of the FIRST detection. A marker written only when the node was created would be gone the
