@@ -123,8 +123,9 @@ services:
     env_file: [infra/env/.env.prod]
     volumes:
       # User-uploaded attachment blobs (ADR-0082): asset documents + KB inline images,
-      # content-addressed by sha256, served API-only behind per-parent authz. ⚠ NOT covered by any
-      # backup yet (deferred to v1.1 by decision — ADR-0082; see docs/05-runbooks/backups.md).
+      # content-addressed by sha256, served API-only behind per-parent authz. Backed up by the
+      # `backup` sidecar below (read-only mount, a verified tarball per run beside the DB dump —
+      # #1467; restore order in docs/05-runbooks/backups.md).
       - attachments_data:/app/attachments
     depends_on:
       db:
@@ -284,13 +285,17 @@ services:
       start_period: 10s
     networks: [internal]
 
-  # --- Backup sidecar (OPT-IN) — cron + pg_dump of the app DB (prod) ----------
-  # In the `prod` AND a `backup` profile, so it only runs when BOTH are requested alongside the
-  # prod stack:
+  # --- Backup sidecar — cron + pg_dump of the app DB + a tarball of the attachments volume (prod) ---
+  # Listed in the `prod` and `backup` profiles. Compose enables a service when ANY of its profiles is
+  # active, so `--profile prod` alone (what infra/start.sh and infra/update.sh run) already starts it;
+  # `--profile backup` or naming the service brings it up on its own:
   #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
-  # Dumps the app DB on a schedule to the host-mounted ./backups dir, prunes app dumps older than the
-  # retention window, and (optional, OFF by default) runs an offsite hook.
+  # Each run dumps the app DB, then archives the attachments volume (#1467) under the SAME timestamp
+  # (app-<ts>.dump + attachments-<ts>.tar.gz — a matched pair) to the host-mounted ./backups dir,
+  # prunes both kinds past the retention window, and (optional, OFF by default) runs an offsite hook
+  # on each file. DB first, then blobs: attachments are written blob-first (ADR-0082 §3), so every
+  # row in the dump already has its blob on disk when the tarball is taken.
   # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
   # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
   backup:
@@ -306,15 +311,23 @@ services:
     environment:
       # Cron schedule (crontab syntax). Default: daily at 02:30.
       BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
-      # Keep dumps newer than this many days; older ones are pruned after each run.
+      # Keep dumps (and attachments tarballs) newer than this many days; older ones are pruned after
+      # each successful run of that kind.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # Free space (MB) the attachments tarball must leave on the ./backups filesystem. The run checks
+      # `du` of the volume against `df` of /backups BEFORE writing and refuses (loud FAILED line, last
+      # good tarball kept, the DB dump unaffected) rather than fill the disk the database lives on.
+      BACKUP_MIN_FREE_MB: ${BACKUP_MIN_FREE_MB:-1024}
       # App DB connection (reuses the shared POSTGRES_* + the `db` service name).
       PGHOST: db
-      # OPTIONAL offsite copy — OFF unless set. Receives the dump path as $1 (e.g. an rclone/scp
-      # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
+      # OPTIONAL offsite copy — OFF unless set. Runs once per file the run produced (the app dump, then
+      # the attachments tarball), with that file's path as $1 (e.g. an rclone/scp one-liner). Leave
+      # unset to keep backups local-disk only (no mandatory cloud).
       BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
       # OPTIONAL failure alert hook — OFF unless set. Runs when a dump fails (non-zero pg_dump,
-      # or an empty/unrestorable dump) or the offsite hook fails. Receives a one-line reason as $1.
+      # or an empty/unrestorable dump), the attachments tarball fails (not enough free space, tar
+      # error, or an archive that does not verify) or the offsite hook fails. Receives a one-line
+      # reason as $1.
       # Mirrors BACKUP_OFFSITE_CMD so a self-hosted operator can wire their own notifier — there is
       # no built-in vendor integration (ADR-0028 "no mandatory cloud"). A failed run is ALWAYS loud
       # in the logs ("[lazyit-backup] FAILED ...") and exits non-zero whether or not this is set.
@@ -323,6 +336,9 @@ services:
       # Dumps land on the host (repo-root ./backups) so they survive `down`/recreate and can be
       # copied off-host. ./backups is gitignored.
       - ./backups:/backups
+      # The attachments volume (ADR-0082), READ-ONLY: the sidecar only ever reads blobs to archive
+      # them. A restore writes through a separate, explicit mount (docs/05-runbooks/backups.md).
+      - attachments_data:/attachments:ro
     depends_on:
       db:
         condition: service_healthy
@@ -330,8 +346,8 @@ services:
     # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
     # RUNTIME. POSTGRES_* come from env_file, and the cron job inherits them directly from
     # `exec crond` (no env-export file; see the note by the crontab below). The job writes timestamped
-    # custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps the container alive and
-    # logs to stdout (json-file driver + rotation).
+    # custom-format (-Fc) dumps and attachments tarballs (.tar.gz) and prunes by mtime. `crond -f -d 8`
+    # keeps the container alive and logs to stdout (json-file driver + rotation).
     command:
       - sh
       - -c
@@ -400,23 +416,104 @@ services:
           echo "[lazyit-backup] $$label DB -> $$final ($$(wc -c < "$$final") bytes, restorable)"
         }
 
-        # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
+        # tar_attachments FINAL_PATH: archive the attachments volume (read-only at /attachments) to
+        # FINAL_PATH.partial, verify, then atomically promote — dump_db's partial -> verify -> rename
+        # discipline. Unlike dump_db it does NOT abort the run: it returns non-zero with the reason in
+        # ATT_ERR, so the already-promoted DB dump still gets its retention sweep and offsite copy, and
+        # the run then fails loud at the end. tmp/ (in-flight uploads, never referenced by a row) is
+        # left out. Blobs are immutable, content-addressed files promoted by an atomic rename
+        # (ADR-0082 §2-3), so archiving a live volume never captures a half-written blob.
+        tar_attachments() {
+          final="$$1"; partial="$${final}.partial"
+          rm -f "$$partial"
+          if [ ! -d /attachments ]; then
+            ATT_ERR="attachments volume is not mounted at /attachments; $$final NOT written"
+            return 1
+          fi
+          case "$${BACKUP_MIN_FREE_MB:-}" in
+            ''|*[!0-9]*)
+              ATT_ERR="BACKUP_MIN_FREE_MB must be a whole number of MB (got '$${BACKUP_MIN_FREE_MB:-}'); $$final NOT written, last good tarball kept"
+              return 1 ;;
+          esac
+          # Disk guard: the blobs are mostly already-compressed (PDF, JPEG/PNG/WebP, docx/xlsx), so the
+          # tarball is about the size of the volume. Refuse BEFORE writing if it would leave less than
+          # BACKUP_MIN_FREE_MB free on the ./backups filesystem — usually the disk Postgres lives on.
+          need_kb="$$(du -sk /attachments | awk '{print $$1}')"
+          avail_kb="$$(df -Pk /backups | awk 'NR==2 {print $$4}')"
+          case "$${need_kb}:$${avail_kb}" in
+            [0-9]*:[0-9]*) ;;
+            *)
+              ATT_ERR="could not measure the attachments volume or the free space on /backups (du='$${need_kb}', df='$${avail_kb}'); $$final NOT written, last good tarball kept"
+              return 1 ;;
+          esac
+          reserve_kb=$$((BACKUP_MIN_FREE_MB * 1024))
+          if [ $$((avail_kb - need_kb)) -lt "$$reserve_kb" ]; then
+            ATT_ERR="not enough free space for the attachments tarball (volume $${need_kb} KB, free $${avail_kb} KB on /backups, BACKUP_MIN_FREE_MB=$${BACKUP_MIN_FREE_MB}); $$final NOT written, last good tarball kept"
+            return 1
+          fi
+          # One retry: a blob the attachments GC unlinks mid-archive makes tar fail; the second pass
+          # simply no longer sees it.
+          if ! tar -czf "$$partial" -C /attachments --exclude ./tmp .; then
+            echo "[lazyit-backup] attachments tar failed once; retrying" >&2
+            rm -f "$$partial"
+            if ! tar -czf "$$partial" -C /attachments --exclude ./tmp .; then
+              rm -f "$$partial"
+              ATT_ERR="attachments tar exited non-zero twice (disk full / unreadable file?); $$final NOT written, last good tarball kept"
+              return 1
+            fi
+          fi
+          # Verify: gzip -t checks the CRC of the whole stream (fails on truncation or corruption), and
+          # tar -t walks every header — the tarball analogue of dump_db's pg_restore -l.
+          if ! gzip -t "$$partial" 2>/dev/null || ! tar -tzf "$$partial" > /dev/null 2>&1; then
+            rm -f "$$partial"
+            ATT_ERR="attachments tarball is truncated/corrupt (gzip -t / tar -t could not read it); $$final NOT written, last good tarball kept"
+            return 1
+          fi
+          mv "$$partial" "$$final"
+          blobs="$$(tar -tzf "$$final" | grep -c '^\./[0-9a-f][0-9a-f]/.' || true)"
+          echo "[lazyit-backup] attachments -> $$final ($$(wc -c < "$$final") bytes, $${blobs} blob(s), verified)"
+        }
+
+        # 1. App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file). A failure here
+        # aborts the run (no tarball without its matching dump).
         dump_db "app" "/backups/app-$${TS}.dump" "$$POSTGRES_PASSWORD" "$$PGHOST" "$$POSTGRES_USER" "$$POSTGRES_DB"
 
-        # Retention sweep — delete app dumps older than BACKUP_RETENTION_DAYS. Only ever matches
-        # app-*.dump (verified, promoted) files, so nothing else an operator keeps here (e.g. an old
-        # zitadel-*.dump) is pruned; *.partial temp files are never left behind on the happy path and
-        # are removed on failure, so a corrupt run can never be retained as a "real" backup.
-        find /backups -name 'app-*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
-
-        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs only on the dump that was
-        # already verified + promoted above. Receives the dump path as $$1. An offsite failure is
-        # loud + non-zero (the local dump is safe, but the offsite copy didn't happen).
-        if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
-          f="/backups/app-$${TS}.dump"
-          run_hook "$$BACKUP_OFFSITE_CMD" "$$f" \
-            || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
+        # 2. Attachments — AFTER the dump, under the SAME timestamp. Blobs are written before their row
+        # (ADR-0082 §3), so every row in the dump already has its blob in this tarball; a blob uploaded
+        # in between is row-less in the dump and the GC reclaims it after a restore.
+        ERRS=""
+        ATT_ERR=""
+        ATT_FILE="/backups/attachments-$${TS}.tar.gz"
+        if ! tar_attachments "$$ATT_FILE"; then
+          echo "[lazyit-backup] attachments step failed: $$ATT_ERR" >&2
+          ERRS="$$ATT_ERR"
         fi
+
+        # Retention sweep — delete files older than BACKUP_RETENTION_DAYS, each kind only after a
+        # successful run of that kind (a failing step never prunes its last good copies). Only ever
+        # matches app-*.dump / attachments-*.tar.gz (verified, promoted) files, so nothing else an
+        # operator keeps here (e.g. an old zitadel-*.dump, an update.sh pre-update-*.dump) is pruned;
+        # *.partial temp files are never left behind on the happy path and are removed on failure, so
+        # a corrupt run can never be retained as a "real" backup.
+        find /backups -name 'app-*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        if [ -z "$$ATT_ERR" ]; then
+          find /backups -name 'attachments-*.tar.gz' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        fi
+
+        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs once per file this run
+        # verified + promoted — the dump, then the tarball — with that path as $$1. An offsite failure
+        # is loud + non-zero (the local copies are safe, but the offsite copy didn't happen).
+        if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
+          for f in "/backups/app-$${TS}.dump" "$$ATT_FILE"; do
+            [ -f "$$f" ] || continue
+            if ! run_hook "$$BACKUP_OFFSITE_CMD" "$$f"; then
+              msg="offsite hook failed for $$f (local copy is intact; offsite copy did NOT happen)"
+              echo "[lazyit-backup] $$msg" >&2
+              ERRS="$${ERRS:+$$ERRS; }$$msg"
+            fi
+          done
+        fi
+        [ -z "$$ERRS" ] || fail "$$ERRS"
         echo "[lazyit-backup] run $$TS complete"
         SCRIPT
         chmod +x /usr/local/bin/lazyit-backup
@@ -430,7 +527,7 @@ services:
         # byte-for-byte). env_file + the `environment:` block above populate this shell, and
         # `exec crond` below replaces it while keeping that env.
         echo "$$BACKUP_CRON /usr/local/bin/lazyit-backup >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
-        echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups"
+        echo "[lazyit-backup] scheduled: $$BACKUP_CRON (retention $${BACKUP_RETENTION_DAYS}d) -> /backups (app DB + attachments)"
         exec crond -f -d 8
     networks: [internal]
 
@@ -447,9 +544,10 @@ volumes:
   caddy_config:
   # User-uploaded attachment blobs (ADR-0082): `<sha[0:2]>/<sha256>` content-addressed files + a
   # tmp/ staging dir, mounted on the api at /app/attachments. Domain data — NOT rebuildable.
-  # ⚠ DR gap (accepted, loud): the backup sidecar does NOT tar this volume yet (deferred to v1.1 —
-  # ADR-0082); a host disk loss loses all attachments while the DB restores. See
-  # docs/05-runbooks/backups.md before relying on it.
+  # Backed up by the `backup` sidecar (mounted READ-ONLY there): each run writes
+  # attachments-<ts>.tar.gz beside app-<ts>.dump, same schedule/retention/offsite hook (#1467). The
+  # sidecar never writes to this volume; a restore is a manual, documented step
+  # (docs/05-runbooks/backups.md).
   attachments_data:
   # The bundled Zitadel's zitadel_db_data and zitadel_secrets are intentionally no longer declared
   # (ADR-0102): compose never deletes an undeclared volume, so any left on a host stay until the
