@@ -44,9 +44,11 @@ import {
  * ALLOW-LIST BY FORMAT. Only rows whose `format` is exactly `aisdk-v7` — plus the web-search record
  * `lazyit-web-search-v1` (#1389), read ONLY for the `sources` part it becomes under the message before
  * it, through the shared scheme-checked source schema — are read. The runtime's own
- * records (`lazyit-system-prompt-v1`, `lazyit-run-v1`, `lazyit-step-v1`, and any `lazyit-*` a later build
- * adds) are state, not transcript — the frozen system prompt, session epochs, step ledgers — and never
- * reach the wire, whatever the query that loaded the rows asked for. Tool messages are folded into the
+ * records (`lazyit-step-v1`, the legacy `lazyit-system-prompt-v1` and `lazyit-run-v1` rows conversations
+ * from before #1675 still hold, and any `lazyit-*` a later build adds) are state, not transcript — step
+ * ledgers, the frozen system prompt, session epochs — and never reach the wire, whatever the query that
+ * loaded the rows asked for. (The prompt and the epoch now live in `AiConversation.systemPrompt` and
+ * `AiRun.sessionEpoch`, which the projection never reads.) Tool messages are folded into the
  * calls they answer and never become messages of their own. Everything else a model message may carry
  * (reasoning, provider options, signatures, raw tool input and output) is dropped.
  *

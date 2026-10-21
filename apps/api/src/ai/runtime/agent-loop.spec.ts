@@ -65,6 +65,12 @@ async function headless(text = 'Retire asset LZ-0001') {
   });
 }
 
+function conversationRow(conversationId: string) {
+  return rt.prisma.tables.aiConversation.rows.find(
+    (r) => r.id === conversationId,
+  )!;
+}
+
 function status(runId: string) {
   return rt.run(runId).status as string;
 }
@@ -141,17 +147,20 @@ describe('text-only turn', () => {
       /^<turn_context>\nCurrent time: .*\nCurrent page: \/assets\n<\/turn_context>\n\nWhich laptops/,
     );
 
-    // The transcript holds only provider messages; the runtime records sit beside them.
+    // The transcript holds only provider messages. The frozen prompt and the session epoch are columns
+    // (#1675): a new conversation and run write no `lazyit-system-prompt-v1` / `lazyit-run-v1` row.
     expect(rt.transcript(conversationId).map((m) => m.role)).toEqual([
       'user',
       'assistant',
     ]);
     expect(rt.messages(conversationId).map((m) => m.format)).toEqual([
-      'lazyit-system-prompt-v1',
-      'lazyit-run-v1',
       'aisdk-v7',
       'aisdk-v7',
     ]);
+    expect(conversationRow(conversationId).systemPrompt).toBe(
+      request.instructions,
+    );
+    expect(run.sessionEpoch).toBe(3);
 
     // Events: the shared union, in order.
     const events = rt.events(runId);
@@ -205,6 +214,192 @@ describe('text-only turn', () => {
       'assistant',
       'user',
     ]);
+  });
+});
+
+describe('runtime state columns, with the legacy rows as fallback (#1675)', () => {
+  const LEGACY_PROMPT =
+    'You are the lazyit assistant (a legacy frozen prompt).';
+
+  /** A conversation as an instance created it before #1675: no column, the prompt in a seq-0 row. */
+  async function legacyConversation(): Promise<string> {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+    });
+    conversationRow(id).systemPrompt = null;
+    rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId: id,
+        runId: null,
+        seq: 0,
+        role: 'system',
+        format: 'lazyit-system-prompt-v1',
+        content: { text: LEGACY_PROMPT },
+      },
+    });
+    return id;
+  }
+
+  /** Turn a just-queued run into one from before #1675: no column, the epoch in a `lazyit-run-v1` row. */
+  function asLegacyRun(
+    runId: string,
+    conversationId: string,
+    sessionEpoch: number | null,
+  ): void {
+    rt.run(runId).sessionEpoch = null;
+    if (sessionEpoch === null) return;
+    const last = rt.messages(conversationId).at(-1)!.seq as number;
+    rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId,
+        runId,
+        seq: last + 1,
+        role: 'system',
+        format: 'lazyit-run-v1',
+        content: { runId, sessionEpoch },
+      },
+    });
+  }
+
+  async function chatIn(conversationId: string, text = 'hi') {
+    return rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text,
+      conversationId,
+    });
+  }
+
+  it('a new conversation and run write the columns, and a service account run has no epoch', async () => {
+    rt.model.push({ text: 'ok' }, { text: 'ok' });
+    const human = await chat();
+    const robot = await headless();
+    await rt.drain();
+    expect(conversationRow(human.conversationId).systemPrompt).toContain(
+      'You are the lazyit assistant',
+    );
+    expect(rt.run(human.runId).sessionEpoch).toBe(3);
+    expect(rt.run(robot.runId).sessionEpoch).toBeNull();
+    expect(rt.run(robot.runId).status).toBe('SUCCEEDED');
+    const formats = rt.prisma.tables.aiMessage.rows.map((r) => r.format);
+    expect(formats).not.toContain('lazyit-system-prompt-v1');
+    expect(formats).not.toContain('lazyit-run-v1');
+  });
+
+  it('a legacy conversation and run (rows only) still read their prompt and epoch from the rows', async () => {
+    const conversationId = await legacyConversation();
+    rt.model.push({ text: 'ok' });
+    const { runId } = await chatIn(conversationId);
+    asLegacyRun(runId, conversationId, 3);
+    await rt.drain();
+    expect(rt.run(runId).status).toBe('SUCCEEDED');
+    expect(rt.model.requests[0].instructions).toBe(LEGACY_PROMPT);
+    // Never backfilled, never removed: the legacy rows stay and the columns stay null.
+    expect(conversationRow(conversationId).systemPrompt).toBeNull();
+    expect(rt.run(runId).sessionEpoch).toBeNull();
+    expect(rt.messages(conversationId).map((m) => m.format)).toEqual([
+      'lazyit-system-prompt-v1',
+      'aisdk-v7',
+      'lazyit-run-v1',
+      'aisdk-v7',
+    ]);
+    // And the provider still sees provider messages only.
+    expect(
+      rt.model.requests[0].messages.map((m) => (m as { role: string }).role),
+    ).toEqual(['user']);
+  });
+
+  it("a legacy run's epoch is still checked: a stale one is refused like the session token", async () => {
+    const conversationId = await legacyConversation();
+    const { runId } = await chatIn(conversationId);
+    asLegacyRun(runId, conversationId, 2);
+    await rt.drain();
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(rt.model.requests).toHaveLength(0);
+  });
+
+  it('a human run with neither the column nor a legacy row fails closed', async () => {
+    const { runId, conversationId } = await chat();
+    asLegacyRun(runId, conversationId, null);
+    await rt.drain();
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(rt.model.requests).toHaveLength(0);
+  });
+
+  it('mixed: a legacy conversation continues after the upgrade with a new run on the column', async () => {
+    const conversationId = await legacyConversation();
+    rt.model.push({ text: 'before' }, { text: 'after' });
+    const before = await chatIn(conversationId, 'one');
+    asLegacyRun(before.runId, conversationId, 3);
+    await rt.drain();
+    const after = await chatIn(conversationId, 'two');
+    await rt.drain();
+    expect(rt.run(before.runId).status).toBe('SUCCEEDED');
+    expect(rt.run(after.runId)).toMatchObject({
+      status: 'SUCCEEDED',
+      sessionEpoch: 3,
+    });
+    const [a, b] = rt.model.requests;
+    expect(a.instructions).toBe(LEGACY_PROMPT);
+    expect(b.instructions).toBe(LEGACY_PROMPT);
+    expect(b.messages.map((m) => (m as { role: string }).role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+    ]);
+  });
+
+  it('the column wins over a legacy row when both exist', async () => {
+    const { runId, conversationId } = await chat();
+    rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId,
+        runId: null,
+        seq: -1,
+        role: 'system',
+        format: 'lazyit-system-prompt-v1',
+        content: { text: LEGACY_PROMPT },
+      },
+    });
+    rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId,
+        runId,
+        seq: 99,
+        role: 'system',
+        format: 'lazyit-run-v1',
+        content: { runId, sessionEpoch: 2 },
+      },
+    });
+    rt.model.push({ text: 'ok' });
+    await rt.drain();
+    expect(rt.run(runId).status).toBe('SUCCEEDED');
+    expect(rt.model.requests[0].instructions).toBe(
+      conversationRow(conversationId).systemPrompt,
+    );
+    expect(rt.model.requests[0].instructions).not.toBe(LEGACY_PROMPT);
+  });
+
+  it('a conversation with neither a prompt column nor a readable legacy row goes read-only', async () => {
+    const { id } = await rt.orchestrator.createConversation({
+      identity: HUMAN,
+      channel: 'CHAT',
+    });
+    conversationRow(id).systemPrompt = null;
+    const { runId } = await chatIn(id);
+    await rt.drain();
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'CONVERSATION_READ_ONLY' },
+    });
+    expect(conversationRow(id).closedReason).toBe('VERSION_CHANGED');
   });
 });
 
