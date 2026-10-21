@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-05
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -397,6 +397,13 @@ palette (a purchase also by its line descriptions) only by a principal holding `
 applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
 The design, the projections and the upgrade path are in [[0035-search-architecture]]'s 2026-10-03
 amendment.
+
+*Built since (2026-10-21, #1500, API):* the **supplier's yearly totals**, as the CEO scoped them on #1495 the same
+day. `GET /suppliers/:id` adds `yearlyTotals: [{ year, currency, amount, unpricedLines, purchaseCount }]`: the year
+of the order date, else of when the purchase was recorded; live purchases that are neither draft nor cancelled,
+each line as (quantity − cancelled) × unit price; grouped per label by the shared rule of §5 — never converted,
+`amount: null` beyond `MONEY_MAX`. No migration; the field is optional in the contract. The rules are on
+[[supplier]]; the supplier page shows them in a follow-up web change.
 
 ### 14. Upgrade safety
 
