@@ -345,7 +345,9 @@ describe('resolving a CIMD client', () => {
           human(user),
           params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
         ),
-      ).resolves.toEqual({ ok: false, refusal: 'INVALID_CLIENT' });
+        // The egress guard's refusal is a network failure: it reads as unreachable, exactly like a host
+        // that is down — so the refusal tells a private address apart from nothing (#1683).
+      ).resolves.toEqual({ ok: false, refusal: 'CLIENT_METADATA_UNREACHABLE' });
       expect(fetched).toHaveLength(0);
       expect(audits('CLIENT_METADATA_REFUSED')[0].detail.reason).toBe(
         'fetch_failed',
@@ -398,7 +400,8 @@ describe('resolving a CIMD client', () => {
         human(user),
         params('https://tools.example.org/c/one-more'),
       ),
-    ).resolves.toEqual({ ok: false, refusal: 'INVALID_CLIENT' });
+      // Not fetched now, so not known to be invalid: the distinct refusal says "try again later" (#1683).
+    ).resolves.toEqual({ ok: false, refusal: 'CLIENT_METADATA_UNREACHABLE' });
     expect(fetched).toHaveLength(CIMD_FETCH_RATE_LIMIT.max);
     // Another user is not affected.
     await h.authorization.validate(
@@ -545,11 +548,52 @@ describe('the bundled offline copy', () => {
         human(user),
         params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
       ),
-    ).resolves.toEqual({ ok: false, refusal: 'INVALID_CLIENT' });
+    ).resolves.toEqual({ ok: false, refusal: 'CLIENT_METADATA_UNREACHABLE' });
     expect(audits('CLIENT_METADATA_REFUSED')[0].detail).toEqual({
       host: 'tools.example.org',
       reason: 'fetch_failed',
     });
+  });
+});
+
+describe('an unreachable metadata document is its own consent refusal (#1683)', () => {
+  it('refuses validate and decision with CLIENT_METADATA_UNREACHABLE, issuing no code', async () => {
+    // Nothing served: the transport fails like an instance without internet access.
+    enableMcp(h, { mcpAllowAnyHttpsClient: true });
+    const user = seedUser(h);
+    await expect(
+      h.authorization.validate(
+        human(user),
+        params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
+      ),
+    ).resolves.toEqual({ ok: false, refusal: 'CLIENT_METADATA_UNREACHABLE' });
+    await expect(
+      h.authorization.decision(human(user), {
+        params: params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
+        decision: 'approve',
+        scopes: ['lazyit.read'],
+      }),
+    ).rejects.toMatchObject({ refusal: 'CLIENT_METADATA_UNREACHABLE' });
+    expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(0);
+  });
+
+  it('answers a transient status (503) as unreachable, a definitive one (404) as an invalid client', async () => {
+    enableMcp(h, { mcpAllowAnyHttpsClient: true });
+    const user = seedUser(h);
+    served.set(EXAMPLE_ID, { status: 503, body: '', headers: {} });
+    await expect(
+      h.authorization.validate(
+        human(user),
+        params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
+      ),
+    ).resolves.toEqual({ ok: false, refusal: 'CLIENT_METADATA_UNREACHABLE' });
+    served.set(EXAMPLE_ID, { status: 404, body: '', headers: {} });
+    await expect(
+      h.authorization.validate(
+        human(user),
+        params(EXAMPLE_ID, { redirect_uri: EXAMPLE_REDIRECT }),
+      ),
+    ).resolves.toEqual({ ok: false, refusal: 'INVALID_CLIENT' });
   });
 });
 
