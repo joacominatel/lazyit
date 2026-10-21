@@ -232,7 +232,7 @@ function hasUserinfo(url: unknown): boolean {
   }
 }
 
-/** The channels of the tools that change only lazyit's own definitions, never a live integration. */
+/** The default: the chat only — every tool that can make or change a live integration, and every preview. */
 const CHAT_ONLY: readonly AiChannel[] = ['CHAT'];
 /**
  * `workflow_create`, `workflow_update`, `workflow_author_version`: the chat, and MCP on a DISABLED workflow
