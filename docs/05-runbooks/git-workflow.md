@@ -3,7 +3,7 @@ title: Git / GitHub Workflow
 tags: [runbook, git, workflow, development]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-10-21
 ---
 
 # Git / GitHub Workflow
@@ -140,26 +140,42 @@ signing key; the mandatory control is MFA + branch protection on the GitHub iden
 
 ## Issue auto-close — read this carefully
 
-GitHub's closing keywords (`Closes #<n>`, `Fixes #<n>`) **only take effect when the reference
-reaches the default branch (`master`)**, and there is a subtlety because our PRs target `dev`:
+GitHub's closing keywords (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`,
+`resolves`, `resolved`, any case, optionally with a colon: `Closes #<n>`, `Fixes: #<n>`) are
+honored **only when the PR merges into the default branch (`master`)**. Our PRs target `dev`, so
+GitHub ignores the keyword there: no link, no close on the `dev`-merge. It does not ride along in
+a commit either — `dev` PRs land as merge commits (`Merge pull request #N …` plus the title), so
+the body never reaches `master`. Until #1666 issues therefore never closed on their own; the v3.0.0
+promotion (#1639) left 19 open, closed by hand.
 
-- A closing keyword in a **PR body** is honored **only if the PR targets the default branch**.
-  Our PRs target `dev`, so a `Closes #<n>` in the PR body is **ignored** by GitHub there — it
-  neither links the issue nor auto-closes it on the `dev`-merge.
-- A closing keyword in a **commit message** closes the issue **when that commit lands on
-  `master`** (it won't list the PR as "linked", but it does close the issue).
+**`.github/workflows/promotion-autoclose.yml` closes them on promotion (#1666).** When the
+`dev` → `master` promotion PR merges (head `dev`, this repository), it:
+
+1. takes every commit the promotion brought in — `git log <dev head> ^<master before the merge>`,
+   uncapped (the PR-commits API stops at 250; v3.0.0 carried 648);
+2. resolves each commit that landed on `dev` (its first-parent line, plus `Merge pull request`
+   commits of PRs stacked into a feature branch) to the PR whose `merge_commit_sha` it is;
+3. reads the closing keywords in those PRs' **bodies** — same repository only (`#N` or
+   `owner/repo#N` naming this one); HTML comments and code are ignored, so the template's guidance
+   and quoted examples close nothing;
+4. skips pull requests and already-closed issues, and closes every other referenced issue as
+   **completed** with a comment naming the delivering PR and the promotion.
+
+Every decision is logged in the run and its job summary. One failing issue does not stop the
+others, and the job never turns the promotion red — a failure surfaces as a warning annotation.
 
 **What this means in practice:**
 
-- Keep `Closes #<n>` in the PR body anyway — it documents intent for the reviewer, and a
-  **squash merge into `dev` carries the PR description into the squash commit message**, so the
-  keyword rides along in a commit.
-- The issue **does not close when the PR merges into `dev`.** It closes when the change is
-  **promoted to `master`** (the user's `dev` → `master` merge brings the keyword-bearing commit
-  onto the default branch). This is intentional: **a closed issue means the work is in
-  production**, not merely integrated.
-- If a squash message strips the keyword, or you don't want to wait for promotion, **close the
-  issue manually**.
+- **Put `Closes #<n>` in the PR body** — one keyword per issue (`Closes #1, closes #2`; a bare
+  `#2` after a comma is not closed, as on GitHub). Use `Refs #<n>` or `Part of #<n>` when the PR
+  does not finish the issue — those never close anything.
+- The issue **stays open while the work sits on `dev`** and closes when the promotion merges.
+  **A closed issue means the work is in production**, not merely integrated.
+- **Preview a promotion before merging it:** Actions → *Promotion auto-close* → *Run workflow*,
+  with the promotion PR number and `dry_run` left on. The summary lists what would close. Running
+  it with `dry_run` off on an already-merged promotion closes what that promotion left open.
+- Close an issue by hand only when its PR did not say `Closes` (or when you do not want to wait
+  for the promotion).
 
 ## Labels (set the user creates in GitHub)
 
