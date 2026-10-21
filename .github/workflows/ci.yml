@@ -19,6 +19,13 @@ jobs:
   verify:
     name: Typecheck · lint · test · build
     runs-on: ubuntu-latest
+    env:
+      # Throwaway credentials for the ephemeral CI Postgres (#1656) — not a secret, never used outside
+      # this job. Deliberately NOT named POSTGRES_PASSWORD at job level: the infra/test scripts below
+      # exercise start.sh's own POSTGRES_PASSWORD handling and must not inherit one. Only the Postgres
+      # steps map it in. compose.yaml's db defaults: user `postgres`, database `lazyit`.
+      CI_DB_PASSWORD: ci-db-test-password-not-a-secret
+      CI_DB_URL: postgresql://postgres:ci-db-test-password-not-a-secret@127.0.0.1:5432/lazyit
     steps:
       # fetch-depth: 0 — full history so the diff-lint step (below) can compute the
       # merge-base with origin/dev for the changed-files gate (#591).
@@ -37,6 +44,17 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 26
+
+      # Postgres for the DB-backed API suite (#1656), started from compose.yaml EXACTLY as it is
+      # pinned there (same image digest, same major as production, same healthcheck) — no second copy
+      # of the pin in this file to drift, the same reasoning as the search-wire job's Meilisearch. A
+      # GitHub `services:` container would need the image repeated here. Detached and NOT waited on:
+      # it boots while install/typecheck/lint run; "Migrate the test database" waits on its own
+      # healthcheck. The dev override (compose.override.yaml, auto-loaded) publishes 127.0.0.1:5432.
+      - name: Start the pinned Postgres (from compose.yaml)
+        env:
+          POSTGRES_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+        run: docker compose up -d db
 
       - name: Cache Bun install cache
         uses: actions/cache@v6
@@ -138,6 +156,31 @@ jobs:
       - name: Test API
         working-directory: apps/api
         run: node node_modules/.bin/jest
+
+      # The DB-backed API suite (#1656): apps/api/test/*.db.spec.ts runs what the mocked unit suite
+      # cannot — raw-SQL notification grouping, time-zone day windows, mark-group-read — against the
+      # real Postgres started above, migrated with the same `prisma migrate deploy` production runs.
+      # `--wait` blocks on the compose healthcheck (normally already passing by now). The suite FAILS
+      # (never skips) without DB_TEST_URL, and it wipes the notification tables — this database is
+      # ephemeral and exists only for this job.
+      - name: Migrate the test database
+        env:
+          POSTGRES_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+          DATABASE_URL: ${{ env.CI_DB_URL }}
+        run: |
+          docker compose up -d --wait --wait-timeout 120 db
+          docker compose images db
+          (cd apps/api && bunx prisma migrate deploy)
+
+      - name: Test API against Postgres
+        working-directory: apps/api
+        env:
+          DB_TEST_URL: ${{ env.CI_DB_URL }}
+        run: bun run test:db
+
+      - name: Postgres logs (on failure)
+        if: failure()
+        run: docker compose logs db
 
       - name: Test shared
         working-directory: packages/shared
