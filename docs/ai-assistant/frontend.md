@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-21
 ---
 
 # AI assistant — Frontend surfaces
@@ -846,7 +846,9 @@ while MCP is enabled. On an HTTPS instance with MCP enabled, the public
   component calls `POST /oauth/authorize/validate` (Bearer) with the raw parameters →
   `{ client: { id, name, uri?, verified, verifiedDomain? }, redirectUri, redirectHost, loopbackOnly, scopes: Scope[],
   user: { email } }` or a typed refusal (`AI_DISABLED`, `FORBIDDEN`, `INVALID_CLIENT`,
-  `INVALID_REDIRECT`). An invalid client or redirect renders an error page, never a redirect.
+  `INVALID_REDIRECT`, and since #1683 `CLIENT_METADATA_UNREACHABLE` — a CIMD document that could not be
+  fetched right now). An invalid client or redirect renders an error page, never a redirect; every
+  refusal has a title and body in both catalogs (`consent.stop.refusal.*`).
 - `POST /oauth/authorize/decision` (Bearer) with the same raw parameters plus the chosen scope →
   `{ redirectTo }` (code + state + iss, or `error=access_denied`). The API re-validates everything.
 - `GET /oauth/grants/mine` → `Page<{ id, kind: "oauth"|"personal", client?: { name, verified, verifiedDomain? },

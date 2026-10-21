@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -674,13 +674,18 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
 - A route-level expected version on writes (assets, consumables, users, KB, access) to close the
   approve→execute window rather than narrow it.
-- Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.
+- ~~Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.~~
+  **Done in #1683** ([[ai-assistant/mcp-and-oauth|MCP]] §16): a per-user overall cap on `/mcp` on top of
+  the per-grant / per-SA limits (CEO Q8), DCR keyed per IPv4 address or IPv6 /64, and the oldest unused
+  pending registration evicted at the cap.
 - Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
   `lazyit-*` system rows in `ai_messages`.
 - A per-host plugin name (two instances installed side by side share the `lazyit` namespace).
-- From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
+- ~~From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
   the authorization code, record the code → grant link so a replayed code revokes its grant, and a
-  distinct consent refusal for an unreachable CIMD document.
+  distinct consent refusal for an unreachable CIMD document.~~ **Done in #1683** (CEO Q10; MCP §16): two
+  additive nullable columns on `oauth_authorization_codes`; a replay revokes only when the replayed request
+  is otherwise valid (OAuth 2.1); `CLIENT_METADATA_UNREACHABLE`.
 - From the amendments: an admin switch, an expiry and a per-turn cap for auto-approve (decision 4); an
   admin allow-list of pickable models, a per-model cost view and a provider-aware model-id rule for Google
   (decision 5).
