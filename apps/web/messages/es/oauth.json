@@ -280,6 +280,10 @@
         "INVALID_REDIRECT": {
           "title": "No se puede confiar en esta solicitud",
           "body": "La app pidió enviarte a una dirección que no registró. Por tu seguridad, lazyit no te enviará a ningún sitio. Inicia la conexión de nuevo desde la app."
+        },
+        "CLIENT_METADATA_UNREACHABLE": {
+          "title": "lazyit no pudo obtener la descripción de esta app",
+          "body": "Esta app se identifica con una dirección web, y lazyit no pudo descargar ahora la descripción que publica allí. Puede que el servidor no tenga acceso a internet, que el sitio de la app no responda o que hubo demasiados intentos en poco tiempo. Espera unos minutos e inicia la conexión de nuevo desde la app; si sigue pasando, avisa a tu administrador."
         }
       },
       "unavailable": {
