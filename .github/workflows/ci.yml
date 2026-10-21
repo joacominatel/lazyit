@@ -182,22 +182,27 @@ jobs:
         if: failure()
         run: docker compose logs db
 
+      # The three `bun test` suites run with --isolate (#1318): each test file gets a fresh global and
+      # module registry, so a `mock.module(...)` stub — which lasts for the rest of the process and
+      # cannot be undone — can no longer leak into the files that run after it and make a result
+      # depend on file order (which differs between macOS and Linux). Same flag as each workspace's
+      # `test` script and the charter's validation list. Measured cost ~+1-6 s per suite.
       - name: Test shared
         working-directory: packages/shared
-        run: bun test
+        run: bun test --isolate
 
       # Web unit tests cover the framework-agnostic list-state helpers (#217 — the pure URL-patch
       # core of useListParams). No DOM/router: `bun test` runs them directly, like the shared step.
       - name: Test web
         working-directory: apps/web
-        run: bun test
+        run: bun test --isolate
 
       # Agent tests (#1133) pin the collector's bounded-wait contract — that a hung command is
       # killed and degrades to null rather than hanging the report. Spawns real processes (echo,
       # false, sleep), so it needs a runner shell, not a DOM; `bun test` like the two steps above.
       - name: Test agent
         working-directory: apps/agent
-        run: bun test
+        run: bun test --isolate
 
       # Caddy routing + streaming regression (#1250, #1322), on the real Caddyfile with the
       # digest-pinned image from compose.yaml. Static: `caddy adapt` in each network mode (local,
