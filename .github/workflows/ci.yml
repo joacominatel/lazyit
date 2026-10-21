@@ -194,6 +194,10 @@ jobs:
       - name: Test update.sh UpdateRun row
         run: sh infra/test/update-run-row.sh
 
+      # The promotion auto-close logic (#1666): closing-keyword parsing, the commit → PR resolution and the close plan, against a fake GitHub client and fake git. No network.
+      - name: Test promotion auto-close
+        run: bun test ./.github/scripts
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
