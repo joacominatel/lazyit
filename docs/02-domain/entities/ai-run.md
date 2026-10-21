@@ -3,7 +3,7 @@ title: AiRun
 tags: [domain, entity, ai-assistant]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-21
 ---
 
 # AiRun
@@ -32,6 +32,11 @@ redacted error. It holds **no content**.
   `(userId, idempotencyKey)` and `(serviceAccountId, idempotencyKey)`, each `WHERE` both are non-null
   (raw SQL in the migration).
 - A run is never retried blindly; a sweeper re-enqueues lost resumes and finalizes stale runs.
+- **Session epoch** (#1675): a human run records the chat session's `sessionEpoch` at submission — the
+  epoch its tool calls are delegated under; a logout or password change since refuses the next step, and
+  the sweeper cancels a waiting run. A run created before #1675 has the column null and keeps the epoch
+  in its legacy `lazyit-run-v1` row in `ai_messages`; readers take the column, else that row (never
+  backfilled). Neither found on a human run: it fails `FORBIDDEN`.
 
 ## Fields
 
@@ -49,6 +54,7 @@ Prisma model `AiRun` → table `ai_runs`.
 | `finishReason` | `text?` | |
 | `error` | `json?` | redacted `{ code, message }`. |
 | `idempotencyKey` | `text?` | partial unique per principal. |
+| `sessionEpoch` | `int?` | humans only (#1675); null for a service account, and on a pre-#1675 run (read from its `lazyit-run-v1` row). |
 | `cancelRequestedAt` / `startedAt` / `finishedAt` | `datetime?` | |
 | `createdAt` / `updatedAt` | `datetime` | mutable lifecycle row (the [[manual-task]] precedent). |
 
