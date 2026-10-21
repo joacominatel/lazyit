@@ -87,6 +87,10 @@ registros o conceder acceso a aplicaciones— lazyit lo marca con claridad y te 
 porque es una delegación importante. No te lo impide: dar a un Miembro de confianza la capacidad de
 eliminar es una decisión legítima. El Administrador, en cambio, nunca es editable.
 
+Un rol que puede modificar, eliminar o gestionar algo en un área siempre puede también **verla**: el
+editor activa la vista junto con la edición. Consulta
+[Configuración de permisos](/help/users-permissions-permission-configuration#modificar-algo-implica-poder-verlo).
+
 Delegar **Gestionar usuarios** tiene un techo: un Miembro o Lector que la tenga solo puede otorgar su
 propio rol o uno inferior, y solo puede actuar sobre usuarios con un rol igual o inferior al suyo. Solo
 un administrador gestiona administradores. Consulta
