@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-05
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -371,6 +371,12 @@ Until it does, the purchase's documents panel says plainly that files are not in
 deferred by the CEO; the purchase's documents panel warns that the files are not in the backup, and
 [[backups]] item 7 carries the manual workaround.
 
+*Delivered (2026-10-21, #1467):* the backup sidecar archives the attachments volume on every run, right
+after the app DB dump and under the same timestamp, with the dump's schedule, retention and offsite hook
+([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
+backup from the first run after an update. The documents panel still shows its "not in the backup" notice;
+retiring that copy is a frontend follow-up.
+
 ### 13. Phasing
 
 | Phase | Scope |
@@ -440,11 +446,12 @@ amendment.
   - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
   - Viewers keep seeing asset cost while purchases and an asset's purchase provenance are hidden from
     them; there is no field-level authorization.
-  - Purchase documents raise the stakes of the attachments backup gap until §12 ships (#1467, deferred).
+  - Purchase documents raised the stakes of the attachments backup gap until §12 shipped (#1467, delivered
+    2026-10-21).
   - A supplier's PDF goes to the configured AI provider when extraction is on; the disclosure and the
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
-  - The attachments backup sidecar (§12, #1467 — deferred by the CEO).
+  - ~~The attachments backup sidecar (§12, #1467 — deferred by the CEO).~~ Delivered 2026-10-21 (#1467).
   - The items §13 lists as not built (#1495).
   - The four questions left open at acceptance are settled below; none remains open before Phase 1.
 
