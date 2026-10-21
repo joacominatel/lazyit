@@ -52,6 +52,23 @@ and **the app decides whether to ask you first**. Read this before connecting on
 A service account connected over MCP has no one to ask at all; its administrator bounds it with
 [AI access and a write cap](/help/ai-assistant-setup#service-accounts).
 
+### Access automation workflows over MCP
+
+With **Admin actions**, an app can prepare [access automation](/help/access-automation-concepts)
+workflows, but only while they are **disabled**:
+
+- It can **create** a workflow (it is always created disabled), **rename** it or change its description
+  or deprovisioning policy, and **save new versions of its steps**, as long as the workflow is disabled.
+- It **cannot** enable or disable a workflow, archive it, change an enabled workflow, or create, change,
+  test or archive a **connection**. Anything that makes lazyit start sending data to another system needs
+  your approval on a card in the [lazyit chat](/help/ai-assistant-approvals), which runs a
+  [dry-run](/help/access-automation-testing-observability) first and shows exactly what would be sent
+  where.
+- If someone enables the workflow while the app is working on it, lazyit refuses the app's change.
+- Workflows of applications marked critical are refused over MCP altogether. Use the chat instead.
+
+A service account never builds workflows, over MCP or the headless API.
+
 ## How apps connect: OAuth or personal tokens
 
 lazyit picks the method from the instance's configured public address (`WEB_ORIGIN`); the page shows which
