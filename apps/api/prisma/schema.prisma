@@ -211,6 +211,10 @@ model User {
   // silently retiring a decision the estate depends on.
   infraAutoConfirmRules InfraAutoConfirmRule[] @relation("InfraAutoConfirmRuleAuthor")
 
+  // Software watches this user added (#1684). SetNull: a watch is a shared fleet view, so losing its
+  // author leaves it in place and visibly unattributed.
+  softwareWatches SoftwareWatch[] @relation("SoftwareWatchAuthor")
+
   // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
   // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
   permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
@@ -3206,6 +3210,32 @@ model InfraAutoConfirmRule {
   @@index([enabled])
   @@index([createdById])
   @@map("infra_auto_confirm_rules")
+}
+
+/// The software watchlist (#1684, split from epic #1146 item 4): a short, operator-maintained list of
+/// package names, each answered on read with a fleet-wide distribution computed from the package
+/// lists agents already store in `InfraNode.specs.software`. Distribution only — no version
+/// comparison, no EOL flag, no CVE feed (CEO decision Q12 on #1146).
+///
+/// No `updatedAt`: a watch has no editable field. It is created and soft-deleted, nothing else — a
+/// rename is a delete plus a new watch. Uniqueness of `name` among LIVE rows is the raw-SQL partial
+/// unique index `software_watches_name_live_key` in the migration (NOT @unique here), so a deleted
+/// watch frees its name for a new one, the same shape as `secret_vaults_name_live_key`.
+model SoftwareWatch {
+  id   String @id @default(cuid())
+  // Stored NORMALIZED (`normalizeSoftwareName` in @lazyit/shared: whitespace collapsed, trimmed,
+  // lower-cased) — the one spelling a package is matched in.
+  name String
+
+  // The human who added it. SetNull, never cascade. @db.Uuid to match User.id (#1179).
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("SoftwareWatchAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([createdById])
+  @@map("software_watches")
 }
 
 /// Which parent kind an Attachment hangs off (ADR-0082). Polymorphic by design — the model extends
