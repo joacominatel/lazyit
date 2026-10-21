@@ -333,7 +333,7 @@ The documents are **shared, not copied**: every asset linked to the purchase lis
 **Purchase** panel.
 
 > **Backups.** Uploaded files are stored on the server's file volume. lazyit's backup archives that volume
-> together with every database backup, so a restore brings invoices, orders and delivery notes back with
+> together with every database backup (unless your administrator has switched that archive off), so a restore brings invoices, orders and delivery notes back with
 > their purchases — see [Backups & restore](/help/deployment-operations-backups-restore). The Documents
 > section may still show an older notice saying the files are not in the backup; on an instance whose
 > backup service runs, they are.

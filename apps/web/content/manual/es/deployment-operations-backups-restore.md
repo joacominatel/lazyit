@@ -66,7 +66,8 @@ Qué significa esto para la recuperación:
 Un servicio de **copia** se ejecuta según una programación. En cada ejecución vuelca la base de datos de
 la aplicación, luego archiva los archivos subidos, y escribe ambos en `./backups` con la misma marca de
 tiempo — `app-<hora>.dump` y `attachments-<hora>.tar.gz` —; después elimina las copias más antiguas que
-la ventana de retención. Tiene un enganche opcional de copia externa y otro opcional de alerta ante fallos.
+su ventana de retención (14 días para los volcados de la base de datos, 7 para los archivos de adjuntos
+por defecto). Tiene un enganche opcional de copia externa y otro opcional de alerta ante fallos.
 
 Arranca con la pila de producción: el levantamiento estándar (`./infra/start.sh`, `./infra/update.sh`)
 ya lo ejecuta, diga lo que diga la pregunta sí/no del instalador sobre copias. Compruébalo con
@@ -82,7 +83,9 @@ Ajústalo en el archivo de entorno (valores por defecto mostrados):
 
 ```sh
 BACKUP_CRON="30 2 * * *"     # cuándo ejecutar (sintaxis de crontab) — por defecto, diario a las 02:30
-BACKUP_RETENTION_DAYS=14     # elimina volcados y archivos de adjuntos con más de estos días
+BACKUP_RETENTION_DAYS=14     # elimina volcados de la base de datos con más de estos días
+BACKUP_ATTACHMENTS=true      # archiva los archivos subidos en cada ejecución; false lo desactiva
+BACKUP_ATTACHMENTS_RETENTION_DAYS=7   # elimina archivos de adjuntos con más de estos días
 BACKUP_MIN_FREE_MB=1024      # omite el archivo de adjuntos si dejaría menos disco libre que esto
 BACKUP_OFFSITE_CMD=          # copia externa opcional, se ejecuta por cada archivo con su ruta como "$1"
 BACKUP_ON_FAILURE_CMD=       # alerta opcional, se ejecuta con el motivo como "$1" cuando falla una ejecución
@@ -90,14 +93,24 @@ BACKUP_ON_FAILURE_CMD=       # alerta opcional, se ejecuta con el motivo como "$
 
 Por ejemplo, `BACKUP_OFFSITE_CMD='rclone copy "$1" offsite:lazyit/'` envía los dos archivos de cada
 ejecución a un remoto de rclone. El contenedor **no** respalda el archivo de entorno —cópialo fuera del
-servidor tú mismo— y no cifra nada: cifra la copia externa.
+servidor tú mismo— y no cifra nada: cifra la copia externa. No necesitas añadir ninguna de estas
+variables al archivo de entorno: una instancia actualizada en el lugar usa los valores por defecto
+mostrados.
+
+Define `BACKUP_ATTACHMENTS=false` solo si respaldas los archivos subidos de otra forma (por ejemplo, con
+instantáneas del disco del servidor): los volcados de la base de datos siguen, pero los archivos pasan a
+ser tu responsabilidad. Los archivos de adjuntos que ya estén en `./backups` siguen caducando según su
+retención.
 
 **Planifica el espacio en disco.** El archivo de adjuntos es una copia completa en cada ejecución, del
-tamaño aproximado de todos los archivos subidos. Con los valores por defecto son unas 15 copias: 300 MB
-de adjuntos ocupan unos 4,5 GB en `./backups`; 5 GB de adjuntos, unos 75 GB. Si el disco está demasiado
-lleno, la ejecución omite el archivo de adjuntos e informa un fallo en lugar de llenar el disco que usa
-la base de datos; el volcado de la base de datos se escribe igual. Reduce la retención, dale a `./backups`
-un disco más grande, o copia cada ejecución fuera del servidor y conserva menos días en local.
+tamaño aproximado de todos los archivos subidos; por eso conserva menos días que los volcados de la base
+de datos. Con los valores por defecto son unas 8 copias: 300 MB de adjuntos ocupan unos 2,4 GB en
+`./backups`; 1 GB, unos 8 GB; 5 GB, unos 40 GB. Una restauración necesita el volcado y el archivo de
+adjuntos de la misma ejecución, así que solo los últimos 7 días se pueden restaurar con sus archivos. Si
+el disco está demasiado lleno, la ejecución omite el archivo de adjuntos e informa un fallo en lugar de
+llenar el disco que usa la base de datos; el volcado de la base de datos se escribe igual. Reduce
+`BACKUP_ATTACHMENTS_RETENTION_DAYS`, dale a `./backups` un disco más grande, o copia cada ejecución fuera
+del servidor y conserva menos días en local.
 
 Una ejecución fallida nunca pasa en silencio: el registro muestra
 `[lazyit-backup] FAILED run <hora>: <motivo>`, y tu enganche de alerta se dispara si lo definiste.

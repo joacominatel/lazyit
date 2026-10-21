@@ -325,7 +325,8 @@ asset's detail page lists them with their name, size and upload date.
   document. It shows next to the file name.
 
 > **Backups.** Attachments are stored on the server's file volume. lazyit's backup archives that volume
-> together with every database backup, so a restore brings the documents back with their records. See
+> together with every database backup (unless your administrator has switched that archive off), so a
+> restore brings the documents back with their records. See
 > [Backups & restore](/help/deployment-operations-backups-restore).
 
 ## Editing, cloning and deactivating

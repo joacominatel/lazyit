@@ -58,7 +58,8 @@ What this means for recovery:
 
 A **backup** service runs on a schedule. Each run dumps the application database, then archives the
 uploaded files, and writes both into `./backups` under the same timestamp — `app-<time>.dump` and
-`attachments-<time>.tar.gz` — then removes copies older than the retention window. It has an optional
+`attachments-<time>.tar.gz` — then removes copies older than their retention window (14 days for the
+database dumps, 7 for the file archives by default). It has an optional
 off-site copy hook and an optional failure alert hook.
 
 It starts with the production stack: the standard bring-up (`./infra/start.sh`, `./infra/update.sh`)
@@ -75,7 +76,9 @@ Tune it in the environment file (defaults shown):
 
 ```sh
 BACKUP_CRON="30 2 * * *"     # when to run (crontab syntax) — daily at 02:30 by default
-BACKUP_RETENTION_DAYS=14     # remove database dumps and file archives older than this many days
+BACKUP_RETENTION_DAYS=14     # remove database dumps older than this many days
+BACKUP_ATTACHMENTS=true      # archive the uploaded files on every run; false turns the archive off
+BACKUP_ATTACHMENTS_RETENTION_DAYS=7   # remove file archives older than this many days
 BACKUP_MIN_FREE_MB=1024      # skip the file archive if it would leave less free disk than this
 BACKUP_OFFSITE_CMD=          # optional off-site copy, run for each file with its path as "$1"
 BACKUP_ON_FAILURE_CMD=       # optional alert, run with the reason as "$1" when a run fails
@@ -83,14 +86,21 @@ BACKUP_ON_FAILURE_CMD=       # optional alert, run with the reason as "$1" when 
 
 For example, `BACKUP_OFFSITE_CMD='rclone copy "$1" offsite:lazyit/'` sends both files of every run to an
 rclone remote. The sidecar does **not** back up the environment file — copy that off-host yourself —
-and it does not encrypt anything: encrypt the off-site copy.
+and it does not encrypt anything: encrypt the off-site copy. You don't need to add any of these to
+the environment file: an instance updated in place uses the defaults shown.
+
+Set `BACKUP_ATTACHMENTS=false` only if you back up the uploaded files some other way (for example with
+snapshots of the server's disk): the database dumps continue, but the files are then your
+responsibility. Archives already in `./backups` still age out after their retention.
 
 **Plan the disk space.** The file archive is a full copy every run, about the size of all uploaded
-files. With the defaults that is about 15 copies: 300 MB of attachments takes about 4.5 GB in
-`./backups`, 5 GB of attachments about 75 GB. If the disk is too full, the run skips the archive and
-reports a failure rather than filling the disk the database uses; the database dump is still written.
-Lower the retention, give `./backups` a bigger disk, or copy each run off-site and keep fewer days
-locally.
+files — which is why it keeps fewer days than the database dumps. With the defaults that is about 8
+copies: 300 MB of attachments takes about 2.4 GB in `./backups`, 1 GB about 8 GB, 5 GB about 40 GB. A
+restore needs a database dump and the file archive of the same run, so only the last 7 days can be
+restored with their files. If the disk is too full, the run skips the archive and reports a failure
+rather than filling the disk the database uses; the database dump is still written. Lower
+`BACKUP_ATTACHMENTS_RETENTION_DAYS`, give `./backups` a bigger disk, or copy each run off-site and keep
+fewer days locally.
 
 A failed run is never silent: the log shows `[lazyit-backup] FAILED run <time>: <reason>`, and your
 alert hook fires if you set one. Check with
