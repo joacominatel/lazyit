@@ -144,7 +144,7 @@ export function ReceiveDeliverySheet({ purchaseId, onClose }: { purchaseId: stri
 }
 
 type Progress = { current: number; total: number };
-type NoteOutcome = "uploaded" | "failed" | null;
+export type NoteOutcome = "uploaded" | "failed" | null;
 
 function DeliveryBody({
   purchase,
@@ -724,8 +724,6 @@ function DeliveryResult({
 }) {
   const t = useTranslations("purchases.receiveDelivery");
   const ta = useTranslations("assets.receive");
-  const summary = summarizeDelivery(outcomes);
-  const byId = new Map(lines.map((line) => [line.id, line]));
 
   return (
     <div className="flex min-h-full flex-col">
@@ -733,74 +731,8 @@ function DeliveryResult({
         <SheetTitle className="text-lg">{t("title")}</SheetTitle>
         <SheetDescription>{description}</SheetDescription>
       </SheetHeader>
-      <div className="flex-1 space-y-4 px-5 pb-4">
-        {summary.units > 0 ? (
-          <Callout tone="success" icon={<CheckCircleIcon />}>
-            <p className="text-sm font-medium">{t("result.summary", { units: summary.units })}</p>
-            {summary.linesWithProblems > 0 ? (
-              <p className="mt-0.5 text-sm">{t("result.someProblems", { count: summary.linesWithProblems })}</p>
-            ) : null}
-          </Callout>
-        ) : (
-          <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
-            <p className="text-sm font-medium">{t("result.nothingReceived")}</p>
-          </Callout>
-        )}
-
-        <ul className="divide-y rounded-lg border text-sm">
-          {outcomes.map((outcome) => {
-            const line = byId.get(outcome.lineId);
-            return (
-              <li key={outcome.lineId} className="space-y-1 p-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-medium">{line?.description ?? t("result.aLine")}</span>
-                  {outcome.state === "received" ? (
-                    <span className="inline-flex items-center gap-1">
-                      <CheckCircleIcon className="size-4 text-success" aria-hidden />
-                      {outcome.kind === "CONSUMABLE"
-                        ? t("result.stockReceived", { count: outcome.created })
-                        : t("result.unitsReceived", { count: outcome.created })}
-                    </span>
-                  ) : outcome.state === "partial" ? (
-                    <span className="text-warning-text">
-                      {t("result.partial", { created: outcome.created, failed: outcome.failed.length })}
-                    </span>
-                  ) : outcome.state === "failed" ? (
-                    <span className="text-warning-text">{t("result.failed")}</span>
-                  ) : (
-                    <span className="text-destructive">{t("result.notReceived")}</span>
-                  )}
-                </div>
-                {outcome.state === "error" ? (
-                  <p className="break-words text-muted-foreground">{outcome.message}</p>
-                ) : null}
-                {(outcome.state === "partial" || outcome.state === "failed") && outcome.kind === "ASSET" ? (
-                  <ul className="space-y-0.5">
-                    {outcome.failed.map((item) => (
-                      <li key={item.index} className="flex items-baseline gap-2">
-                        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                          {ta("result.unit", { index: item.index + 1 })}
-                        </span>
-                        <span className="break-words">{item.error}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {outcome.state !== "error" && outcome.overReceived ? (
-                  <p className="text-muted-foreground">{t("result.overReceived")}</p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-
-        {note === "uploaded" ? (
-          <p className="text-sm text-muted-foreground">{t("result.noteUploaded")}</p>
-        ) : note === "failed" ? (
-          <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
-            <p className="text-sm">{t("result.noteFailed")}</p>
-          </Callout>
-        ) : null}
+      <div className="flex-1 px-5 pb-4">
+        <DeliveryOutcomes lines={lines} outcomes={outcomes} note={note} />
       </div>
       <SheetFooter className="sticky bottom-0 flex-row items-center justify-end gap-2 border-t bg-popover px-5 py-3">
         <OpenPurchaseButton purchaseId={purchase.id}>{t("result.openPurchase")}</OpenPurchaseButton>
@@ -808,6 +740,97 @@ function DeliveryResult({
           {ta("result.done")}
         </Button>
       </SheetFooter>
+    </div>
+  );
+}
+
+/**
+ * The result's body, without the sheet around it (rendered on its own in tests): the summary, each line's
+ * outcome, and whether the delivery note was attached.
+ */
+export function DeliveryOutcomes({
+  lines,
+  outcomes,
+  note,
+}: {
+  lines: readonly Pick<PurchaseOrderLine, "id" | "description">[];
+  outcomes: readonly DeliveryOutcome[];
+  note: NoteOutcome;
+}) {
+  const t = useTranslations("purchases.receiveDelivery");
+  const ta = useTranslations("assets.receive");
+  const summary = summarizeDelivery(outcomes);
+  const byId = new Map(lines.map((line) => [line.id, line]));
+
+  return (
+    <div className="space-y-4">
+      {summary.units > 0 ? (
+        <Callout tone="success" icon={<CheckCircleIcon />}>
+          <p className="text-sm font-medium">{t("result.summary", { units: summary.units })}</p>
+          {summary.linesWithProblems > 0 ? (
+            <p className="mt-0.5 text-sm">{t("result.someProblems", { count: summary.linesWithProblems })}</p>
+          ) : null}
+        </Callout>
+      ) : (
+        <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+          <p className="text-sm font-medium">{t("result.nothingReceived")}</p>
+        </Callout>
+      )}
+
+      <ul className="divide-y rounded-lg border text-sm">
+        {outcomes.map((outcome) => {
+          const line = byId.get(outcome.lineId);
+          return (
+            <li key={outcome.lineId} className="space-y-1 p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium">{line?.description ?? t("result.aLine")}</span>
+                {outcome.state === "received" ? (
+                  <span className="inline-flex items-center gap-1">
+                    <CheckCircleIcon className="size-4 text-success" aria-hidden />
+                    {outcome.kind === "CONSUMABLE"
+                      ? t("result.stockReceived", { count: outcome.created })
+                      : t("result.unitsReceived", { count: outcome.created })}
+                  </span>
+                ) : outcome.state === "partial" ? (
+                  <span className="text-warning-text">
+                    {t("result.partial", { created: outcome.created, failed: outcome.failed.length })}
+                  </span>
+                ) : outcome.state === "failed" ? (
+                  <span className="text-warning-text">{t("result.failed")}</span>
+                ) : (
+                  <span className="text-destructive">{t("result.notReceived")}</span>
+                )}
+              </div>
+              {outcome.state === "error" ? (
+                <p className="break-words text-muted-foreground">{outcome.message}</p>
+              ) : null}
+              {(outcome.state === "partial" || outcome.state === "failed") && outcome.kind === "ASSET" ? (
+                <ul className="space-y-0.5">
+                  {outcome.failed.map((item) => (
+                    <li key={item.index} className="flex items-baseline gap-2">
+                      <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                        {ta("result.unit", { index: item.index + 1 })}
+                      </span>
+                      <span className="break-words">{item.error}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {outcome.state !== "error" && outcome.overReceived ? (
+                <p className="text-muted-foreground">{t("result.overReceived")}</p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+
+      {note === "uploaded" ? (
+        <p className="text-sm text-muted-foreground">{t("result.noteUploaded")}</p>
+      ) : note === "failed" ? (
+        <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+          <p className="text-sm">{t("result.noteFailed")}</p>
+        </Callout>
+      ) : null}
     </div>
   );
 }
