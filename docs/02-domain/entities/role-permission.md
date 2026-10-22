@@ -45,9 +45,16 @@ became configurable is the *permissions* each role grants. There are no custom r
   never editable — the resolver short-circuits ADMIN to the whole catalog **without** a DB read, so a
   bad seed can never lock ADMIN out. The config endpoint refuses to write ADMIN rows. This keeps the
   last-admin / first-admin invariants intact (INV-7 + the ADR-0040 last-admin guard).
+- **Write implies read** (#1518, [[0046-roles-permissions-v2]] → *Amendment — write implies read*): a
+  role holding a non-read verb on a domain must hold that domain's `:read` (derived from the catalog as
+  `IMPLIED_READS`; `accessRequest:create`, `secret:fetch` and `infra:report` are exempt). `PUT
+  /config/permissions` refuses a NEW write-without-read with **400** `PERMISSION_READ_REQUIRED`; one the
+  stored rows already held (saved before the rule) is read back as it is and healed on the next save by
+  adding the read, never by dropping the write. The matrix editor turns the read on with the write.
 - **MEMBER + VIEWER are fully configurable** within the catalog. The matrix UI / `PUT /config/permissions`
   may grant MEMBER or VIEWER a `:delete` or a coarse verb (`settings:manage` / `user:manage` /
-  `accessGrant:grant`); the only guardrails are *ADMIN-immutable* + *catalog-membership*. The UI marks
+  `accessGrant:grant`); the guardrails are *ADMIN-immutable*, *catalog-membership* and *write implies
+  read* (above). The UI marks
   these ⚠ "Admin-level" and confirms, but the server does not block — an admin-initiated delegation is
   accepted by design. A delegated `user:manage` is bounded by the **role ceiling** (SEC-088, 2026-10-15):
   the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the

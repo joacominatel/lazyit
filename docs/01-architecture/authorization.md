@@ -253,7 +253,11 @@ preview, backfill — stays `settings:manage`. See [[asset-tag-scheme]].
 
 **Fully configurable, admin-delegated.** Coarse verbs and `:delete` ARE grantable to MEMBER/VIEWER — the
 UI marks them ⚠ "Admin-level" and confirms, but the server does not block (an admin-initiated delegation
-is accepted by design). The only guardrails are *ADMIN-immutable* + *catalog-membership*.
+is accepted by design). The guardrails are *ADMIN-immutable*, *catalog-membership* and **write implies
+read** (#1518): a role holding a non-read verb on a domain also holds its `:read`. `PUT /config/permissions`
+refuses a new write-without-read with **400** `PERMISSION_READ_REQUIRED` and heals a stored one by adding
+the read; the editor turns the read on with the write ([[0046-roles-permissions-v2]] → *Amendment — write
+implies read*). It does not apply to [[service-account]] grants (§6).
 
 ## 6. Service accounts as a non-human principal
 

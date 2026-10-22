@@ -86,6 +86,10 @@ records or to grant application access — lazyit marks it clearly and asks you 
 is a meaningful delegation. It does not stop you: handing a trusted Member the ability to delete is a
 legitimate choice. Administrator, by contrast, is never editable.
 
+A role that can change, delete or manage something in an area can always **see** that area too: the
+editor turns the view on with the edit. See
+[Permission configuration](/help/users-permissions-permission-configuration#changing-something-means-seeing-it).
+
 Delegating **Manage users** has a ceiling: a Member or Viewer who holds it can only give out their own
 role or a lower one, and can only act on users at or below their role. Only an admin manages admins.
 See [Roles](/help/users-permissions-roles#built-in-safety-rules).
