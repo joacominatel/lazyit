@@ -324,8 +324,10 @@ asset's detail page lists them with their name, size and upload date.
   already used. Fill it before uploading, or set, change or clear it later with the pencil on the
   document. It shows next to the file name.
 
-> **Backups.** Attachments are stored on the server's file volume, which is **not yet covered by the
-> database backup**. Until backup support ships, keep an independent copy of anything irreplaceable.
+> **Backups.** Attachments are stored on the server's file volume. lazyit's backup archives that volume
+> together with every database backup (unless your administrator has switched that archive off), so a
+> restore brings the documents back with their records. See
+> [Backups & restore](/help/deployment-operations-backups-restore).
 
 ## Editing, cloning and deactivating
 

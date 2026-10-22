@@ -1200,7 +1200,7 @@ ask_questions() {
   fi
 
   # --- backup sidecar opt-in ---
-  if ask_yn "Enable the automated backup sidecar now? (cron pg_dump of both DBs)" "n"; then
+  if ask_yn "Enable the automated backup sidecar now? (cron pg_dump of the app DB + attachments tarball)" "n"; then
     ENABLE_BACKUP=1
   fi
 }

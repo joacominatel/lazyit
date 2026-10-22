@@ -3,7 +3,7 @@ title: "Purchases — Map of Content"
 tags: [purchases, moc, index, research]
 status: draft
 created: 2026-10-01
-updated: 2026-10-04
+updated: 2026-10-22
 ---
 
 # Purchases — Map of Content
@@ -56,9 +56,9 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 #1496–#1503; merging suppliers has since shipped, #1496): *Receive delivery* across lines, the dashboard *Pending deliveries* tile, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
 field to suppliers, the warranty replacement action, and the XLSX export. Also not built: the per-asset proposal after a line's
 price is edited (§2; the asset panel shows *Differs from purchase* instead), the pending list's *Overdue only*
-toggle and the link picker's *created near the order date* chip. **The attachments backup** (§12) has not
-shipped either: #1467 is open, deferred by the CEO, and the purchase's documents panel says the files are not
-in the backup ([[backups]]).
+toggle and the link picker's *created near the order date* chip. **The attachments backup** (§12) did not
+ship with the epic; it followed on 2026-10-21 (#1467) — purchase documents are now in the backup
+([[backups]] item 7).
 
 ## Research (pre-decision)
 
@@ -91,6 +91,6 @@ in the backup ([[backups]]).
 - [[0034-consumables-design]] · [[0088-application-license-seat-tracking]] — consumable and license
   lines.
 - [[0036-int4-bounded-integers]] — the integer bound money leaves.
-- [[0082-attachments-storage]] — purchase documents and the backup gap.
+- [[0082-attachments-storage]] — purchase documents and their backup (the gap closed by #1467).
 - [[0046-roles-permissions-v2]] · [[0048-service-accounts]] — the permission catalog and the actor model.
 - [[0097-ai-assistant-mcp-and-headless-api]] — the AI pipeline extraction and chat build on.

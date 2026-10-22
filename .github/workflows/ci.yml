@@ -223,6 +223,15 @@ jobs:
       - name: Test Caddy routing
         run: sh infra/test/caddy-routing.sh
 
+      # Backup sidecar round-trip (#1467): the REAL `backup` service from compose.yaml (copied into an
+      # isolated temp project, digest-pinned postgres image) dumps a throwaway DB and archives a seeded
+      # attachments volume, then the runbook's restore (DB first, then attachments) is replayed onto
+      # fresh volumes and compared byte for byte (sha256 = file name, owner uid 1000, mtime). Also
+      # covers the empty volume, the free-space guard, the separate retentions (dumps 14 d, tarballs
+      # 7 d), the BACKUP_ATTACHMENTS=false opt-out and the offsite hook. Docker only.
+      - name: Test backup sidecar round-trip
+        run: sh infra/test/backup-attachments-roundtrip.sh
+
       # infra/start.sh secret handling (ADR-0047, ADR-0087), offline through the script's own test
       # seams — no Docker, no real .env.prod. --reconfigure preserves every secret byte-for-byte; an
       # existing-install run appends only the allowlisted, safely generatable keys a release added
