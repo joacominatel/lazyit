@@ -3,7 +3,7 @@ title: "ADR-0103: Data export — one server-side streaming path per list"
 tags: [adr, api, export, csv, security, audit, reports]
 status: accepted
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -168,6 +168,16 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
 | 1c | Users, access grants (global and per application), consumables, purchases. |
 | 1d | The web `<ExportButton>` on those seven screens (the user and application records export their grants), the "Exports" audit source on screen, the Manual. |
 | 2 | Applications, locations, suppliers, pending units, access requests, servers, consumable movements and deliveries, the KB article index (metadata only, folder ACL tests mandatory). |
+
+### 10. Filters follow the list (2026-10-21, #1660)
+
+The per-application grant export follows the paged Access tab's filters — `status`, `accessLevel` /
+`noAccessLevel` and the person `q` — through the same `where` as
+`GET /applications/:id/access-grants/page`, so "export what I see" holds once the tab filters
+server-side. The older `activeOnly` / `includeExpired` pair is still accepted for clients that send
+it; mixing the two families is a `400`. The audit row records the filters that were sent:
+`activeOnly` / `includeExpired` only when `status` is absent, and `noAccessLevel: true` for a no-level
+export (a `null` level would otherwise be dropped by the audit sanitizer and read as "any level").
 
 ## Consequences
 

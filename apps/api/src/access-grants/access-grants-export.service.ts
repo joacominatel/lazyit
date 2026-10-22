@@ -18,10 +18,15 @@ export class AccessGrantsExportService {
     private readonly permissions: PermissionResolverService,
   ) {}
 
+  /**
+   * `auditFilters` is what the audit row records when it differs from the query filters — the
+   * per-application route records the params actually sent (#1660, ADR-0103 §10).
+   */
   async export(
     filters: FindAccessGrantsFilters,
     principal: Principal,
     response: Response,
+    auditFilters: Record<string, unknown> = { ...filters },
   ): Promise<StreamableFile> {
     const [users, applications, serviceAccounts] = await Promise.all([
       this.permissions.principalHas(principal, 'user:read'),
@@ -32,7 +37,7 @@ export class AccessGrantsExportService {
       resource: 'ACCESS_GRANTS',
       principal,
       response,
-      filters: { ...filters },
+      filters: auditFilters,
       ...this.grants.exportSource(filters),
       columns: accessGrantExportColumns(
         { users, applications, serviceAccounts },

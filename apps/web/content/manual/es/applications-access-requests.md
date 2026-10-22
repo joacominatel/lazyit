@@ -71,6 +71,9 @@ cargó en nombre de alguien, quién la cargó.
   historial de acceso de la aplicación).
 - **Rechazar** pide un **motivo**, que es obligatorio. El motivo se muestra a quien solicitó, para que
   sepa por qué.
+- Si la persona fue **desactivada o dada de baja** después de cargar la solicitud, lazyit se niega a
+  aprobarla y la solicitud sigue pendiente. Recházala con un motivo, o reactiva antes a la persona si
+  debe recibir el acceso.
 
 Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar o rechazar requiere el
 mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).

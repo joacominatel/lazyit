@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-10-21
 ---
 
 # User
@@ -260,7 +260,11 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 and `?role` filters — `?role=ADMIN|MEMBER|VIEWER` scopes the list to one role, validated by
 `RoleSchema` → 400 on an unknown value; backs the Settings → Roles "View N members" deep-link, issue
 #693; `?isActive=true|false` scopes it to enabled or deactivated accounts — anything else → 400,
-absent = both, issue #1375), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
+absent = both, issue #1375; `?ids=a,b,c` is the batch id→name resolver, issue #961 — sent without an
+explicit `deleted` slice it also returns **offboarded** (soft-deleted) people, marked by their non-null
+`deletedAt`, so history and access lists show their name instead of "Unknown person", issue #1659 —
+`deleted=active` keeps it live-only, and the open list without `ids` never includes them),
+`GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
 `groupBy` over the active directory — the Settings → Roles card counts; declared before `:id` so the
 literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal

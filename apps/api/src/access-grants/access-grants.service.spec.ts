@@ -29,6 +29,7 @@ type GrantMock = {
   updateMany: jest.Mock;
   findUniqueOrThrow: jest.Mock;
   count: jest.Mock;
+  groupBy: jest.Mock;
 };
 
 // Shapes the create/update calls are cast to, so assertions stay type-safe (no-unsafe-* lint).
@@ -83,6 +84,7 @@ describe('AccessGrantsService', () => {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findUniqueOrThrow: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
     };
     user = { findFirst: jest.fn(), findUnique: jest.fn() };
     application = { findFirst: jest.fn(), findUnique: jest.fn() };
@@ -132,7 +134,11 @@ describe('AccessGrantsService', () => {
   /** user.findFirst echoes the queried id back as a live user (grantee/application lookups pass). */
   const allUsersLive = () =>
     user.findFirst.mockImplementation((args: { where: { id: string } }) =>
-      Promise.resolve({ id: args.where.id }),
+      Promise.resolve({
+        id: args.where.id,
+        isActive: true,
+        directoryOnly: false,
+      }),
     );
 
   // --- create -------------------------------------------------------------
@@ -243,13 +249,225 @@ describe('AccessGrantsService', () => {
   it('rejects (400) when the grantee is a DIRECTORY person (INV-2, ADR-0069 REDESIGN §7)', async () => {
     // A directory-only person has no account → it must NEVER be the subject of an AccessGrant (orphan,
     // irrevocable access). The block lifts the moment they sign in (directoryOnly flips to false).
-    user.findFirst.mockResolvedValue({ id: USER_ID, directoryOnly: true });
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: true,
+      isActive: true,
+    });
     application.findFirst.mockResolvedValue({ id: APP_ID });
 
     await expect(
       service.create({ userId: USER_ID, applicationId: APP_ID }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(accessGrant.create).not.toHaveBeenCalled();
+  });
+
+  // Issue #1661: a deactivated (live but inactive) person cannot sign in, so no grant may open for them.
+  it('rejects (400 ACCESS_GRANT_PERSON_INACTIVE) when the grantee is deactivated', async () => {
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: false,
+      isActive: false,
+    });
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+
+    const error = await service
+      .create({ userId: USER_ID, applicationId: APP_ID })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'ACCESS_GRANT_PERSON_INACTIVE' }),
+    );
+    expect(accessGrant.create).not.toHaveBeenCalled();
+  });
+
+  it('the approval path refuses a deactivated grantee too, before any write', async () => {
+    user.findFirst.mockResolvedValue({
+      id: USER_ID,
+      directoryOnly: false,
+      isActive: false,
+    });
+    application.findFirst.mockResolvedValue({ id: APP_ID });
+    const extra = jest.fn();
+
+    await expect(
+      service.createWithinApproval(
+        { userId: USER_ID, applicationId: APP_ID },
+        HUMAN_PRINCIPAL,
+        extra,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(accessGrant.create).not.toHaveBeenCalled();
+    expect(extra).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  // --- per-application page + summary (#1660) ---------------------------
+  describe('findApplicationPage', () => {
+    type PageArgs = {
+      where: Record<string, unknown>;
+      orderBy: unknown;
+      take: number;
+      skip: number;
+    };
+    const lastCall = () =>
+      (accessGrant.findMany.mock.calls as Array<[PageArgs]>).at(-1)![0];
+
+    beforeEach(() => {
+      accessGrant.findMany.mockResolvedValue([]);
+      accessGrant.count.mockResolvedValue(0);
+    });
+
+    it('active: not revoked, by person, then active before revoked, newest grant, id', async () => {
+      const page = await service.findApplicationPage(
+        { applicationId: APP_ID, status: 'active' },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      expect(lastCall()).toEqual({
+        where: { applicationId: APP_ID, revokedAt: null },
+        orderBy: [
+          { user: { firstName: 'asc' } },
+          { user: { lastName: 'asc' } },
+          { revokedAt: { sort: 'asc', nulls: 'first' } },
+          { grantedAt: 'desc' },
+          { id: 'asc' },
+        ],
+        take: 50,
+        skip: 0,
+      });
+      expect(page).toEqual({ items: [], total: 0, limit: 50, offset: 0 });
+    });
+
+    it('expiring: not revoked, expiry within 30 days (past ones included), soonest first', async () => {
+      const before = Date.now();
+      await service.findApplicationPage(
+        { applicationId: APP_ID, status: 'expiring' },
+        { limit: 10, offset: 20, deleted: 'active' },
+      );
+      const { where, orderBy, take, skip } = lastCall();
+      const cutoff = (where.expiresAt as { lte: Date }).lte.getTime();
+      expect(cutoff).toBeGreaterThanOrEqual(before + 30 * 86_400_000);
+      expect(cutoff).toBeLessThanOrEqual(Date.now() + 30 * 86_400_000);
+      expect(where).toEqual({
+        applicationId: APP_ID,
+        revokedAt: null,
+        expiresAt: { lte: expect.any(Date) as unknown },
+      });
+      expect(orderBy).toEqual([{ expiresAt: 'asc' }, { id: 'asc' }]);
+      expect({ take, skip }).toEqual({ take: 10, skip: 20 });
+    });
+
+    it('revoked + no level + person search: one where, newest revocation first', async () => {
+      await service.findApplicationPage(
+        {
+          applicationId: APP_ID,
+          status: 'revoked',
+          accessLevel: null,
+          q: 'ana diaz',
+        },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      const { where, orderBy } = lastCall();
+      expect(where).toEqual({
+        applicationId: APP_ID,
+        revokedAt: { not: null },
+        accessLevel: null,
+        user: {
+          is: {
+            AND: [
+              {
+                OR: [
+                  { firstName: { contains: 'ana', mode: 'insensitive' } },
+                  { lastName: { contains: 'ana', mode: 'insensitive' } },
+                  { email: { contains: 'ana', mode: 'insensitive' } },
+                ],
+              },
+              {
+                OR: [
+                  { firstName: { contains: 'diaz', mode: 'insensitive' } },
+                  { lastName: { contains: 'diaz', mode: 'insensitive' } },
+                  { email: { contains: 'diaz', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+        },
+      });
+      expect(orderBy).toEqual([{ revokedAt: 'desc' }, { id: 'asc' }]);
+      // The count shares the page's where.
+      expect(accessGrant.count).toHaveBeenCalledWith({ where });
+    });
+
+    it('all + an exact level ignores activeOnly/includeExpired entirely', async () => {
+      await service.findApplicationPage(
+        {
+          applicationId: APP_ID,
+          status: 'all',
+          accessLevel: 'admin',
+          activeOnly: true,
+          includeExpired: false,
+        },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      expect(lastCall().where).toEqual({
+        applicationId: APP_ID,
+        accessLevel: 'admin',
+      });
+    });
+  });
+
+  describe('applicationSummary', () => {
+    beforeEach(() => {
+      // active, expiring, expired, revoked — in the order the service asks.
+      accessGrant.count
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(2);
+      accessGrant.groupBy.mockImplementation((args: { by: string[] }) =>
+        Promise.resolve(
+          args.by[0] === 'accessLevel'
+            ? [
+                { accessLevel: null, _count: { _all: 2 } },
+                { accessLevel: 'viewer', _count: { _all: 1 } },
+                { accessLevel: 'admin', _count: { _all: 4 } },
+              ]
+            : [{ userId: 'u1' }, { userId: 'u2' }],
+        ),
+      );
+    });
+
+    it('counts every view, sorts levels (no level last) and counts offboarded holders', async () => {
+      const summary = await service.applicationSummary(APP_ID, {
+        canReadUsers: true,
+      });
+      expect(summary).toEqual({
+        counts: { active: 5, expiring: 3, expired: 1, revoked: 2, all: 7 },
+        levels: [
+          { accessLevel: 'admin', count: 4 },
+          { accessLevel: 'viewer', count: 1 },
+          { accessLevel: null, count: 2 },
+        ],
+        offboardedHolders: 2,
+        expiringWithinDays: 30,
+      });
+      expect(accessGrant.groupBy).toHaveBeenCalledWith({
+        by: ['userId'],
+        where: {
+          applicationId: APP_ID,
+          revokedAt: null,
+          user: { is: { deletedAt: { not: null } } },
+        },
+      });
+    });
+
+    it('hides offboardedHolders (null) from a caller without user:read and never queries it', async () => {
+      const summary = await service.applicationSummary(APP_ID, {
+        canReadUsers: false,
+      });
+      expect(summary.offboardedHolders).toBeNull();
+      expect(accessGrant.groupBy).toHaveBeenCalledTimes(1);
+    });
   });
 
   // --- findAll ------------------------------------------------------------

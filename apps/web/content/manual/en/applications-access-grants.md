@@ -26,6 +26,9 @@ Open an application and choose **Grant access** at the top of the page. You pick
 
 Granting (and revoking) access is an administrator-only action by default.
 
+You can only grant access to an **active** person with a sign-in account. lazyit refuses a grant for
+someone who is deactivated (reactivate them first) or a directory-only person.
+
 > Today access is **granted directly** — there is no approval queue. A formal request-and-approve
 > workflow is planned; see [Access requests](/help/applications-access-requests).
 
