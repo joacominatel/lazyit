@@ -238,7 +238,8 @@
       "unknown": "version unknown",
       "current": "up to date",
       "notReporting": "not reporting",
-      "degraded": "reporting incompletely"
+      "degraded": "reporting incompletely",
+      "retired": "retired"
     },
     "columns": {
       "host": "Host",
@@ -607,7 +608,8 @@
       "hostDisksCount": "Disk count",
       "hostHardwareSerial": "Hardware serial",
       "containerImage": "Container image",
-      "containerImageDigest": "Image digest"
+      "containerImageDigest": "Image digest",
+      "nodeLifecycle": "Lifecycle"
     }
   },
   "delete": {
@@ -713,5 +715,38 @@
     "authorUnknown": "Author no longer in the directory",
     "lastMatched": "{count, plural, one {Used # time} other {Used # times}}, last on {when}",
     "neverMatched": "Not used yet"
+  },
+  "lifecycle": {
+    "retired": "Retired",
+    "retiredSince": "Retired on {at}. It is no longer watched for liveness; it returns by itself if the host reports again.",
+    "snoozed": "Alerts snoozed",
+    "snoozedUntil": "Offline alerts snoozed until {at}",
+    "menu": "Lifecycle",
+    "menuAria": "Retire or snooze {label}",
+    "retire": "Retire",
+    "retireHint": "Gone, not offline: it stays on the map with its history, is no longer watched, and its asset is untouched.",
+    "unretire": "Un-retire",
+    "snooze": "Snooze offline alerts",
+    "snoozeChange": "Change snooze",
+    "unsnooze": "End snooze now",
+    "preset": {
+      "4h": "For 4 hours",
+      "1d": "For 1 day",
+      "3d": "For 3 days",
+      "7d": "For 1 week",
+      "30d": "For 30 days"
+    },
+    "retiredToast": "{label} retired",
+    "retiredToastDescription": "It will not be marked offline or announced again. If it reports again, it is un-retired automatically.",
+    "unretiredToast": "{label} is watched again",
+    "snoozedToast": "Offline alerts for {label} snoozed until {at}",
+    "unsnoozedToast": "Offline alerts for {label} are back on",
+    "undo": "Undo",
+    "error": "Could not update the node",
+    "value": {
+      "active": "active",
+      "retired": "retired"
+    },
+    "sectionDescription": "Retire a node that is gone for good — it keeps its history and asset, and returns by itself if it reports again. Snooze offline alerts for planned maintenance; the status still changes."
   }
 }

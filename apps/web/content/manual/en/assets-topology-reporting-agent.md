@@ -393,8 +393,12 @@ On Windows, from an elevated PowerShell:
 & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Uninstall
 ```
 
-It stops and removes what runs the agent — the timer and both systemd units on Linux, the scheduled
-task on Windows — then the binary, the agent's local state and its configuration file, including
+It stops what runs the agent — the timer and both systemd units on Linux, the scheduled task on
+Windows — then **tells lazyit this machine is going away**, so its node is **retired** instead of
+turning offline a few minutes later and setting off an alert (see **Retired servers and snoozed
+alerts** below). The uninstall prints whether lazyit confirmed it. If lazyit could not be reached, or
+your instance is older than this feature, it says so and carries on, and you can retire the node by
+hand. Then it removes the binary, the agent's local state and its configuration file, including
 **the token**, which is destroyed whichever options you use. On Windows it also takes its
 directory back off the machine PATH, so nothing is left pointing at a folder that no longer exists.
 It's safe to run twice, and safe on a half-finished install.
@@ -407,10 +411,52 @@ decommissioned. (`--keep-token`, further down, is the opposite operation and bel
 combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
 believing the credential survived.)
 
-Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
-it is: discard it from the Servers view if you want it off the map. And the token is only removed
-*from that host* — if no other machine uses it, revoke the service account in
+The containers and virtual machines the server reported are retired with it, so they do not each set
+off an offline alert once the server stops listing them. Nodes you drew by hand are never touched.
+
+Two things uninstalling does **not** do, deliberately. The server's node in lazyit is retired, not
+deleted: it keeps its history and its asset, and you can discard it from the Servers view if you want
+it off the map. And the token is only removed *from that host* — if no other machine uses it, revoke the service account in
 [Service accounts](/help/users-permissions-service-accounts).
+
+## Retired servers and snoozed alerts
+
+"Offline" and "gone" are different things. A server that crashed and a server you decommissioned both
+stop reporting, and both used to sit on the map as **Offline** forever, setting off an **Agent
+offline** notification on the way. Two actions tell lazyit which one it is looking at.
+
+**Retire** a server that is gone for good. A retired node:
+
+- stays on the map, in the Servers view and in the Agents view, with a **Retired** badge, its history,
+  its connections and its linked asset all intact. Retiring a server does not dispose of the hardware:
+  the asset is not touched.
+- is no longer watched. It is never marked offline and never announced, so it stops filling the bell.
+- is left out of the Agents view's counts (it is not "behind" or "not reporting", it is gone) and gets
+  its own **retired** filter there. It is also left out of software watch results.
+- **comes back by itself if it reports again.** If the machine was not really gone, its next report
+  un-retires it, and the node's **Changes** tab records when that happened.
+
+Uninstalling the agent retires the node for you (see **Removing the agent** above), so you only need
+to retire by hand a server whose agent you could not uninstall, or one that was never reported by an
+agent at all.
+
+**Snooze offline alerts** for planned maintenance: a reboot window, a hardware swap, a datacenter
+move. While a node is snoozed it still turns **Offline** when it stops reporting (the map stays true),
+but nobody is notified, in the bell or by email. You can snooze for 4 hours, 1 day, 3 days, 1 week or
+30 days (90 days is the longest lazyit accepts), and end a snooze early at any time. Two things to know:
+
+- What counts is **when lazyit marks the server Offline**, not when it actually went quiet. If that
+  happens while the snooze is running, nobody is notified, and nobody is notified later either when the
+  window ends: the Offline status is already on the map. If the server is only marked Offline after
+  the window has ended, the alert goes out as usual.
+- A snooze is not a mute switch. For a server that should never alert again, retire it.
+
+**Where to find them.** Every node has a **Lifecycle** menu: in the node's details on the map
+(**Lifecycle** section), on each row of the **Pending review** tray, and on each row of the **Agents**
+view. It has **Retire** (or **Un-retire**), **Snooze offline alerts** and, while a snooze is running,
+**End snooze now**. Retiring shows an **Undo** right away. These actions need the
+**Manage topology** (`infra:manage`) permission, and only a person can take them, never a service
+account. The one exception is the agent retiring its own node when it is uninstalled.
 
 ## Pending review
 
@@ -1314,7 +1360,8 @@ gets a card:
 
 Every number opens the hosts behind it, a page at a time, each linking to its node on the map. A host's
 row also says how old the package list it is judged on is — an offline host still counts, by its last
-list.
+list. A **retired** host does not count at all: it is gone, so it neither runs a version nor is
+missing one (see [Retired servers and snoozed alerts](#retired-servers-and-snoozed-alerts)).
 
 **It is a distribution, nothing more.** lazyit counts versions; it does not judge them. There is no
 "outdated", no end-of-life flag and no vulnerability matching — lazyit has no feed to check against, and

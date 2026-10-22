@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ArchiveBoxArrowDownIcon,
+  BellSlashIcon,
   CircleStackIcon,
   CpuChipIcon,
   CubeIcon,
@@ -50,6 +52,16 @@ export interface InfraNodeData {
    * the `infra-focus-pulse` breathe + wears a brand ring so the eye lands on the right node.
    */
   focusPulse?: boolean;
+  /**
+   * The retire / snooze lifecycle (#1701). A retired node is GONE, not silent: the card fades and
+   * wears a dashed border plus a "Retired" badge, so a decommissioned server is told apart from a
+   * crashed one at a glance. A snoozed node keeps its normal look and gains a small badge. The
+   * labels arrive resolved, like `statusLabel`, so this leaf stays i18n-free.
+   */
+  retired?: boolean;
+  snoozed?: boolean;
+  retiredLabel?: string;
+  snoozedLabel?: string;
   [key: string]: unknown;
 }
 
@@ -102,6 +114,7 @@ export function InfraNodeCard({ data, selected }: NodeProps) {
       className={cn(
         "relative flex min-w-44 max-w-60 items-start gap-2.5 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5 text-card-foreground shadow-sm transition-[box-shadow,opacity,transform]",
         "hover:shadow-md",
+        node.retired && "border-dashed opacity-70",
         selected && SELECTED_RING[tone],
         // Blast radius (issue #755). The origin is the distinct source (brand ring + lift); affected
         // nodes wear a danger ring + faint tint so the radius pops; unaffected nodes fade back. These
@@ -142,6 +155,18 @@ export function InfraNodeCard({ data, selected }: NodeProps) {
             <span className="font-mono text-[11px] text-muted-foreground">
               {node.ipAddress}
             </span>
+          ) : null}
+          {node.retired ? (
+            <StatusBadge tone="neutral">
+              <ArchiveBoxArrowDownIcon className="size-3" aria-hidden />
+              {node.retiredLabel}
+            </StatusBadge>
+          ) : null}
+          {node.snoozed ? (
+            <StatusBadge tone="neutral">
+              <BellSlashIcon className="size-3" aria-hidden />
+              {node.snoozedLabel}
+            </StatusBadge>
           ) : null}
         </div>
       </div>

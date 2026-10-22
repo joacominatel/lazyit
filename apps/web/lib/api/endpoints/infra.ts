@@ -24,6 +24,7 @@ import type {
   InfraNodeListRole,
   InfraSecretRef,
   MergeInfraNode,
+  SnoozeInfraNodeAlerts,
   UpdateInfraNode,
 } from "@lazyit/shared";
 import {
@@ -239,6 +240,35 @@ export function restoreInfraNode(nodeId: string): Promise<InfraNode> {
   return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/restore`, {
     method: "POST",
   });
+}
+
+/**
+ * Retire a node (`POST /infra/nodes/:id/retire`, #1701): it is GONE, not silent. It stays on the map
+ * with its history, stops being watched for liveness, and its Asset is untouched. If the host reports
+ * again it is un-retired automatically.
+ */
+export function retireInfraNode(nodeId: string): Promise<InfraNode> {
+  return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/retire`, { method: "POST" });
+}
+
+/** Un-retire a node (`POST /infra/nodes/:id/unretire`, #1701) — watched for liveness again. */
+export function unretireInfraNode(nodeId: string): Promise<InfraNode> {
+  return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/unretire`, { method: "POST" });
+}
+
+/**
+ * Snooze a node's offline alerts until `until` (`PUT /infra/nodes/:id/snooze`, #1701). The node still
+ * goes OFFLINE; only the notification is withheld. The API 400s a past instant or one more than
+ * `INFRA_NODE_SNOOZE_MAX_DAYS` ahead.
+ */
+export function snoozeInfraNodeAlerts(nodeId: string, until: string): Promise<InfraNode> {
+  const body: SnoozeInfraNodeAlerts = { until };
+  return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/snooze`, { method: "PUT", body });
+}
+
+/** End a node's snooze now (`DELETE /infra/nodes/:id/snooze`, #1701). */
+export function unsnoozeInfraNodeAlerts(nodeId: string): Promise<InfraNode> {
+  return apiFetch<InfraNode>(`${BASE}/nodes/${nodeId}/snooze`, { method: "DELETE" });
 }
 
 /**

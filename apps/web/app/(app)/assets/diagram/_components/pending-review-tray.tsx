@@ -45,6 +45,7 @@ import { AutoConfirmRulesDialog } from "./auto-confirm-rules-dialog";
 import { BulkConfirmDialog, BulkDiscardDialog } from "./bulk-review-dialogs";
 import { ConfirmNodeDialog } from "./confirm-node-dialog";
 import { DeleteNodeDialog } from "./delete-node-dialog";
+import { NodeLifecycleBadges, NodeLifecycleMenu } from "./node-lifecycle";
 import { MergeNodeDialog } from "./merge-node-dialog";
 import { pendingBatchNotice } from "./node-page-state";
 import { exceedsBulkReviewCap, visibleSelection } from "./tray-selection";
@@ -514,6 +515,8 @@ export function PendingReviewTray() {
                               </Badge>
                             ) : null}
                             <AgentBadge />
+                            {/* A proposal can be a ghost already (#1701): badged, not hidden. */}
+                            <NodeLifecycleBadges node={node} />
                             {node.ipAddress ? (
                               <span className="font-mono text-xs text-muted-foreground">
                                 {node.ipAddress}
@@ -552,6 +555,7 @@ export function PendingReviewTray() {
                           <TrashIcon />
                           {t("discardAction")}
                         </Button>
+                        <NodeLifecycleMenu node={node} size="icon-sm" />
                       </div>
                     </li>
                   );
