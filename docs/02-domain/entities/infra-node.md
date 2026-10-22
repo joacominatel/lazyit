@@ -138,18 +138,23 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   **migration** inside a PVE cluster appears as old child OFFLINE on node A + new child on node B,
   surfaced as duplicate-suspects for a one-click operator merge — **no auto-merge in v1**, same
   reasoning as ADR-0093's no-retroactive-re-linking.
-- **A host in machine-id COLLISION has no container children at all (#1158).** The child key above is
-  derived from the **reported** `externalId`, which two clones share, so both would compute identical
-  container keys and each report would retire the other's still-running children. The #1141 collision
-  branch therefore skips container reconciliation entirely: a colliding host's containers go
-  **untracked** until its `/etc/machine-id` — on Windows, its `MachineGuid` — is fixed, then tracking
-  resumes on its own. The same property holds for `/guest/` children ([[0095-hypervisor-guest-inventory]]
-  "Known limitations"): a hypervisor host in collision reports no guests until its identity conflict
-  is resolved. A Windows image prepared with `sysprep /generalize` regenerates that key per
+- **A host in machine-id COLLISION keys its containers under its OWN node (#1158).** The child key's
+  host half is the reporting host's **node** `externalId`, not the reported one. For every ordinary
+  host the two are the same string (the node is found by exact equality on the reported key), so
+  those keys never moved. A clone's node is `<externalId>#<discriminator>`, so its children are
+  `<externalId>#<discriminator>/container/<name>`, and neither clone's retire sweep can select the
+  other's rows. Two cases still reconcile nothing, because the key would not be unique to one machine:
+  a discriminator ending in `/container`, and a clone node on which a second machine has been seen
+  (two clones sharing a first serial on ONE clone node). The latter is **sticky**: the first report
+  whose MACs share nothing with the ones the node held stamps `identityConflict.sharedKeySeenAt`, and
+  it clears only with the marker (machine-id fixed, node merged or discarded). A clone's children land
+  PENDING and are not offered to the auto-confirm rules. `/guest/` children are unchanged
+  ([[0095-hypervisor-guest-inventory]] "Known limitations"): a hypervisor host in collision reports no
+  guests until its identity conflict is resolved. A Windows image prepared with `sysprep /generalize` regenerates that key per
   clone and never enters this branch at all, which is the asymmetry the ADR-0074 §3 amendment for
-  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. Deliberate and
-  deferred (re-deriving the key would re-key every existing child); the guarantee that a colliding
-  host's report never retires its peer's children is pinned by test.
+  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. The guarantee
+  that a colliding host's report never retires its peer's children is pinned by test, with
+  reconciliation running ([[0074-server-reporting-agent]] §3, the #1158 amendment).
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
   or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
   human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than

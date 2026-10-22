@@ -661,6 +661,15 @@ When two machines are found:
 - You get **one notification** in the bell (not one per check-in). Its title names both hosts; its
   summary opens with the command that fixes it (the bell shortens long summaries to one line — hover
   the row to read it in full). The row links to the topology map.
+- The new host's **containers are tracked under its own entry**. They arrive in Pending review like
+  any container, grouped under the new host, and they **never touch the containers of the server that
+  was already there**. They are **not** auto-confirmed by your rules, even one that would normally
+  match: a host lazyit suspects of being a clone is for you to look at. One exception: if two clones
+  also share a **serial number**, they end up on one entry, and once lazyit has seen a second machine
+  there it stops tracking that entry's containers until the identity is fixed, rather than let the two
+  machines take turns marking each other's containers offline.
+- A **hypervisor** host in this situation does **not** report its virtual machines or LXC guests until
+  its identity is fixed.
 
 The fix is on the machines, not in lazyit — and **the command differs by platform**, which is why the
 notification names the one for the host that reported:
@@ -673,7 +682,9 @@ notification names the one for the host that reported:
 
 Fix the template too, or every future clone repeats it. Once a clone has a real ID of its own it
 simply reports as a new host — confirm it, or use **Merge into…** to fold it onto the entry lazyit
-created for it in the meantime.
+created for it in the meantime. Its containers report again under the new host too. The entry lazyit
+created for the clone, and the containers under it, stop checking in and go **offline**; discard them
+once you have confirmed or merged the new host.
 
 All of this needs the hardware details a **current** agent sends — and it needs that agent to actually
 have them. Two things leave a host out of the check, and both are silent:
