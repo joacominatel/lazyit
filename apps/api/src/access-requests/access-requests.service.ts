@@ -136,10 +136,27 @@ export class AccessRequestsService {
   /**
    * The caller's OWN requests (`GET /access-requests/mine`) — the self-scope carve-out (ADR-0085): any
    * authenticated human sees their own requests, PENDING and decided, regardless of `accessRequest:read`.
-   * Scoped strictly to `requesterId == caller` so it can never leak another user's requests.
+   * Scoped strictly to `requesterId == caller` so it can never leak another user's requests. Each
+   * request carries the coarse `provisioning` status of the grant its approval created (#1700).
    */
-  findMine(requesterId: string, page: PageQuery) {
-    return this.findPage({ requesterId }, page);
+  async findMine(requesterId: string, page: PageQuery) {
+    const result = await this.findPage({ requesterId }, page);
+    // The coarse provisioning status of each approved request's grant (#1700), in ONE batched read of
+    // the linked runs; null where there is no grant (PENDING, DENIED). No workflow detail.
+    const grantIds = result.items
+      .map((request) => request.grantId)
+      .filter((id): id is string => id !== null);
+    const provisioning = await this.grants.provisioningFor(grantIds);
+    return {
+      ...result,
+      items: result.items.map((request) => ({
+        ...request,
+        provisioning:
+          request.grantId === null
+            ? null
+            : (provisioning.get(request.grantId) ?? 'NONE'),
+      })),
+    };
   }
 
   /** The CSV export's reads (ADR-0103): the estate-wide list's `where`, walked newest first by keyset. */

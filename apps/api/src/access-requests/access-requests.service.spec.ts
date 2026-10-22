@@ -100,7 +100,7 @@ describe('AccessRequestsService', () => {
     $transaction: jest.Mock;
     accessRequest: AccessRequestMock;
   } & Record<string, unknown>;
-  let grants: { createWithinApproval: jest.Mock };
+  let grants: { createWithinApproval: jest.Mock; provisioningFor: jest.Mock };
   let notifications: { emit: jest.Mock };
 
   beforeEach(async () => {
@@ -126,7 +126,10 @@ describe('AccessRequestsService', () => {
             : arg({ accessRequest, application, user }),
       ),
     };
-    grants = { createWithinApproval: jest.fn() };
+    grants = {
+      createWithinApproval: jest.fn(),
+      provisioningFor: jest.fn().mockResolvedValue(new Map()),
+    };
     notifications = { emit: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
@@ -644,6 +647,51 @@ describe('AccessRequestsService', () => {
         accessRequest.findMany.mock.calls as FindManyCall[]
       )[0][0];
       expect(findManyArg.where).toEqual({ requesterId: REQUESTER });
+    });
+
+    it('adds the coarse provisioning of each approved request grant in ONE batched read (#1700)', async () => {
+      accessRequest.findMany.mockResolvedValue([
+        { id: 'r1', status: 'APPROVED', grantId: 'g1' },
+        { id: 'r2', status: 'PENDING', grantId: null },
+        { id: 'r3', status: 'APPROVED', grantId: 'g3' },
+        { id: 'r4', status: 'DENIED', grantId: null },
+      ]);
+      accessRequest.count.mockResolvedValue(4);
+      grants.provisioningFor.mockResolvedValue(
+        new Map([
+          ['g1', 'DONE'],
+          ['g3', 'WAITING_ON_IT'],
+        ]),
+      );
+
+      const page = await service.findMine(REQUESTER, {
+        limit: 50,
+        offset: 0,
+      } as never);
+
+      expect(grants.provisioningFor).toHaveBeenCalledTimes(1);
+      expect(grants.provisioningFor).toHaveBeenCalledWith(['g1', 'g3']);
+      expect(page.items.map((r) => [r.id, r.provisioning] as const)).toEqual([
+        ['r1', 'DONE'],
+        ['r2', null],
+        ['r3', 'WAITING_ON_IT'],
+        ['r4', null],
+      ]);
+    });
+
+    it('leaves the estate-wide list without provisioning (admin route unchanged)', async () => {
+      accessRequest.findMany.mockResolvedValue([
+        { id: 'r1', status: 'APPROVED', grantId: 'g1' },
+      ]);
+      accessRequest.count.mockResolvedValue(1);
+
+      const page = await service.findPage({}, {
+        limit: 50,
+        offset: 0,
+      } as never);
+
+      expect(page.items[0]).not.toHaveProperty('provisioning');
+      expect(grants.provisioningFor).not.toHaveBeenCalled();
     });
   });
 

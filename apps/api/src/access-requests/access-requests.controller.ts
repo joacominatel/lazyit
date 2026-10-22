@@ -30,6 +30,7 @@ import { accessRequestExportColumns } from './access-request-export';
 import {
   AccessRequestDto,
   AccessRequestListPageDto,
+  MyAccessRequestListPageDto,
   CreateAccessRequestDto,
   DenyAccessRequestDto,
 } from './access-request.dto';
@@ -175,12 +176,12 @@ export class AccessRequestsController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @ApiOperation({
     summary:
-      "The caller's OWN access requests (any authenticated human; no accessRequest:read needed) — paginated, newest first.",
+      "The caller's OWN access requests (any authenticated human; no accessRequest:read needed) — paginated, newest first. An approved request carries the coarse `provisioning` status of its grant (NONE, IN_PROGRESS, DONE, WAITING_ON_IT); null otherwise.",
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiOkResponse({ type: AccessRequestListPageDto })
+  @ApiOkResponse({ type: MyAccessRequestListPageDto })
   findMine(
     @CurrentPrincipal() principal?: Principal,
     @Query('limit') limit?: string,
