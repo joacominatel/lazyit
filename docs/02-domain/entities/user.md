@@ -102,6 +102,15 @@ the reverse.
   `POST /auth/sessions/revoke-all` increments `sessionEpoch` **and** `mcpCredentialEpoch` (unconditionally
   — a concurrent plain logout must not make it skip the MCP bump) and deletes every session row, in one
   transaction and in every auth mode, audited `SIGNED_OUT_EVERYWHERE` in the OAuth audit trail.
+  **OIDC sessions have a cutoff instead of an epoch (#1715).** In `oidc` mode lazyit mints no web session —
+  the browser carries the IdP's access token — so no epoch can end one. `oidcTokensNotBefore` (`datetime?`,
+  `null` = no cutoff) does: the guard refuses an IdP token whose `iat`, or whose `auth_time` when the token
+  carries one, is earlier than the cutoff minus a 30-second clock-skew tolerance, with the same 401 as an
+  expired token. *Sign out everywhere and disconnect AI apps*, a **deactivation**, an **offboarding** and the
+  directory sync's **soft offboard** set it to now, next to their epoch bumps, so a later reactivation or
+  restore never revives an IdP session either. Plain sign-out does not (it stays a no-op in `oidc` mode), and
+  the local-credential levers (password change or reset, admin reset, *revoke sessions*, the recovery CLI)
+  have no OIDC counterpart. The column is inert in `local` and `shim` mode.
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
@@ -132,8 +141,8 @@ the reverse.
   only through `PUBLIC_USER_SELECT` (`apps/api/src/users/public-user.ts`) — the `UserSchema` columns plus
   the resolved `manager` descriptor. Every `/users` response goes through `serializeUsers`, and a relation
   that embeds a User uses `include: { user: { select: PUBLIC_USER_SELECT } }`, never `user: true`.
-  `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`, `mustChangePassword`,
-  `notificationEmailOptOutTypes`, the raw manager columns and the AD reconcile keys never reach a client.
+  `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`, `oidcTokensNotBefore`,
+  `mustChangePassword`, `notificationEmailOptOutTypes`, the raw manager columns and the AD reconcile keys never reach a client.
   A new column stays server-side until it is added to both `UserSchema` and the allowlist.
 
 ## Fields
@@ -166,6 +175,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
 | `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
 | `directoryOffboardedAt` | `datetime?` | Set when an **active** AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). The offboard also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The stamp means *the sync* deactivated them, so it is the only deactivation the sync ever undoes: a person who is already inactive (deactivated by hand) is never stamped and stays inactive when they reappear, and a manual deactivation clears any stamp left from an earlier sync offboard (#1311). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
+| `oidcTokensNotBefore` | `datetime?` | OIDC-mode cutoff (#1715): IdP tokens issued or authenticated before it (minus 30s of skew) are refused. Set by *Sign out everywhere and disconnect AI apps*, deactivation, offboarding and the sync's soft offboard; `null` (every row on upgrade) = no cutoff. Never on the wire (`PUBLIC_USER_SELECT`). |
 | `directoryReenabledAt` | `datetime?` | Set when an admin re-enables a person by hand (`PATCH /users/:id`, inactive→active); cleared by a manual deactivation. While it is set, the directory sync never offboards the person, whatever their history, so an admin's re-enable holds while they stay missing from the directory (#1522, [[0091-on-prem-ad-ldap-directory-source]]). The sync clears it, and any leftover `directoryOffboardedAt` on the now-active person, when they reappear in the directory, so a later absence past grace offboards them as usual. Server-side only, never serialized (same posture as `directoryOffboardedAt`). `NULL` on every row that predates the column. |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])

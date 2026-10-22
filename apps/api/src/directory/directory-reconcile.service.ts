@@ -441,6 +441,8 @@ export class DirectoryReconcileService {
           sessionEpoch: { increment: 1 },
           // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
           mcpCredentialEpoch: { increment: 1 },
+          // OIDC mode: the person's reappearance must not revive their old IdP sessions (#1715).
+          oidcTokensNotBefore: new Date(),
         },
       });
       if (count !== 1) return 'stale';

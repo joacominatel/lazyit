@@ -599,6 +599,15 @@ the **exfiltration leg** and the **consequential-action leg**.
     in `/account/ai`, or *Sign out everywhere and disconnect AI apps* (`POST /auth/sessions/revoke-all`,
     #1699 — both counters, every session row, every auth mode, no step-up since it only removes access)
     does.
+  - **OIDC instances, other devices (#1715).** In OIDC mode a web session is the IdP's access token, which
+    Auth.js renews with a refresh token, and no lazyit counter covers it. Until #1715 *Sign out everywhere*
+    therefore left the user's *other* devices signed in to lazyit — able to mint a personal token or approve
+    a new OAuth connection straight away. It now stamps `User.oidcTokensNotBefore`, and the guard refuses
+    any IdP token whose `iat`, or `auth_time` when present, predates it (30 s skew tolerance, the 401 of an
+    expired token), so every device is signed out of lazyit on its next request. Still out of reach: the
+    IdP's own session (sign out at the provider), and — on an IdP whose access tokens carry no
+    `auth_time` — a device that renews its token before its next lazyit request, which then carries a fresh
+    `iat` ([[authorization]] §3.2).
   - `/mcp` accepts `lzit_oat_` access tokens whose audience is the canonical URI, `lzit_pat_` personal
     tokens on `lan` only, and `lzit_sa_` tokens only of a Service Account that holds `ai:connect`
     (R10, fail-closed). The global `JwtAuthGuard` rejects OAuth and personal tokens on every other route,

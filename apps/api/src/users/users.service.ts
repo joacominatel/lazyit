@@ -1054,6 +1054,8 @@ export class UsersService {
             ? {
                 sessionEpoch: { increment: 1 },
                 mcpCredentialEpoch: { increment: 1 },
+                // OIDC mode: a reactivation must not revive the IdP sessions held before it (#1715).
+                oidcTokensNotBefore: new Date(),
                 // A stale sync stamp would let the directory sync undo this deactivation (#1311).
                 directoryOffboardedAt: null,
                 directoryReenabledAt: null,
@@ -1634,6 +1636,8 @@ export class UsersService {
           deletedAt: now,
           sessionEpoch: { increment: 1 },
           mcpCredentialEpoch: { increment: 1 },
+          // OIDC mode: a restore must not revive the IdP sessions held before the offboarding (#1715).
+          oidcTokensNotBefore: now,
         },
       });
 

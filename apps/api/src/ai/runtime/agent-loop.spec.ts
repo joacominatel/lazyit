@@ -20,6 +20,7 @@ jest.mock('jose', () => ({
 import { ConflictException, HttpException, Logger } from '@nestjs/common';
 import { AiRunEventSchema } from '@lazyit/shared';
 import { AiProviderError } from '../providers/ai-provider.error';
+import { UserSessionsService } from '../../auth/local/user-sessions.service';
 import {
   buildRuntime,
   HUMAN,
@@ -1836,5 +1837,70 @@ describe('per-conversation model (#1373)', () => {
       body: { code: 'PROVIDER_OPTIONS_UNSUPPORTED' },
     });
     expect(rt.prisma.tables.aiConversation.rows).toHaveLength(0);
+  });
+});
+
+describe('"Sign out everywhere and disconnect AI apps" stops a run in flight (#1699)', () => {
+  /**
+   * The REAL action over a database whose user row is the runtime's principal row: its `sessionEpoch`
+   * bump is what every step re-checks before it runs.
+   */
+  function signOutEverywhere(): Promise<void> {
+    const user = rt.loader.user;
+    const db = {
+      user: {
+        update: ({
+          data,
+        }: {
+          data: { sessionEpoch: { increment: number } };
+        }) => {
+          user.sessionEpoch += data.sessionEpoch.increment;
+          return Promise.resolve({ id: user.id });
+        },
+      },
+      userSession: { deleteMany: () => Promise.resolve({ count: 0 }) },
+      oAuthAuditLog: { create: () => Promise.resolve({}) },
+      $transaction: (fn: (tx: unknown) => unknown) => Promise.resolve(fn(db)),
+    };
+    const sessions = new UserSessionsService(
+      db as never,
+      { record: jest.fn() } as never,
+    );
+    return sessions.signOutEverywhere({ id: user.id }, null);
+  }
+
+  it('a queued run is refused before its first step: the model is never called', async () => {
+    rt.model.push({ text: 'never sent' });
+    const { runId } = await chat();
+    await signOutEverywhere();
+    await rt.drain();
+
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'FORBIDDEN' },
+    });
+    expect(rt.model.requests).toHaveLength(0);
+  });
+
+  it('a run mid-turn is refused at its next step boundary', async () => {
+    rt.model.push(
+      {
+        // The user signs out everywhere while the model is answering the first step.
+        before: () => signOutEverywhere(),
+        toolCalls: [
+          { toolCallId: 'call_1', toolName: READ, input: { q: 'laptop' } },
+        ],
+      },
+      { text: 'never sent' },
+    );
+    const { runId } = await chat();
+    await rt.drain();
+
+    expect(rt.run(runId)).toMatchObject({
+      status: 'FAILED',
+      error: { code: 'FORBIDDEN' },
+    });
+    // The second step never reached the provider.
+    expect(rt.model.requests).toHaveLength(1);
   });
 });

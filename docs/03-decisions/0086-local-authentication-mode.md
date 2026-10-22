@@ -464,7 +464,8 @@ phone in the user's hand.
   here, and signing out still leaves MCP connections alive ([[0097-ai-assistant-mcp-and-headless-api]]
   decision 8). The separate, explicit **"Sign out everywhere and disconnect AI apps"**
   (`POST /auth/sessions/revoke-all`, #1699) ends both: it bumps `sessionEpoch` and `mcpCredentialEpoch`
-  and deletes every session row in one transaction, in every auth mode.
+  and deletes every session row in one transaction, in every auth mode. In OIDC mode it also stamps the
+  `oidcTokensNotBefore` cutoff, which ends the lazyit side of the IdP sessions on every device (#1715).
 - **No admin endpoint.** An admin ends a user's sessions with the levers that already exist; a per-session
   admin view was not built.
 

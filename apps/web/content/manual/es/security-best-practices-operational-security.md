@@ -77,8 +77,10 @@ lazyit te avisa la primera vez que una app de IA o un token personal nuevo se us
 campana, y por correo siempre que tu instancia envíe correos (este aviso de seguridad no se puede
 desactivar). Si no fuiste vos, [revocala](/help/ai-assistant-connected-apps#revocar) enseguida, o usá
 [Cerrar sesión en todos lados y desconectar las apps de IA](/help/getting-started-your-profile#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia) para terminar todas las sesiones y
-todas las conexiones de una vez. Cambiá tu contraseña (con inicio de sesión único, en tu proveedor de
-inicio de sesión) y avisale a un administrador.
+todas las conexiones de una vez —también con inicio de sesión único, donde cierra la sesión de lazyit en
+todos los dispositivos (cerrá sesión también en tu proveedor de inicio de sesión; lazyit no puede cerrar
+esa sesión). Cambiá tu contraseña (con inicio de sesión único, en tu proveedor de inicio de sesión) y
+avisale a un administrador.
 
 ### Un secreto compartido pudo filtrarse
 

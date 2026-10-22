@@ -808,7 +808,8 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
    > exists for the user: **Sign out everywhere and disconnect AI apps** (`POST /auth/sessions/revoke-all`,
    > Account → Password & sessions). It bumps both counters and deletes every session row in one
    > transaction, in every auth mode (in OIDC mode lazyit cannot end the IdP session; the web drops its own
-   > cookie), and records `SIGNED_OUT_EVERYWHERE` in `oauth_audit_log`. No step-up, following the
+   > cookie, and since #1715 the `oidcTokensNotBefore` cutoff signs the other devices out of lazyit too),
+   > and records `SIGNED_OUT_EVERYWHERE` in `oauth_audit_log`. No step-up, following the
    > precedent of every other revocation (sign-out, ending a device, revoking a connection).
 7. **Q7 — Anonymous plugin marketplace → served only when MCP is enabled on an HTTPS instance**; the
    authenticated zip download is always available (R8).

@@ -397,6 +397,69 @@ describe('JwtAuthGuard', () => {
       expect(prismaUser.upsert).not.toHaveBeenCalled();
     });
 
+    describe('the sign-out cutoff, oidcTokensNotBefore (#1715)', () => {
+      const CUTOFF = new Date('2026-10-22T12:00:00.000Z');
+      const CUTOFF_S = CUTOFF.getTime() / 1000;
+
+      async function authenticate(payload: Record<string, unknown>) {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-001', ...payload },
+        });
+        prismaUser.findFirst.mockResolvedValue({
+          ...DB_USER,
+          oidcTokensNotBefore: CUTOFF,
+        });
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer idp.access.token' },
+        };
+        await guard.canActivate(makeCtx(req));
+        return req;
+      }
+
+      it('refuses a token issued before the cutoff with the same 401 as an expired token', async () => {
+        const refusal = authenticate({ iat: CUTOFF_S - 3600 });
+        await expect(refusal).rejects.toBeInstanceOf(UnauthorizedException);
+        await expect(refusal).rejects.toThrow(
+          'Invalid or expired Bearer token',
+        );
+      });
+
+      it('refuses a token another device renewed after the cutoff from an earlier sign-in', async () => {
+        await expect(
+          authenticate({ iat: CUTOFF_S + 900, auth_time: CUTOFF_S - 3600 }),
+        ).rejects.toThrow('Invalid or expired Bearer token');
+      });
+
+      it('lets the user sign in again: a token from a sign-in after the cutoff is accepted', async () => {
+        const req = await authenticate({
+          iat: CUTOFF_S + 120,
+          auth_time: CUTOFF_S + 110,
+        });
+        expect(req.user).toMatchObject({ id: DB_USER.id });
+        expect(req.principal).toMatchObject({ kind: 'human' });
+      });
+
+      it('fails closed on a token with no iat while a cutoff exists', async () => {
+        await expect(authenticate({})).rejects.toThrow(
+          'Invalid or expired Bearer token',
+        );
+      });
+
+      it('changes nothing for a user without a cutoff (null), whatever the token age', async () => {
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-001', iat: 1 },
+        });
+        prismaUser.findFirst.mockResolvedValue({
+          ...DB_USER,
+          oidcTokensNotBefore: null,
+        });
+        const req: Record<string, unknown> = {
+          headers: { authorization: 'Bearer idp.access.token' },
+        };
+        await expect(guard.canActivate(makeCtx(req))).resolves.toBe(true);
+      });
+    });
+
     it('JIT-creates a new User (via upsert) when sub is unknown (first login)', async () => {
       (jose.jwtVerify as jest.Mock).mockResolvedValue({
         payload: {

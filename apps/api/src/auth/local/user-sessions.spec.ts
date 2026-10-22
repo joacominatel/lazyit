@@ -1,5 +1,6 @@
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import * as jose from 'jose';
 
 // Keep the real generated Prisma client and ESM-only jose out of this test: every service here runs
 // against the in-memory user row and session table below, with real HS256 tokens.
@@ -54,6 +55,8 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
     passwordHash: string | null;
     sessionEpoch: number;
     mcpCredentialEpoch: number;
+    externalId: string | null;
+    oidcTokensNotBefore: Date | null;
     deletedAt: Date | null;
   };
   let auditCreate: jest.Mock;
@@ -90,6 +93,8 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
       passwordHash: await credentials.hash(PASSWORD),
       sessionEpoch: 0,
       mcpCredentialEpoch: 0,
+      externalId: 'idp-sub-alice',
+      oidcTokensNotBefore: null,
       deletedAt: null,
     };
     auditCreate = jest.fn().mockResolvedValue({});
@@ -127,11 +132,15 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
             data: {
               sessionEpoch?: { increment: number };
               mcpCredentialEpoch?: { increment: number };
+              oidcTokensNotBefore?: Date;
             };
           }) => {
             if (!matches(where)) return Promise.reject(new Error('not found'));
             row.sessionEpoch += data.sessionEpoch?.increment ?? 0;
             row.mcpCredentialEpoch += data.mcpCredentialEpoch?.increment ?? 0;
+            if (data.oidcTokensNotBefore !== undefined) {
+              row.oidcTokensNotBefore = data.oidcTokensNotBefore;
+            }
             return Promise.resolve({ id: row.id });
           },
         ),
@@ -514,6 +523,66 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
       expect(auditData()).toMatchObject({
         action: 'SIGNED_OUT_EVERYWHERE',
         detail: { authMode: 'oidc' },
+      });
+    });
+
+    describe('OIDC mode: the web sessions on other devices end too (#1715)', () => {
+      const originalIssuer = process.env.OIDC_ISSUER;
+      const nowS = () => Math.floor(Date.now() / 1000);
+
+      beforeEach(() => {
+        process.env.AUTH_MODE = 'oidc';
+        process.env.OIDC_ISSUER = 'https://idp.example.com';
+      });
+      afterEach(() => {
+        if (originalIssuer === undefined) delete process.env.OIDC_ISSUER;
+        else process.env.OIDC_ISSUER = originalIssuer;
+      });
+
+      /** Present an IdP access token with these time claims, as Auth.js forwards it. */
+      function idpToken(claims: { iat?: number; auth_time?: number }) {
+        (jose.jwtVerify as jest.Mock).mockResolvedValueOnce({
+          payload: { sub: 'idp-sub-alice', ...claims },
+        });
+        return authenticate('idp.access.token');
+      }
+
+      it('stamps the cutoff, and the guard refuses every IdP token issued before it', async () => {
+        const signedIn = nowS() - 3600;
+        // Before the action: the other device's token works.
+        await expect(
+          idpToken({ iat: signedIn, auth_time: signedIn }),
+        ).resolves.toMatchObject({ user: { id: USER_ID } });
+
+        const before = Date.now();
+        await sessions.signOutEverywhere({ id: USER_ID }, null);
+        expect(row.oidcTokensNotBefore?.getTime()).toBeGreaterThanOrEqual(
+          before,
+        );
+
+        // The token it held, and the one it would get by renewing it with its refresh token.
+        await expect(
+          idpToken({ iat: signedIn, auth_time: signedIn }),
+        ).rejects.toThrow(UnauthorizedException);
+        await expect(
+          idpToken({ iat: nowS() + 300, auth_time: signedIn }),
+        ).rejects.toThrow('Invalid or expired Bearer token');
+      });
+
+      it('signing in again afterwards works: a new sign-in carries a later iat', async () => {
+        await sessions.signOutEverywhere({ id: USER_ID }, null);
+        const later = nowS() + 60;
+        await expect(
+          idpToken({ iat: later, auth_time: later }),
+        ).resolves.toMatchObject({ user: { id: USER_ID } });
+      });
+
+      it('plain sign-out stamps no cutoff (CEO decision 8: unchanged)', async () => {
+        await login.logout({ ...row } as never);
+        expect(row.oidcTokensNotBefore).toBeNull();
+        await expect(idpToken({ iat: nowS() - 3600 })).resolves.toMatchObject({
+          user: { id: USER_ID },
+        });
       });
     });
 

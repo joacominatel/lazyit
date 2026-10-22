@@ -54,12 +54,15 @@ export class UserSessionsService {
    *     does every AI chat delegation and in-flight run, which re-check it before each step;
    *   - `mcpCredentialEpoch` — every OAuth grant (access and refresh tokens) and personal MCP token stops
    *     on its next use and drops out of the connected-apps list (ADR-0097 decision 8, amended);
-   *   - the `UserSession` rows — the device list empties at once rather than waiting for the sweeper.
+   *   - the `UserSession` rows — the device list empties at once rather than waiting for the sweeper;
+   *   - `oidcTokensNotBefore` — in OIDC mode, where there is no lazyit session to end, the guard refuses
+   *     every IdP token issued or authenticated before now, so the web sessions on OTHER devices end too
+   *     (#1715). Inert in local and shim mode.
    * The event is recorded in the OAuth audit trail (`SIGNED_OUT_EVERYWHERE`) in the same transaction.
    *
    * Works in EVERY auth mode, unlike {@link LoginService.logout}, which is a no-op outside local mode: in
-   * OIDC mode lazyit mints no web session, so there is no row to delete and the identity provider's
-   * session is not lazyit's to end — but the AI connections and chat delegations are, and they die here.
+   * OIDC mode lazyit mints no web session, so there is no row to delete — the cutoff above ends the lazyit
+   * side of every device's session instead. The identity provider's own session is not lazyit's to end.
    * The web then drops this browser's cookie.
    *
    * Plain sign-out (`POST /auth/logout`) is unchanged: it moves `sessionEpoch` only (CEO, 2026-09-24).
@@ -81,6 +84,8 @@ export class UserSessionsService {
         data: {
           sessionEpoch: { increment: 1 },
           mcpCredentialEpoch: { increment: 1 },
+          // OIDC mode: the IdP tokens other devices hold are refused from now on (#1715).
+          oidcTokensNotBefore: new Date(),
         },
         select: { id: true },
       });
