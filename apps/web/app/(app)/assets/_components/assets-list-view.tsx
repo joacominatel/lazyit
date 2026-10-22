@@ -741,6 +741,7 @@ export function AssetsListView() {
               total={page?.total}
               filename="assets"
               permission="asset:read"
+              resource="ASSETS"
             />
             {/* Discoverable entry to the bulk Migrator (#950): register many assets from a CSV
                 without hunting through Settings. Gated on `import:run` like the wizard itself. */}
