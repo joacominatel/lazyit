@@ -2,7 +2,11 @@ import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '../../generated/prisma/client';
-import { PrismaExceptionFilter } from './prisma-exception.filter';
+import {
+  PrismaExceptionFilter,
+  driverCode,
+  isRetryableConflict,
+} from './prisma-exception.filter';
 
 /**
  * The single global exception filter (ADR-0031).
@@ -30,7 +34,24 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
   }
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    if (this.httpStatusOf(exception) >= 500) {
+    if (
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      isRetryableConflict(exception)
+    ) {
+      // A 503 the client retries (#1696). A deadlock still means two writes took locks in different orders, a
+      // lock-order bug (ADR-0023), so it stays an error; a serialization failure is expected contention.
+      if (driverCode(exception) === '40001') {
+        this.logger.warn(
+          { err: exception },
+          'Transaction serialization failure',
+        );
+      } else {
+        this.logger.error(
+          { err: exception },
+          'Transaction deadlock: two writes took row locks in different orders',
+        );
+      }
+    } else if (this.httpStatusOf(exception) >= 500) {
       this.logger.error({ err: exception }, 'Unhandled server error');
     }
 
@@ -49,6 +70,7 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
   private httpStatusOf(exception: unknown): number {
     if (exception instanceof HttpException) return exception.getStatus();
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      if (isRetryableConflict(exception)) return 503;
       switch (exception.code) {
         case 'P2002':
           return 409;

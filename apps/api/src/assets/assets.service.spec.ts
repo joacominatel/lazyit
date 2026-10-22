@@ -258,8 +258,11 @@ describe('AssetsService', () => {
     location: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
-  // The live-location check on writes (#1476): live by default; a test archives one by answering null.
+  // The bulk receive's upfront live-location check (#1476): live by default; a test archives one by answering null.
   let location: { findFirst: jest.Mock };
+  // Locations the writes' `FOR SHARE` lock (#1604) finds archived; every other id is live.
+  let archivedLocations: Set<string>;
+  let txQueryRaw: jest.Mock;
   let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -286,9 +289,17 @@ describe('AssetsService', () => {
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
     location = { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) };
     Object.defineProperty(txClient, 'location', { value: location });
-    Object.defineProperty(txClient, '$queryRaw', {
-      value: jest.fn().mockResolvedValue([]),
-    });
+    archivedLocations = new Set();
+    txQueryRaw = jest.fn(
+      (strings: TemplateStringsArray, ...values: unknown[]) =>
+        Promise.resolve(
+          strings.join('?').includes('FROM "locations"') &&
+            !archivedLocations.has(values[0] as string)
+            ? [{ id: values[0] }]
+            : [],
+        ),
+    );
+    Object.defineProperty(txClient, '$queryRaw', { value: txQueryRaw });
     // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
     prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
@@ -2192,9 +2203,18 @@ describe('AssetsService', () => {
     expect(history.record).not.toHaveBeenCalled();
   });
 
+  // The location ids the writes locked FOR SHARE (#1604), in call order.
+  const lockedLocations = () =>
+    (txQueryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][])
+      .filter(([strings]) => {
+        const sql = strings.join('?');
+        return sql.includes('FROM "locations"') && sql.includes('FOR SHARE');
+      })
+      .map(([, id]) => id);
+
   describe('archived references are refused on write (#1476 review)', () => {
     it('create into an archived location is a 400 — nothing written', async () => {
-      location.findFirst.mockResolvedValue(null);
+      archivedLocations.add('l9');
       await expect(
         service.create({
           name: 'SRV-02',
@@ -2202,10 +2222,7 @@ describe('AssetsService', () => {
           locationId: 'l9',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(location.findFirst).toHaveBeenCalledWith({
-        where: { id: 'l9', deletedAt: null },
-        select: { id: true },
-      });
+      expect(lockedLocations()).toEqual(['l9']);
       expect(tx.create).not.toHaveBeenCalled();
     });
 
@@ -2227,7 +2244,7 @@ describe('AssetsService', () => {
       asset.findFirst.mockResolvedValue(
         beforeRow({ locationId: 'l1', modelId: 'm1' }),
       );
-      location.findFirst.mockResolvedValue(null);
+      archivedLocations.add('l9');
       await expect(
         service.update('a1', { locationId: 'l9' }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -2238,6 +2255,7 @@ describe('AssetsService', () => {
       expect(tx.update).not.toHaveBeenCalled();
 
       // The same (now archived) location and model re-sent by an edit form: no check, the edit goes through.
+      archivedLocations.add('l1');
       location.findFirst.mockClear();
       txAssetModel.findFirst.mockClear();
       tx.update.mockResolvedValue(
@@ -2251,6 +2269,109 @@ describe('AssetsService', () => {
       expect(location.findFirst).not.toHaveBeenCalled();
       expect(txAssetModel.findFirst).not.toHaveBeenCalled();
       expect(tx.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // A location delete locks the location FOR UPDATE before it scans its assets; these writes hold it FOR SHARE
+  // until they commit, so the check and the write cannot be split by the delete (#1604).
+  describe('the location a write names is locked FOR SHARE (#1604)', () => {
+    const sqlOf = (call: unknown[]) =>
+      (call[0] as TemplateStringsArray).join('?');
+
+    it('create locks the location, with its liveness in the locking statement, before inserting', async () => {
+      tx.create.mockResolvedValue({ id: 'a1', name: 'SRV', locationId: 'l1' });
+
+      await service.create({
+        name: 'SRV',
+        status: 'IN_STORAGE',
+        locationId: 'l1',
+      });
+
+      expect(lockedLocations()).toEqual(['l1']);
+      const lock = txQueryRaw.mock.calls.findIndex((c: unknown[]) =>
+        sqlOf(c).includes('FROM "locations"'),
+      );
+      expect(sqlOf(txQueryRaw.mock.calls[lock] as unknown[])).toMatch(
+        /"deletedAt" IS NULL[\s\S]*FOR SHARE/,
+      );
+      expect(txQueryRaw.mock.invocationCallOrder[lock]).toBeLessThan(
+        tx.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create takes no location lock when no location is named', async () => {
+      tx.create.mockResolvedValue({ id: 'a1', name: 'SRV' });
+
+      await service.create({ name: 'SRV', status: 'IN_STORAGE' });
+
+      expect(lockedLocations()).toEqual([]);
+    });
+
+    it('a receive whose location was archived after the upfront check is refused per unit under the lock — nothing created', async () => {
+      // The upfront (unlocked) read still saw it live; the delete committed before the unit took its lock.
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'Dock' });
+      txAssetModel.findFirst.mockResolvedValue({ specs: null });
+      archivedLocations.add('l1');
+
+      const result = await service.receiveBatch(
+        { modelId: 'm1', quantity: 2, status: 'IN_STORAGE', locationId: 'l1' },
+        HUMAN_PRINCIPAL,
+      );
+
+      expect(result.created).toEqual([]);
+      expect(result.failed).toEqual([
+        { index: 0, error: 'Location l1 not found (missing or archived)' },
+        { index: 1, error: 'Location l1 not found (missing or archived)' },
+      ]);
+      expect(lockedLocations()).toEqual(['l1', 'l1']);
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('a move locks the target location before the asset row, so it never waits for a parent while holding the asset', async () => {
+      asset.findFirst.mockResolvedValue(beforeRow({ locationId: 'l1' }));
+      tx.update.mockResolvedValue(beforeRow({ locationId: 'l2' }));
+
+      await service.update('a1', { locationId: 'l2' });
+
+      const sqls = (txQueryRaw.mock.calls as unknown[][]).map(sqlOf);
+      const locationLock = sqls.findIndex((q) =>
+        q.includes('FROM "locations"'),
+      );
+      const assetLock = sqls.findIndex((q) => q.includes('FROM "assets"'));
+      expect(locationLock).toBeGreaterThanOrEqual(0);
+      expect(locationLock).toBeLessThan(assetLock);
+      expect(lockedLocations()).toEqual(['l2']);
+      expect(tx.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('a move into a location archived while the write waited on the lock is a 400 — nothing written', async () => {
+      asset.findFirst.mockResolvedValue(beforeRow({ locationId: 'l1' }));
+      archivedLocations.add('l2');
+
+      await expect(
+        service.update('a1', { locationId: 'l2' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('an edit that leaves an archived location unchanged still goes through (write-only rule)', async () => {
+      asset.findFirst.mockResolvedValue(beforeRow({ locationId: 'l1' }));
+      archivedLocations.add('l1');
+      tx.update.mockResolvedValue(beforeRow({ locationId: 'l1' }));
+
+      await service.update('a1', { locationId: 'l1', name: 'renamed' });
+
+      expect(tx.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('an edit that names no location takes no location lock', async () => {
+      asset.findFirst.mockResolvedValue(beforeRow({ locationId: 'l1' }));
+      tx.update.mockResolvedValue(beforeRow({ name: 'renamed' }));
+
+      await service.update('a1', { name: 'renamed' });
+
+      expect(lockedLocations()).toEqual([]);
     });
   });
 });

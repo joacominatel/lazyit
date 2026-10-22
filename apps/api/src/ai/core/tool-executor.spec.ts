@@ -252,6 +252,29 @@ describe('AiToolExecutor', () => {
       'Invalid input format for one or more fields',
     ],
     [prismaError('P1001'), 'INTERNAL', 500, 'The tool failed unexpectedly.'],
+    // A lost lock race (#1696): nothing saved, a retry should pass — never a 500.
+    [
+      prismaError('P2034'),
+      'CONFLICT',
+      409,
+      'This change ran into another one at the same moment and was not saved. Try again.',
+    ],
+    [
+      Object.assign(prismaError('P2010'), {
+        meta: { driverAdapterError: { cause: { originalCode: '40P01' } } },
+      }),
+      'CONFLICT',
+      409,
+      'This change ran into another one at the same moment and was not saved. Try again.',
+    ],
+    [
+      Object.assign(prismaError('P2010'), {
+        meta: { driverAdapterError: { cause: { originalCode: '42601' } } },
+      }),
+      'INTERNAL',
+      500,
+      'The tool failed unexpectedly.',
+    ],
     [
       new Error('connection string postgres://user:pw@db'),
       'INTERNAL',
