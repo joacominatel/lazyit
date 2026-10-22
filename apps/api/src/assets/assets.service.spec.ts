@@ -2,11 +2,15 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { AssetsService } from './assets.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import {
+  ASSET_OWNER_USER_SELECT,
+  PUBLIC_USER_SELECT,
+} from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
@@ -109,6 +113,26 @@ const EXPECTED_INCLUDE = {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
     include: { user: { select: PUBLIC_USER_SELECT } },
+  },
+};
+
+// The same relations for a caller WITHOUT user:read (#1685): each owner is only id, name, email and
+// deletedAt — no role, legajo, username or directoryAttrs.
+const EXPECTED_INCLUDE_OWNER_ONLY = {
+  ...EXPECTED_INCLUDE,
+  assignments: {
+    ...EXPECTED_INCLUDE.assignments,
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          deletedAt: true,
+        },
+      },
+    },
   },
 };
 
@@ -245,6 +269,7 @@ const beforeRow = (overrides: Record<string, unknown> = {}) => ({
 
 describe('AssetsService', () => {
   let service: AssetsService;
+  let permissions: { principalHas: jest.Mock };
   let asset: PrismaAssetMock;
   let tx: TxAssetMock;
   let txAssetModel: TxAssetModelMock;
@@ -327,6 +352,7 @@ describe('AssetsService', () => {
     }).compile();
 
     service = moduleRef.get(AssetsService);
+    permissions = moduleRef.get(PermissionResolverService);
   });
 
   // --- create -------------------------------------------------------------
@@ -718,14 +744,96 @@ describe('AssetsService', () => {
   });
 
   // --- findOne (expanded) -------------------------------------------------
-  it('findOne queries with the relations include + soft-delete filter', async () => {
+  it('findOne queries with the relations include + soft-delete filter (caller holding user:read)', async () => {
+    permissions.principalHas.mockResolvedValue(true);
+    asset.findFirst.mockResolvedValue(rawRow());
+
+    await service.findOne('a1', HUMAN_PRINCIPAL);
+
+    expect(permissions.principalHas).toHaveBeenCalledWith(
+      HUMAN_PRINCIPAL,
+      'user:read',
+    );
+    expect(asset.findFirst).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      include: EXPECTED_INCLUDE,
+    });
+  });
+
+  // #1685: an owner's directory columns need user:read; without it the owner is the inventory record only.
+  it('findOne selects only id, name, email and deletedAt of each owner without user:read (VIEWER)', async () => {
+    permissions.principalHas.mockResolvedValue(false);
+    asset.findFirst.mockResolvedValue(rawRow());
+
+    await service.findOne('a1', HUMAN_PRINCIPAL);
+
+    expect(asset.findFirst).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      include: EXPECTED_INCLUDE_OWNER_ONLY,
+    });
+    expect(ASSET_OWNER_USER_SELECT).toEqual(
+      EXPECTED_INCLUDE_OWNER_ONLY.assignments.include.user.select,
+    );
+    for (const col of [
+      'role',
+      'legajo',
+      'username',
+      'directoryAttrs',
+      'externalId',
+    ]) {
+      expect(ASSET_OWNER_USER_SELECT).not.toHaveProperty(col);
+    }
+  });
+
+  it('findOne with no principal is fail-closed: the trimmed owner', async () => {
     asset.findFirst.mockResolvedValue(rawRow());
 
     await service.findOne('a1');
 
     expect(asset.findFirst).toHaveBeenCalledWith({
       where: { id: 'a1' },
+      include: EXPECTED_INCLUDE_OWNER_ONLY,
+    });
+  });
+
+  it('restore returns the expanded view projected for the restoring caller (#1685)', async () => {
+    permissions.principalHas.mockResolvedValue(true);
+    asset.findFirst
+      .mockResolvedValueOnce({ id: 'a1', deletedAt: null })
+      .mockResolvedValueOnce(rawRow());
+
+    await service.restore('a1', HUMAN_PRINCIPAL);
+
+    expect(asset.findFirst).toHaveBeenLastCalledWith({
+      where: { id: 'a1' },
       include: EXPECTED_INCLUDE,
+    });
+  });
+
+  describe('authorizePersonFilter (#1685)', () => {
+    it('403s a caller without user:read (VIEWER) that filters by person', async () => {
+      permissions.principalHas.mockResolvedValue(false);
+      await expect(
+        service.authorizePersonFilter(ACTOR_ID, HUMAN_PRINCIPAL),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(permissions.principalHas).toHaveBeenCalledWith(
+        HUMAN_PRINCIPAL,
+        'user:read',
+      );
+    });
+
+    it('lets a caller holding user:read (MEMBER / ADMIN) filter by person', async () => {
+      permissions.principalHas.mockResolvedValue(true);
+      await expect(
+        service.authorizePersonFilter(ACTOR_ID, HUMAN_PRINCIPAL),
+      ).resolves.toBeUndefined();
+    });
+
+    it('asks nothing when no person filter is given', async () => {
+      await expect(
+        service.authorizePersonFilter(undefined, HUMAN_PRINCIPAL),
+      ).resolves.toBeUndefined();
+      expect(permissions.principalHas).not.toHaveBeenCalled();
     });
   });
 

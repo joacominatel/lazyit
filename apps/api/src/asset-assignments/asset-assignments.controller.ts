@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -31,11 +32,15 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import type { Principal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 @ApiTags('asset-assignments')
 @Controller('asset-assignments')
 export class AssetAssignmentsController {
-  constructor(private readonly assignments: AssetAssignmentsService) {}
+  constructor(
+    private readonly assignments: AssetAssignmentsService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
   @Get()
   @RequirePermission('asset:read')
@@ -44,7 +49,12 @@ export class AssetAssignmentsController {
       'List assignments; filter by assetId / userId. Active-only by default.',
   })
   @ApiQuery({ name: 'assetId', required: false })
-  @ApiQuery({ name: 'userId', required: false })
+  @ApiQuery({
+    name: 'userId',
+    required: false,
+    description:
+      'Needs user:read (403 otherwise, #1685): listing a named person’s assignments is a directory lookup.',
+  })
   @ApiQuery({
     name: 'activeOnly',
     required: false,
@@ -52,14 +62,26 @@ export class AssetAssignmentsController {
     description: 'Default true. Pass false to include released assignments.',
   })
   @ApiOkResponse({ type: [AssetAssignmentDto] })
-  findAll(
+  async findAll(
     @Query('assetId') assetId?: string,
     @Query('userId') userId?: string,
     @Query('activeOnly') activeOnly?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
+    const parsedUserId = parseUuidQuery(userId, 'userId');
+    // Filtering by a person is directory-relational, like GET /users/:id/assignments: asset:read alone
+    // does not grant it (#1685). The id is validated first, so a malformed one stays a 400.
+    if (
+      parsedUserId !== undefined &&
+      !(await this.permissions.principalHas(principal, 'user:read'))
+    ) {
+      throw new ForbiddenException(
+        'Filtering assignments by person needs user:read',
+      );
+    }
     return this.assignments.findAll({
       assetId: parseCuidQuery(assetId, 'assetId'),
-      userId: parseUuidQuery(userId, 'userId'),
+      userId: parsedUserId,
       activeOnly: parseBooleanQuery(activeOnly, true),
     });
   }

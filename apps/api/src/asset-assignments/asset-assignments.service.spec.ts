@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { AssetAssignmentsService } from './asset-assignments.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import {
+  ASSET_OWNER_USER_SELECT,
+  PUBLIC_USER_SELECT,
+} from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -305,7 +308,20 @@ describe('AssetAssignmentsService', () => {
     });
   });
 
-  it('findAll inlines the user only when includeUser is true', async () => {
+  it('findAll inlines the user only when includeUser is true — the full public columns with fullUser (user:read)', async () => {
+    assetAssignment.findMany.mockResolvedValue([]);
+
+    await service.findAll({ assetId: 'a1', includeUser: true, fullUser: true });
+
+    expect(assetAssignment.findMany).toHaveBeenCalledWith({
+      where: { assetId: 'a1', releasedAt: null },
+      orderBy: { assignedAt: 'desc' },
+      include: { user: { select: PUBLIC_USER_SELECT } },
+    });
+  });
+
+  // #1685: without user:read the owner is id, name, email and deletedAt only — and that is the default.
+  it('findAll inlines only the owner identity by default (no user:read: role, legajo, username, directoryAttrs withheld)', async () => {
     assetAssignment.findMany.mockResolvedValue([]);
 
     await service.findAll({ assetId: 'a1', includeUser: true });
@@ -313,8 +329,21 @@ describe('AssetAssignmentsService', () => {
     expect(assetAssignment.findMany).toHaveBeenCalledWith({
       where: { assetId: 'a1', releasedAt: null },
       orderBy: { assignedAt: 'desc' },
-      include: { user: { select: PUBLIC_USER_SELECT } },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            deletedAt: true,
+          },
+        },
+      },
     });
+    for (const col of ['role', 'legajo', 'username', 'directoryAttrs']) {
+      expect(ASSET_OWNER_USER_SELECT).not.toHaveProperty(col);
+    }
   });
 
   it('findAll never inlines a credential column of the owner (SEC-085)', async () => {

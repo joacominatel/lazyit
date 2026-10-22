@@ -144,7 +144,7 @@ export class AssetsController {
     name: 'assignedToUserId',
     required: false,
     description:
-      'Restrict to assets currently assigned (live, releasedAt null) to this user (a User uuid). Invalid uuid → 400.',
+      'Restrict to assets currently assigned (live, releasedAt null) to this user (a User uuid). Needs user:read (403 otherwise, #1685). Invalid uuid → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -298,6 +298,13 @@ export class AssetsController {
         acquiredTo,
       }),
     };
+    // Listing a named person's assets is directory-relational: it needs user:read (#1685).
+    if (filters.assignedToUserId !== undefined) {
+      await this.assets.authorizePersonFilter(
+        filters.assignedToUserId,
+        principal,
+      );
+    }
     filters.purchase = await this.parsePurchaseFilters(
       { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
       principal,
@@ -449,7 +456,11 @@ export class AssetsController {
   })
   @ApiQuery({ name: 'statusLabelId', required: false })
   @ApiQuery({ name: 'q', required: false })
-  @ApiQuery({ name: 'assignedToUserId', required: false })
+  @ApiQuery({
+    name: 'assignedToUserId',
+    required: false,
+    description: 'Needs user:read (403 otherwise, #1685).',
+  })
   @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
   @ApiQuery({
     name: 'warranty',
@@ -529,6 +540,13 @@ export class AssetsController {
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
+    // The same by-person gate as the list (#1685).
+    if (filters.assignedToUserId !== undefined) {
+      await this.assets.authorizePersonFilter(
+        filters.assignedToUserId,
+        principal,
+      );
+    }
     filters.purchase = await this.parsePurchaseFilters(
       { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
       principal,
@@ -603,18 +621,19 @@ export class AssetsController {
   @Get(':id')
   @RequirePermission('asset:read')
   @ApiOperation({
-    summary: 'Get an asset by id (expanded with its relations)',
+    summary:
+      "Get an asset by id (expanded with its relations). Each active owner carries id, name, email and deletedAt; the owner's other user fields (role, legajo, username, directoryAttrs, …) only with user:read (#1685).",
   })
   @ApiOkResponse({ type: AssetWithRelationsDto })
-  findOne(@Param('id') id: string) {
-    return this.assets.findOne(id);
+  findOne(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.assets.findOne(id, principal);
   }
 
   @Get(':id/assignments')
   @RequirePermission('asset:read')
   @ApiOperation({
     summary:
-      "List an asset's ownership assignments, each with its user (active-only by default)",
+      "List an asset's ownership assignments, each with its user (active-only by default). The user carries id, name, email and deletedAt; its other fields only with user:read (#1685).",
   })
   @ApiQuery({
     name: 'activeOnly',
@@ -626,12 +645,15 @@ export class AssetsController {
   async findAssignments(
     @Param('id') id: string,
     @Query('activeOnly') activeOnly?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.assignments.findAll({
       assetId: id,
       activeOnly: parseBooleanQuery(activeOnly, true),
       includeUser: true,
+      // The owner's directory columns only for a caller holding user:read (#1685).
+      fullUser: await this.assets.canReadOwnerDetails(principal),
     });
   }
 
