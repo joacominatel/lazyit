@@ -101,6 +101,7 @@ describe('AccessRequestsService', () => {
     accessRequest: AccessRequestMock;
   } & Record<string, unknown>;
   let grants: { createWithinApproval: jest.Mock; provisioningFor: jest.Mock };
+  let accessGrant: { findMany: jest.Mock };
   let notifications: { emit: jest.Mock };
 
   beforeEach(async () => {
@@ -114,10 +115,17 @@ describe('AccessRequestsService', () => {
     };
     application = { findFirst: jest.fn(), findUnique: jest.fn() };
     user = { findUnique: jest.fn(), findFirst: jest.fn() };
+    // The active-grant filter of findMine (#1700): by default every asked grant is still active.
+    accessGrant = {
+      findMany: jest.fn(({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id }))),
+      ),
+    };
     prisma = {
       accessRequest,
       application,
       user,
+      accessGrant,
       // findPage uses the array form; the mock awaits each query in the tuple.
       $transaction: jest.fn(
         (arg: Array<Promise<unknown>> | ((tx: unknown) => unknown)) =>
@@ -669,6 +677,7 @@ describe('AccessRequestsService', () => {
         offset: 0,
       } as never);
 
+      expect(accessGrant.findMany).toHaveBeenCalledTimes(1);
       expect(grants.provisioningFor).toHaveBeenCalledTimes(1);
       expect(grants.provisioningFor).toHaveBeenCalledWith(['g1', 'g3']);
       expect(page.items.map((r) => [r.id, r.provisioning] as const)).toEqual([
@@ -677,6 +686,47 @@ describe('AccessRequestsService', () => {
         ['r3', 'WAITING_ON_IT'],
         ['r4', null],
       ]);
+    });
+
+    it('shows no provisioning for an approved request whose grant was revoked since (#1700)', async () => {
+      accessRequest.findMany.mockResolvedValue([
+        { id: 'r1', status: 'APPROVED', grantId: 'g1' },
+        { id: 'r2', status: 'APPROVED', grantId: 'g2' },
+      ]);
+      accessRequest.count.mockResolvedValue(2);
+      // g2 was revoked (by hand or by the expiry sweep): only g1 is still active.
+      accessGrant.findMany.mockResolvedValue([{ id: 'g1' }]);
+      grants.provisioningFor.mockResolvedValue(new Map([['g1', 'DONE']]));
+
+      const page = await service.findMine(REQUESTER, {
+        limit: 50,
+        offset: 0,
+      } as never);
+
+      expect(accessGrant.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['g1', 'g2'] }, revokedAt: null },
+        select: { id: true },
+      });
+      expect(grants.provisioningFor).toHaveBeenCalledWith(['g1']);
+      expect(page.items.map((r) => [r.id, r.provisioning] as const)).toEqual([
+        ['r1', 'DONE'],
+        ['r2', null],
+      ]);
+    });
+
+    it('skips the active-grant read when no request on the page has a grant', async () => {
+      accessRequest.findMany.mockResolvedValue([
+        { id: 'r1', status: 'PENDING', grantId: null },
+      ]);
+      accessRequest.count.mockResolvedValue(1);
+
+      const page = await service.findMine(REQUESTER, {
+        limit: 50,
+        offset: 0,
+      } as never);
+
+      expect(accessGrant.findMany).not.toHaveBeenCalled();
+      expect(page.items[0].provisioning).toBeNull();
     });
 
     it('leaves the estate-wide list without provisioning (admin route unchanged)', async () => {

@@ -137,16 +137,28 @@ export class AccessRequestsService {
    * The caller's OWN requests (`GET /access-requests/mine`) — the self-scope carve-out (ADR-0085): any
    * authenticated human sees their own requests, PENDING and decided, regardless of `accessRequest:read`.
    * Scoped strictly to `requesterId == caller` so it can never leak another user's requests. Each
-   * request carries the coarse `provisioning` status of the grant its approval created (#1700).
+   * request carries the coarse `provisioning` status of the grant its approval created, while that grant
+   * is active (#1700).
    */
   async findMine(requesterId: string, page: PageQuery) {
     const result = await this.findPage({ requesterId }, page);
-    // The coarse provisioning status of each approved request's grant (#1700), in ONE batched read of
-    // the linked runs; null where there is no grant (PENDING, DENIED). No workflow detail.
+    // The coarse provisioning status of each approved request's grant (#1700), while that grant is
+    // still ACTIVE: one batched read keeps the not-revoked grants (a revoke, manual or the expiry sweep,
+    // ends what the status describes), then ONE batched read of their runs. null where there is no grant
+    // (PENDING, DENIED) or it was revoked since. No workflow detail.
     const grantIds = result.items
       .map((request) => request.grantId)
       .filter((id): id is string => id !== null);
-    const provisioning = await this.grants.provisioningFor(grantIds);
+    const activeGrantIds =
+      grantIds.length === 0
+        ? []
+        : (
+            await this.prisma.accessGrant.findMany({
+              where: { id: { in: grantIds }, revokedAt: null },
+              select: { id: true },
+            })
+          ).map((grant) => grant.id);
+    const provisioning = await this.grants.provisioningFor(activeGrantIds);
     return {
       ...result,
       items: result.items.map((request) => ({
@@ -154,7 +166,7 @@ export class AccessRequestsService {
         provisioning:
           request.grantId === null
             ? null
-            : (provisioning.get(request.grantId) ?? 'NONE'),
+            : (provisioning.get(request.grantId) ?? null),
       })),
     };
   }
