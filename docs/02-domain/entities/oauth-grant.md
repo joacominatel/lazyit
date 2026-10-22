@@ -3,7 +3,7 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # OAuthGrant
@@ -20,12 +20,15 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
 ## Business rules
 
 - **Soft delete = revoked** ([[0006-soft-delete-and-auditing]], [[0032-soft-delete-middleware]]).
-  `revokeReason`: `user` \| `admin` \| `refresh_reuse` \| `revocation_endpoint` \| `client_deleted`.
+  `revokeReason`: `user` \| `admin` \| `refresh_reuse` \| `revocation_endpoint` \| `client_deleted` \|
+  `token_exposed` \| `code_replay`.
   The model is in `SOFT_DELETABLE_MODELS` (the soft-delete extension), so reads hide revoked grants;
   relation reads (a token's `grant`) check `deletedAt` explicitly. Revoking hard-deletes the grant's
   token rows in the same transaction and writes `GRANT_REVOKED` (or `PERSONAL_TOKEN_REVOKED`).
 - **Who revokes**: the owner (`user`), an admin holding `settings:manage` (`admin`), refresh-token reuse
-  (`refresh_reuse`), or the client through RFC 7009 (`revocation_endpoint`).
+  (`refresh_reuse`), a token seen in a `/mcp` query string (`token_exposed`), an otherwise valid replay of
+  the authorization code that produced the grant (`code_replay`, #1683), or the client through RFC 7009
+  (`revocation_endpoint`).
 - **Scopes are exactly what the user ticked** at consent (a subset of the request); a refresh never
   changes them. The scope hierarchy (`write` ⊇ `read`) is applied when tools are listed.
 - **Dies with the user's MCP-credential epoch**: `mcpCredentialEpoch` is a snapshot of
@@ -77,7 +80,12 @@ Both store **only a SHA-256 hash** and are credential material, not domain data 
 hard-deletes them (the `PasswordResetToken` precedent).
 
 - **`OAuthAuthorizationCode`** → `oauth_authorization_codes`: single use, 60 s, bound to the user,
-  client, redirect, PKCE challenge, scopes and resource. FK → [[oauth-client]] (`Cascade`).
+  client, redirect, PKCE challenge, scopes and resource. FK → [[oauth-client]] (`Cascade`). Since #1683:
+  `mcpCredentialEpoch int?` — the user's epoch at consent; the exchange is refused when it moved — and
+  `grantId cuid?` (unique, FK → grant, `SetNull`) — the grant the code produced; an otherwise valid replay
+  of the code revokes it (`revokeReason: code_replay`). Both are null on codes issued before the
+  migration, which skip the epoch check and are only refused on replay until they expire. The sweeper
+  collects a code 15 minutes past its expiry, used or not, so a replay is still recognized.
 - **`OAuthToken`** → `oauth_tokens`: `kind` `access` (`lzit_oat_`, 1 h) \| `refresh` (`lzit_ort_`,
   30 days from last use, rotated on every use — reuse outside a 30 s grace window revokes the grant) \|
   `personal` (`lzit_pat_`). FK → grant (`Cascade`). Accepted only on `/mcp`.
@@ -86,7 +94,7 @@ hard-deletes them (the `PasswordResetToken` precedent).
 
 Prisma model `OAuthAuditLog` → table `oauth_audit_log`. The append-only security trail of the
 authorization server (ADR-0081 source `oauth`): client registered, grant created, consent denied, grant
-revoked, refresh reuse detected, personal token created or revoked. Plain ids, so rows outlive the
+revoked, refresh reuse detected, authorization-code reuse detected, personal token created or revoked. Plain ids, so rows outlive the
 clients, grants and users they mention. Never records a secret.
 
 Related: [[oauth-client]] · [[user]] · [[ai-tool-invocation]] · [[0097-ai-assistant-mcp-and-headless-api]]

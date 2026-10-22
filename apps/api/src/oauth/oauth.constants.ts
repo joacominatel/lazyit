@@ -7,6 +7,12 @@
 /** Authorization codes are single-use and live 60 seconds (INV-AI-9). */
 export const AUTHORIZATION_CODE_TTL_MS = 60 * 1000;
 
+/**
+ * How long the sweeper keeps a code row past its expiry (#1683). A redeemed row is what recognizes a
+ * replay — and revokes the grant it produced — so it is kept a while instead of collected at the next pass.
+ */
+export const AUTHORIZATION_CODE_RETENTION_MS = 15 * 60 * 1000;
+
 /** Access tokens (`lzit_oat_`) live one hour. */
 export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 
@@ -38,10 +44,14 @@ export const DCR_MAX_REDIRECT_URIS = 10;
 export const DCR_UNNAMED_CLIENT = 'Unnamed client';
 
 /**
- * Global cap on dynamically registered clients created in the last 24 h that never obtained a grant.
- * Past it, registration answers 429 until the sweeper collects the unused ones (DCR abuse, security §6.3).
+ * Global cap on dynamically registered clients created in the last 24 h that never obtained a grant. At
+ * it, a new registration evicts the oldest UNUSED pending one (no grant, no authorization code) and
+ * answers 429 only when none is evictable (DCR abuse, security §6.3; #1683).
  */
 export const DCR_MAX_PENDING_REGISTRATIONS = 500;
+
+/** How many times one registration retries the eviction when a concurrent one took the same row. */
+export const DCR_EVICTION_ATTEMPTS = 3;
 
 /** Unused DCR clients (never exchanged a code, no grant) are hard-deleted after this long. */
 export const DCR_UNUSED_CLIENT_TTL_MS = 24 * 60 * 60 * 1000;

@@ -1,4 +1,17 @@
-import { FixedWindowRateLimiter } from './oauth-rate-limit';
+import type { ExecutionContext } from '@nestjs/common';
+import {
+  FixedWindowRateLimiter,
+  RegisterRateLimitGuard,
+  TokenRateLimitGuard,
+  registrationRateKey,
+} from './oauth-rate-limit';
+import { REGISTER_RATE_LIMIT } from './oauth.constants';
+
+function contextFor(ip: string): ExecutionContext {
+  return {
+    switchToHttp: () => ({ getRequest: () => ({ ip }) }),
+  } as unknown as ExecutionContext;
+}
 
 describe('FixedWindowRateLimiter', () => {
   it('reports exhaustion without counting, and forgets old windows', () => {
@@ -40,5 +53,64 @@ describe('FixedWindowRateLimiter', () => {
     limiter.hit('b', 0);
     expect(limiter.hit('b', 100)).toBe(true);
     expect(limiter.hit('a', 100)).toBe(false);
+  });
+});
+
+describe('registrationRateKey — DCR keyed per IPv4 address or per IPv6 /64 (#1683)', () => {
+  it('keeps an IPv4 address as is', () => {
+    expect(registrationRateKey('203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('keys an IPv6 address on its /64, whatever its spelling', () => {
+    const key = '2001:db8:85a3:1::/64';
+    expect(registrationRateKey('2001:db8:85a3:1::1')).toBe(key);
+    expect(registrationRateKey('2001:0db8:85a3:0001:ffff:aaaa:bbbb:cccc')).toBe(
+      key,
+    );
+    expect(registrationRateKey('2001:DB8:85A3:1:0:0:0:2')).toBe(key);
+    expect(registrationRateKey('2001:db8:85a3:2::1')).toBe(
+      '2001:db8:85a3:2::/64',
+    );
+    expect(registrationRateKey('::1')).toBe('0:0:0:0::/64');
+    expect(registrationRateKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
+    expect(registrationRateKey('2001:db8::203.0.113.7')).toBe(
+      '2001:db8:0:0::/64',
+    );
+  });
+
+  it('keys an IPv4-mapped IPv6 address as the IPv4 it carries', () => {
+    expect(registrationRateKey('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    expect(registrationRateKey('::ffff:cb00:7107')).toBe('203.0.113.7');
+  });
+
+  it('returns anything that is not an IP unchanged', () => {
+    expect(registrationRateKey('unknown')).toBe('unknown');
+    expect(registrationRateKey('2001:db8::1::2')).toBe('2001:db8::1::2');
+  });
+});
+
+describe('RegisterRateLimitGuard (#1683)', () => {
+  it('counts every address of one IPv6 /64 against one budget', () => {
+    const guard = new RegisterRateLimitGuard();
+    for (let i = 0; i < REGISTER_RATE_LIMIT.max; i += 1) {
+      expect(guard.canActivate(contextFor(`2001:db8:1:2::${i + 1}`))).toBe(
+        true,
+      );
+    }
+    expect(() => guard.canActivate(contextFor('2001:db8:1:2:abcd::9'))).toThrow(
+      'Http Exception',
+    );
+    // Another /64 and an IPv4 caller are unaffected.
+    expect(guard.canActivate(contextFor('2001:db8:1:3::1'))).toBe(true);
+    expect(guard.canActivate(contextFor('203.0.113.7'))).toBe(true);
+  });
+
+  it('leaves the other per-IP guards on the full address', () => {
+    const guard = new TokenRateLimitGuard();
+    const limiter = (guard as unknown as { limiter: FixedWindowRateLimiter })
+      .limiter;
+    const hit = jest.spyOn(limiter, 'hit');
+    guard.canActivate(contextFor('2001:db8:1:2::1'));
+    expect(hit).toHaveBeenCalledWith('2001:db8:1:2::1');
   });
 });

@@ -87,7 +87,8 @@ const TOKEN_REFUSED = 'The access token is invalid, expired or revoked.';
  *
  * On success it sets `req.auth` (the SDK's `AuthInfo`, carrying the verified {@link McpCaller} — never
  * the bearer), `req.mcpCaller`, and `req.user` for a human (request-log attribution only); counts the
- * caller's request rate (429 past it); and announces a connection's first use to its owner
+ * caller's request rate, and a human's overall rate across all their connections (429 past either); and
+ * announces a connection's first use to its owner
  * ({@link McpConnectionNoticeService}).
  */
 @Injectable()
@@ -174,6 +175,12 @@ export class McpAuthGuard implements CanActivate {
 
     const { caller, expiresAt, user } = verified;
     if (!this.rateLimiter.request(caller.rateKey)) throw tooManyRequests();
+    if (
+      caller.userRateKey &&
+      !this.rateLimiter.userRequest(caller.userRateKey)
+    ) {
+      throw tooManyRequests();
+    }
     req.auth = toAuthInfo(caller, expiresAt);
     req.mcpCaller = caller;
     if (user) req.user = user;
@@ -212,6 +219,7 @@ export class McpAuthGuard implements CanActivate {
           grant: result.grant,
           ceiling: scopesToCeiling(result.grant.scopes),
           rateKey: `grant:${result.grant.id}`,
+          userRateKey: `user:${user.id}`,
         },
         expiresAt: result.expiresAt,
         user,
@@ -247,6 +255,7 @@ export class McpAuthGuard implements CanActivate {
           },
           ceiling: scopesToCeiling(result.grant.scopes),
           rateKey: `grant:${result.grant.id}`,
+          userRateKey: `user:${user.id}`,
         },
         expiresAt: result.expiresAt,
         user,

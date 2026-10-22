@@ -378,8 +378,9 @@ deferred by the CEO; the purchase's documents panel warns that the files are not
 after the app DB dump and under the same timestamp, with the dump's schedule and offsite hook and its own
 7-day retention
 ([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
-backup from the first run after an update. The documents panel's "not in the backup" notice is updated in the
-web app separately (#1690).
+backup from the first run after an update. The documents panel's notice now says the files are in the scheduled
+backup, unless an administrator has switched the attachments archive off (#1690); it is a quiet line, no longer a
+warning.
 
 ### 13. Phasing
 
@@ -401,6 +402,7 @@ selected assets" (2). They are **not built**; they are tracked as #1495 (sub-iss
 list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
 
 *Since built:* merging suppliers (2026-10-03, #1496) — see [[#Merge duplicate suppliers (2026-10-03, #1496)]].
+*Receive delivery* across lines (2026-10-21, #1497) — see [[#Decisions while building (Receive delivery, #1497)]].
 
 *Built since (2026-10-03, #1499):* **global search for purchases and suppliers**. Both are found in the ⌘K
 palette (a purchase also by its line descriptions) only by a principal holding `purchaseOrder:read` — D-A
@@ -1472,6 +1474,52 @@ the same gate (`purchaseOrder:write` and the extraction status `available`), the
 pipeline — a `DRAFT` holder purchase, the file attached, the review opened with `?read=1`. Nothing in §11 or in
 [[#Decisions while building (Phase 2 web, #1477)|Phase 2 web]] changes. Web only: no API, contract or CSP change.
 
+## Decisions while building (Receive delivery, #1497)
+
+The UX proposal's *Receive delivery* sheet (§6, persona question 8), scoped by the CEO on 2026-10-21 (#1495):
+web only, asset and consumable lines, shared delivery values, an inline model pick and an optional delivery-note
+photo. CTO decisions taken while building it, under D-D; none reopens a CEO decision.
+
+- **No new API: one request per line, through the existing routes.** An `ASSET` row posts
+  `…/lines/:lineId/receive` with exactly the single receive's body (`buildReceiveFromLinePayload` over the
+  line's prefill), a `CONSUMABLE` row posts `…/lines/:lineId/receive-stock { quantity }`. The rows run one after
+  the other, in line order, so each line keeps its own per-unit loop and asset-tag commits (§4,
+  [[0089-bulk-receiving-and-checkout-acknowledgement]]) and a delivery can partly succeed: the result reads per
+  line — received, partly received with the units that failed and why, or not received with the request's error.
+  Nothing is rolled back; a failed line is fixed and received again. Rejected: a batch route — a second write
+  path for the same units, and an all-or-nothing transaction that would contradict ADR-0089's partial success.
+- **Which lines.** One row per `ASSET` line when the viewer holds `purchaseOrder:write` + `asset:write`, and per
+  `CONSUMABLE` line with `purchaseOrder:write` + `consumable:write` — the routes' own checks — each only while it
+  has pending units, as the per-line *Receive*. License lines (applied, not received), *Other* lines and any kind
+  a newer build writes never appear. The rows are fixed when the sheet opens; each reads its line fresh.
+- **Every row starts at 0**, never at the pending count: a delivery is counted at the door, and a line left at 0
+  is not received (UX proposal §6). The serials box opens on an asset row once it counts a unit, and the count
+  then follows the serials (the stepper is locked while there are any), so a mismatch cannot be sent.
+- **One set of delivery values for every asset unit**: the purchase date (the invoice date, else the viewer's
+  today — never the order date), the status (*In storage*) and the location (the purchase's delivery location,
+  omitted from the body while unchanged so the API applies the purchase's own value). The warranty end is
+  recomputed from the shared date and each line's warranty months; cost, currency label and company come from
+  each line, as in the single receive. Per-line overrides beyond those three stay in the single-line form,
+  reached from the same header button. Consumable rows send only their count; the shared values do not apply.
+- **An unmapped line is not a dead end**, as in #1475 and #1476: an asset line without a model (with *+ New
+  model*) or a consumable line without a consumable asks for one in its row, and it is saved on the line (a
+  logged line update) just before that line is received.
+- **The delivery-note photo** is one optional file, checked on the client against the documents allowlist
+  (images and PDF only in the picker, so a phone offers its camera and hands over a JPEG) and uploaded **first**
+  through the purchase documents upload, with the type label *Delivery note* in the viewer's language (*Remito*
+  in Spanish) — the label is free text (§10). A failed upload never stops the units; the result says so.
+- **Scanning fills the row it was opened for.** *Scan* sits on each asset row and opens the `/assets/scan`
+  camera (`SerialScanner`) inline under it — one row at a time — so on a phone the line being scanned is the one
+  on screen. Rejected: one scanner for the sheet that follows the focused field — focus is lost as soon as the
+  camera's *Done* takes it.
+- **Entry points.** The purchase header's *Receive* is a split button (UX proposal §3.a): its main action opens
+  the sheet, its menu lists the receivable lines for the full single-line forms; it shows only when the viewer
+  can receive at least one line. On *Pending units*, each purchase's header row has *Receive delivery*. The sheet
+  reads the purchase itself, so both pass only its id.
+- **Over-receipt** is warned per row with *Raise the line to n*, as everywhere else (§4).
+- **Upgrade.** Web only: no migration, contract, permission or API change; existing purchases, lines and
+  documents are read as they are.
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1481,4 +1529,4 @@ pipeline — a `DRAFT` holder purchase, the file attached, the review opened wit
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1507 · #1508 · #1516
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1497 · #1507 · #1508 · #1516

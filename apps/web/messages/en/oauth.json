@@ -280,6 +280,10 @@
         "INVALID_REDIRECT": {
           "title": "This request can't be trusted",
           "body": "The app asked to send you to an address it didn't register. For your safety lazyit won't send you anywhere. Start the connection again from the app."
+        },
+        "CLIENT_METADATA_UNREACHABLE": {
+          "title": "lazyit couldn't reach this app's description",
+          "body": "This app identifies itself by a web address, and lazyit couldn't fetch the description published there right now. The server may have no internet access, the app's site may be down, or there were too many attempts in a short time. Wait a few minutes and start the connection again from the app; if it keeps happening, tell your administrator."
         }
       },
       "unavailable": {

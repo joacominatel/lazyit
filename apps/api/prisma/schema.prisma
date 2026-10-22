@@ -3747,7 +3747,10 @@ model OAuthGrant {
   /// Soft delete = revoked.
   deletedAt    DateTime?
 
-  tokens OAuthToken[]
+  tokens            OAuthToken[]
+  /// The authorization code this grant was issued from (oauth grants issued since #1683): a replay of
+  /// that code revokes the grant.
+  authorizationCode OAuthAuthorizationCode?
 
   @@index([userId])
   @@index([clientRefId])
@@ -3758,20 +3761,27 @@ model OAuthGrant {
 /// hard-deletes expired or used rows (the PasswordResetToken precedent).
 /// See docs/02-domain/entities/oauth-grant.md
 model OAuthAuthorizationCode {
-  id            String      @id @default(cuid())
+  id                 String      @id @default(cuid())
   /// SHA-256 hex of the code.
-  codeHash      String      @unique
-  userId        String      @db.Uuid
-  clientRefId   String
-  client        OAuthClient @relation(fields: [clientRefId], references: [id], onDelete: Cascade)
-  redirectUri   String
+  codeHash           String      @unique
+  userId             String      @db.Uuid
+  clientRefId        String
+  client             OAuthClient @relation(fields: [clientRefId], references: [id], onDelete: Cascade)
+  redirectUri        String
   /// The PKCE S256 challenge (plain is refused).
-  codeChallenge String
-  scopes        String[]
-  resource      String
-  expiresAt     DateTime
-  usedAt        DateTime?
-  createdAt     DateTime    @default(now())
+  codeChallenge      String
+  scopes             String[]
+  resource           String
+  expiresAt          DateTime
+  usedAt             DateTime?
+  /// Snapshot of User.mcpCredentialEpoch at consent (#1683): the exchange is refused when it moved. Null on
+  /// codes issued before the column existed — those skip the check until they expire (60 s).
+  mcpCredentialEpoch Int?
+  /// The grant this code produced, set in the exchange's transaction (#1683): a replayed code revokes it.
+  /// Null until redeemed, for a code burned by a failed exchange, and for codes issued before the column.
+  grantId            String?     @unique
+  grant              OAuthGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+  createdAt          DateTime    @default(now())
 
   @@index([clientRefId])
   @@index([expiresAt])

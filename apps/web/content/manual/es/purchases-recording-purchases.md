@@ -183,6 +183,39 @@ recuadro: deja solo el del número de serie. Y un código que no se lee siempre 
 La cámara necesita el permiso del navegador y una conexión segura (HTTPS). Sin cámara, o si niegas el
 acceso, el formulario lo dice y escribes o pegas los números de serie como siempre.
 
+### Recibir una entrega completa
+
+Cuando una entrega trae unidades de **varias líneas** — las notebooks y los docks en el mismo envío —,
+recíbela de una vez con **Recibir entrega**, la parte principal del botón **Recibir** arriba en la compra (su
+flecha lista las líneas una por una, para el formulario completo de una sola línea). En *Unidades
+pendientes*, cada compra tiene su propio botón **Recibir entrega**.
+
+La hoja tiene una fila por cada línea de **activo** o de **consumible** que todavía espera unidades y que
+puedes recibir — recibir activos requiere permiso para editar compras y activos, y recibir en stock, para
+editar compras y consumibles. Las líneas de licencia y *Otro* nunca aparecen.
+
+- Cada fila **empieza en 0**: cuenta lo que realmente llegó con **−** y **+** (o escribe el número). Las
+  filas que quedan en 0 no se reciben.
+- En una fila de activo con al menos una unidad se abre un cuadro de **Números de serie**. Como en una
+  recepción simple, la **cantidad sigue a los números de serie** que pegas o escaneas. **Escanear** abre la
+  cámara debajo de esa fila y completa **esa línea** — en el teléfono, escanea la línea en la que estás,
+  elige **Listo** y pasa a la siguiente.
+- Una línea **sin modelo** (o una línea de consumible sin consumible) te pide uno en su fila; se guarda en la
+  línea antes de recibir sus unidades, así la próxima entrega ya lo tiene.
+- **Todas las unidades de esta entrega** fija los valores que comparten todos los activos: la **fecha de
+  compra** (la fecha de factura, u hoy si no tiene), el **estado** (*En depósito*) y la **ubicación** (donde
+  se entrega la compra). El costo, la empresa y la garantía salen de cada línea, igual que al recibir una
+  sola línea, y el fin de garantía sigue a la fecha que elijas. Las líneas de consumibles solo suman su
+  cantidad al stock.
+- **Foto del remito** es opcional. En el teléfono ofrece la cámara; la foto (o un PDF) se agrega a los
+  [documentos](#documentos) de la compra con el tipo *Remito*.
+
+**Recibir** recibe entonces cada línea **por separado**, una después de otra, así que una entrega puede
+salir **en parte**. El resultado muestra cada línea: las unidades recibidas, las que no se pudieron crear y
+por qué, o que la línea no se recibió (por ejemplo, si cambió mientras tanto) — corrige esa línea y vuelve a
+recibirla; nada más se deshace. Recibir más de lo que una línea espera muestra en su fila el aviso de
+siempre y la opción **Subir la línea**.
+
 ## Recibir en stock
 
 Una línea de **consumible** se recibe en el stock de su consumible, no como activos. Elige **Recibir** en la
@@ -319,7 +352,8 @@ Cada línea muestra "x de y recibidas" y lo que sigue pendiente, con **Recibir**
 activos existentes** y **Cancelar unidades restantes**. En una línea de consumible, **Recibir** abre
 [Recibir en stock](#recibir-en-stock), y no hay nada que vincular. Una línea de licencia ofrece
 [Aplicar licencia](#aplicar-una-licencia) en su lugar. Una compra cuya **entrega prevista** ya pasó se
-marca como **Atrasada**.
+marca como **Atrasada**. **Recibir entrega**, en una compra, recibe varias de sus líneas a la vez — mira
+[Recibir una entrega completa](#recibir-una-entrega-completa).
 
 **Exportar CSV**, en la pestaña, descarga todas las líneas pendientes, filtradas por proveedor si hay uno
 elegido — mira [Exportar datos](/help/notifications-activity-data-export).

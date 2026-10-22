@@ -26,6 +26,8 @@ import { McpServerFactory, advertisedSchema } from './mcp-server.factory';
 import {
   MCP_CALL_RATE_LIMIT,
   MCP_SA_WRITE_CAP_WINDOW_MS,
+  MCP_USER_CALL_RATE_LIMIT,
+  MCP_USER_WRITE_RATE_LIMIT,
   MCP_WRITE_RATE_LIMIT,
 } from './mcp.constants';
 
@@ -156,6 +158,74 @@ describe('McpServerFactory', () => {
       ).isError,
     ).toBeUndefined();
     jest.restoreAllMocks();
+  });
+
+  describe('the per-user overall cap across connections (CEO Q8 on #1344, #1683)', () => {
+    const ofUser = (grant: string, user = 'u1'): McpCaller => ({
+      ...CALLER,
+      grant: { ...CALLER.grant!, id: grant },
+      rateKey: `grant:${grant}`,
+      userRateKey: `user:${user}`,
+    });
+
+    it('stops writes once the user’s connections together reach the per-user budget', async () => {
+      const now = Date.now();
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      const perGrant = MCP_WRITE_RATE_LIMIT.max;
+      const grants = Math.ceil(MCP_USER_WRITE_RATE_LIMIT.max / perGrant);
+      for (let g = 0; g < grants; g += 1) {
+        for (let i = 0; i < perGrant; i += 1) {
+          await factory.call(ofUser(`g${g}`), tool('w', 'write'), {});
+        }
+      }
+      tools.invoke.mockClear();
+      // A fresh connection of the same user, with its own per-grant budget untouched: refused.
+      const refused = await factory.call(
+        ofUser('fresh'),
+        tool('w', 'write'),
+        {},
+      );
+      expect(refused).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: 'RATE_LIMITED' } },
+      });
+      expect(JSON.stringify(refused)).toContain(
+        'across all your AI connections',
+      );
+      expect(tools.invoke).not.toHaveBeenCalled();
+      // Another user, and a Service Account (no user key), are unaffected.
+      expect(
+        (await factory.call(ofUser('other', 'u2'), tool('w', 'write'), {}))
+          .isError,
+      ).toBeUndefined();
+      expect(
+        (
+          await factory.call(
+            {
+              kind: 'service',
+              identity: { kind: 'service', serviceAccountId: 'sa-9' },
+              ceiling: ['read', 'write'],
+              rateKey: 'sa:sa-9',
+            },
+            tool('w', 'write'),
+            {},
+          )
+        ).isError,
+      ).toBeUndefined();
+      jest.restoreAllMocks();
+    });
+
+    it('counts tool calls per user too, at twice one connection’s budget', () => {
+      const now = Date.now();
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      const limiter2 = new McpRateLimiter();
+      for (let i = 0; i < MCP_USER_CALL_RATE_LIMIT.max; i += 1) {
+        expect(limiter2.userCall('user:u1', false, now)).toBe(true);
+      }
+      expect(limiter2.userCall('user:u1', false, now)).toBe(false);
+      expect(MCP_USER_CALL_RATE_LIMIT.max).toBe(2 * MCP_CALL_RATE_LIMIT.max);
+      jest.restoreAllMocks();
+    });
   });
 
   describe('the per-SA maxMutationsPerRun cap, as writes per rolling hour over MCP (G3 review F2)', () => {
