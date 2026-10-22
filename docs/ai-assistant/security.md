@@ -348,9 +348,9 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-37 | ALL | E | AI in `AUTH_MODE=shim`, where identity is forgeable [R]. | Hard-disabled | v1 |
 | T-38 | ALL | E, I | The AI changes AI configuration (provider, base URL, key, budgets, retention) and creates a persistent exfiltration channel. | Exclude AI configuration from tools (§11 E1-b) | v1 |
 | T-39 | CH | I | Secret Manager plaintext decrypted in the browser leaks into chat context (e.g. "current page" context). | INV-AI-5: the client never sends decrypted vault content or DOM snapshots | v1 |
-| T-40 | CH | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is chat-only and `elevated`; `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring (ADR-0097 decision 3, amended) | v1 |
+| T-40 | CH, MCP | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is `elevated`; everything that makes an integration live (a connection created or re-pointed, a version on an enabled workflow, enabling) is **chat only**, behind the `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring. Over MCP (`lazyit.admin`) only a **disabled** workflow and its versions can be created or edited — inert until a person enables it in the chat (ADR-0097 decision 3, amended 2026-09-24 and 2026-10-21) | v1 |
 | T-41 | CH | I | Credential exfiltration by re-pointing a secret-bearing connection to another host. | CSEC-1 (`workflow:secrets` to re-point or attach) runs through the route; the preview shows old → new host; secrets are reference-only, never read (§6.9) | v1 |
-| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | Authoring tools declare `channels: ['CHAT']`; MCP authoring deferred (#1344), headless authoring excluded for good (INV-AI-17); MCP and headless refuse writes on critical applications (`AI_CHANNEL_REFUSED_WARNINGS`) | v1 |
+| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | No authoring tool lists `HEADLESS` (INV-AI-17, for good), and every authoring tool is `humanOnly`, so a Service Account is refused on MCP too, before anything is recorded. Over MCP only `workflow_create`, `workflow_update` and `workflow_author_version` run, and only on a **disabled** workflow: `OUTBOUND_INTEGRATION` is refused over MCP and headless (`AI_CHANNEL_REFUSED_WARNINGS`), a header change on an enabled workflow is refused by the tool, and the routes re-check `expectedEnabled` under the workflow row lock, so a workflow enabled between the check and the write is refused at execute (#1688). Enabling, connections and the connection test stay chat-only. MCP and headless refuse writes on critical applications | v1 |
 
 ---
 
@@ -388,7 +388,7 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Mermaid in chat | no | As built (W3-7): not rendered in the chat at all — a mermaid fence is shown as code. |
 | Writes that change visibility (KB public folder, notes, `Application.url`) | no; others read later | Preview shows the full content plus the destination's visibility; SEC-051 fixed first. |
 | Identity or credential changes (email, reset link, SA token mint) | no | T3 elevated confirmation; one-time credentials never enter context (INV-AI-5). |
-| Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
+| Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated; anything that makes an integration live is **chat only**, with the `OUTBOUND_INTEGRATION` warning (MCP may edit a disabled workflow only, #1688); secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
 | Instance email (SMTP test, notification templates) | no | Templates are fixed [R: ADR-0079 §6]. SMTP settings are T4. Low residual risk. |
 | A generic HTTP fetch, web-browse or email-compose tool | yes | **Forbidden class**: none in the catalog. Adding one completes the trifecta. |
 | Provider-native web search (#1389) | the model writes the query | **Opt-in, chat only** (§6.11). The query is a residual exfiltration channel to the search, which the provider operates; it adds no destination the provider does not already receive the whole context. No lazyit-side fetch exists. |
@@ -430,6 +430,15 @@ the **exfiltration leg** and the **consequential-action leg**.
   (`updatedAt`), an expiry, and the untrusted sources read. The card is rendered **from that
   record**, as a before → after diff of the target entity. The model's prose is shown separately and
   labelled as the assistant's description.
+- **Model-supplied words inside the server-built sentence are marked (#1687, CEO decision Q6 on #1344).**
+  The card's first row, the `action` sentence, is written by the tool, but some of its values come from
+  the model's own tool input — the name of an application or supplier it creates, an access level it
+  typed, a new purchase line's description. Such a param has the sentence kind `input`: `phrase()` bounds
+  it on the server (invisible and control characters removed first, then wrapper tags removed until none
+  is left, one line, quote characters turned into `'`, at most 80 characters) so it can never close the quotes every template puts
+  around it or stretch the sentence into something else, and the web shows it as a distinct chip, apart
+  from the names lazyit read from its database. The full value is in the card's structured rows. This
+  closes the "known limitation" of the W3-7 review (item 6; [[ai-assistant/frontend|frontend]] §11a).
 - **Approve carries only the pending-action id**, over a human-session-only endpoint
   (`HumanPrincipal`; `ai:use`). It is not callable with an MCP token or an SA token, and it is not a
   tool. Arguments are never taken from the client at approve time.
@@ -728,7 +737,8 @@ These are recommended defaults; the numbers are tunable.
 
 The CEO opened the workflow engine to the AI (#1315): reads, run operations and manual tasks on every
 channel; authoring (workflows, versions, connections, the connection test, dry-run, enable/disable)
-in the **chat only** for v1. Workflow secrets stay structurally excluded.
+in the **chat**, and — since 2026-10-21 (CEO decision Q1 on #1344, #1688) — over **MCP for disabled
+workflows only**. Workflow secrets stay structurally excluded.
 
 **The headline risk (T-40): AI-authored exfiltration through REST/webhook.** Other-authored text (an
 access-request justification, a KB article, asset notes) steers the model to create a connection to
@@ -746,9 +756,27 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 (CSEC-1); replay refuses a non-idempotent create that already succeeded.
 
 **AI-level mitigations (the amendment):**
-- Authoring tools are `elevated` and `channels: ['CHAT']`: one action per approval, the untrusted-source
-  banner, no default focus. No Service Account and no MCP client authors, connects or enables (T-42;
-  MCP authoring deferred, #1344; headless authoring excluded for good, INV-AI-17).
+- Authoring tools are `elevated`: in the chat, one action per approval, the untrusted-source banner, no
+  default focus. No Service Account authors, connects or enables (T-42; headless authoring excluded for
+  good, INV-AI-17), and no MCP client connects or enables.
+- **MCP: disabled workflows only (#1688; ADR-0097 decision 3 as amended 2026-10-21).** Under
+  `lazyit.admin`, and for **human callers only**, `workflow_create` (always disabled), `workflow_update`
+  and `workflow_author_version` declare `channels: ['CHAT', 'MCP']`; every other authoring tool stays
+  `['CHAT']`. Every authoring tool is `humanOnly`: an SA token connected over MCP can carry an `elevated`
+  ceiling and the workflow routes admit a Service Account, so core itself (`list`, `invoke`,
+  `writeDenial`) excludes Service Accounts on every channel, refusing before an invocation row or ledger
+  event is written. A disabled workflow
+  never runs, so what MCP can write is inert until a person enables it on the chat's dry-run card.
+  Enforced server-side at execute, because over MCP the client's own prompt is the only review:
+  `OUTBOUND_INTEGRATION` is in `AI_CHANNEL_REFUSED_WARNINGS` for MCP and headless, so
+  `workflow_author_version` on an enabled workflow is a 403 pointing to the chat; `workflow_update` on an
+  enabled workflow is refused by the tool (a header change carries no warning but still changes a live
+  integration's behaviour, e.g. its deprovision policy); and both send the enabled state they read as
+  `expectedEnabled`, which the route checks under the workflow row lock (`SELECT … FOR UPDATE`, the
+  SEC-077 lock that enabling also takes), so a workflow enabled between the tool's read and the write is
+  refused with 409. **Residual:** an MCP client can prepare a disabled workflow pointing at an existing
+  connection of the application; it only becomes live through the chat's enable card, which dry-runs it
+  and lists every host and mapped field.
 - **`OUTBOUND_INTEGRATION`** on any proposal that creates a connection, changes its host, URL or
   credential reference, authors a version on an enabled workflow, or enables a workflow. The preview
   lists every outbound host and every mapped field → token ("what leaves lazyit"), and old → new host
@@ -777,7 +805,8 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 - The behaviour rules tell the model never to propose sending data to a destination the user did not
   name (primer, `AI_PROMPT_VERSION` 2).
 
-**As built (W2-14, `ai/tools/workflow-authoring.tools.ts`).** Nine chat-only `elevated` tools
+**As built (W2-14, `ai/tools/workflow-authoring.tools.ts`).** Nine `elevated` tools — chat-only, except
+the three disabled-only MCP tools above (#1688) —
 (tools-and-execution §7 W10–W16; the standalone dry-run is folded into the enable card). On top of the
 mitigations above: every destination is checked with the runtime egress guard before a card is shown;
 `workflow_connection_update` refuses before the card what CSEC-1 refuses at execution; the AI cannot
@@ -816,20 +845,25 @@ Open items recorded by the G2 review of #1354 (W2-14):
   lacks `user:read` (the tool's own `GET /users/:id` check stays as a second layer).
 
 **Invariants** (proposed here; binding in [[INVARIANTS]] since 2026-09-26, W4-4):
-- **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
-  connection is created, changed or enabled by the AI only through a chat approval by a human; no
-  Service Account and no MCP client does it.
+- **INV-AI-15 — No unattended outbound integration.** No outbound integration becomes or stays live
+  through the AI without a chat approval by a human: a workflow connection is created or changed, a
+  workflow is enabled or disabled, and a version is authored on an ENABLED workflow only through the
+  chat. No Service Account does any of it, on any channel. A person's MCP client (`lazyit.admin`) may create a workflow and
+  change it or author its versions only while it is DISABLED, checked at execute under the workflow row
+  lock (amended 2026-10-21, #1688).
 - **INV-AI-16 — Workflow secrets are reference-only.** The AI never reads, sets or rotates a workflow
   secret value; it may state whether a connection has a credential configured.
 - **INV-AI-17 — A Service Account operates workflows, it never builds them.** Over headless, a Service
   Account gets the workflow reads, run retry and replay, and the resolution of **unassigned** manual
   tasks. It never authors a workflow or a version, never creates, changes, tests or archives a
   connection, and never enables or disables a workflow. This is a CEO decision recorded in #1344, not a
-  deferral: headless authoring is excluded for good, whatever MCP authoring later becomes. As built:
-  every authoring tool declares `channels: ['CHAT']` (`ai/tools/workflow-authoring.tools.ts`), so core
+  deferral: headless authoring is excluded for good, whatever MCP authoring later becomes (it became
+  "disabled workflows only", #1688 — headless unchanged). As built: no authoring tool declares
+  `HEADLESS` (`ai/tools/workflow-authoring.tools.ts`), so core
   hides it from the headless catalog and refuses to invoke or propose it there
   (`ai/core/ai-tool.service.ts`, the channel checks and the human-only proposal rule); each tool also
-  re-checks chat + human in `preview` and `run` (`assertChatHuman`). A Service Account has no user id,
+  re-checks a human on its own channels in `preview` (chat only) and `run` (`assertChatHuman` /
+  `assertHumanOn`). A Service Account has no user id,
   so `workflow_task_resolve` refuses any task with an assignee (`ai/tools/workflows.tools.ts`).
 
 ### 6.11 Provider-native web search (ADR-0097 decision 3, amended 2026-09-24 for #1389)
@@ -1153,8 +1187,9 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   human sessions.
 - **Tool classes:** the `elevated` classification is complete. Review the catalog against §6.2,
   especially identity attributes (email), credential delivery, access grants, folder rules and workflow
-  authoring (§6.9: chat-only channels, `OUTBOUND_INTEGRATION` and `CRITICAL_APPLICATION` emitted where
-  due, `assertChannelAllows` called on MCP/headless for critical applications, secrets absent, no retry
+  authoring (§6.9: chat-only channels except the three disabled-only MCP tools, `OUTBOUND_INTEGRATION`
+  and `CRITICAL_APPLICATION` emitted where due and `assertChannelAllows` called on MCP/headless for both,
+  `expectedEnabled` sent on MCP-reachable writes, secrets absent, no retry
   `overrides`). AI configuration and cleartext-credential operations are absent. No generic egress tool
   exists.
 - **Headless:** the per-SA AI access setting is enforced (off / read-only / read-write), the mutation cap

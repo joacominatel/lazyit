@@ -1,4 +1,6 @@
 import {
+  aiSentenceInputParams,
+  boundAiSentenceInput,
   formatAiSentence,
   type AiSentence,
   type AiSentenceCode,
@@ -20,12 +22,21 @@ export interface Phrase {
 type ParamsArg<C extends AiSentenceCode> =
   keyof AiSentenceParams<C> extends never ? [] : [AiSentenceParams<C>];
 
-/** One sentence of the closed list, with exactly the params its template names. */
+/**
+ * One sentence of the closed list, with exactly the params its template names. A param of kind `input`
+ * (a value the model supplied in its tool input, #1687) is bounded here — one line, no control or quote
+ * characters, capped (`boundAiSentenceInput`) — so the English the ledger, the model and MCP read and the
+ * params the web renders carry the same value, and no tool can forget to do it. The full value belongs in
+ * the preview's structured rows.
+ */
 export function phrase<C extends AiSentenceCode>(
   code: C,
   ...args: ParamsArg<C>
 ): Phrase {
-  const params = (args[0] ?? {}) as Record<string, string | number>;
+  const params = { ...(args[0] ?? {}) } as Record<string, string | number>;
+  for (const name of aiSentenceInputParams(code)) {
+    if (name in params) params[name] = boundAiSentenceInput(params[name]);
+  }
   return {
     text: formatAiSentence(code, params),
     sentences: [{ code, params: { ...params } }],

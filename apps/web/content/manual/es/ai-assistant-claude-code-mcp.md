@@ -54,6 +54,24 @@ llamar — y **la app decide si te pregunta antes**. Leé esto antes de conectar
 Una cuenta de servicio conectada por MCP no tiene a nadie a quien preguntarle; su administrador la acota
 con el [acceso a IA y un tope de escrituras](/help/ai-assistant-setup#cuentas-de-servicio).
 
+### Workflows de automatización de accesos por MCP
+
+Con **Acciones de administración**, una app puede preparar workflows de
+[automatización de accesos](/help/access-automation-concepts), pero solo mientras están **desactivados**:
+
+- Puede **crear** un workflow (siempre se crea desactivado), **renombrarlo** o cambiar su descripción o su
+  política de desaprovisionamiento, y **guardar nuevas versiones de sus pasos**, siempre que el workflow
+  esté desactivado.
+- **No** puede activar ni desactivar un workflow, archivarlo, cambiar un workflow activo, ni crear,
+  cambiar, probar o archivar una **conexión**. Todo lo que haga que lazyit empiece a mandar datos a otro
+  sistema necesita tu aprobación en una tarjeta del [chat de lazyit](/help/ai-assistant-approvals), que
+  primero hace una [simulación](/help/access-automation-testing-observability) y muestra exactamente qué
+  se mandaría y adónde.
+- Si alguien activa el workflow mientras la app está trabajando en él, lazyit rechaza el cambio de la app.
+- Los workflows de aplicaciones marcadas como críticas se rechazan por completo por MCP. Usá el chat.
+
+Una cuenta de servicio nunca arma workflows, ni por MCP ni por la API headless.
+
 ## Cómo se conectan las apps: OAuth o tokens personales
 
 lazyit elige el método según la dirección pública configurada de la instancia (`WEB_ORIGIN`); la página
