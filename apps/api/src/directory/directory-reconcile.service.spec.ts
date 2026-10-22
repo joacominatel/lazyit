@@ -35,10 +35,10 @@ import type { UserHistoryService } from '../user-history/user-history.service';
 
 /**
  * The keys the reconcile may NEVER write onto a matched/reactivated person (mass-assignment / escalation /
- * credentials). `sessionEpoch` and `mcpCredentialEpoch` are deliberately listed: the sync's ONE sanctioned
- * epoch write is the revoking bump of both on an active→offboarded transition (#1308, ADR-0086 §8; ADR-0097
- * decision 8 as amended), so the offboard assertions use {@link FORBIDDEN_OFFBOARD_KEYS} and check the bumps
- * explicitly instead.
+ * credentials). `sessionEpoch`, `mcpCredentialEpoch` and `oidcTokensNotBefore` are deliberately listed: the
+ * sync's ONE sanctioned revocation write is the bump of both epochs plus the OIDC cutoff on an
+ * active→offboarded transition (#1308, ADR-0086 §8; ADR-0097 decision 8 as amended; #1715), so the offboard
+ * assertions use {@link FORBIDDEN_OFFBOARD_KEYS} and check those writes explicitly instead.
  */
 const FORBIDDEN_WRITE_KEYS = [
   'role',
@@ -47,11 +47,15 @@ const FORBIDDEN_WRITE_KEYS = [
   'directoryOnly',
   'sessionEpoch',
   'mcpCredentialEpoch',
+  'oidcTokensNotBefore',
   'mustChangePassword',
 ];
-/** The offboard path's guard: everything above except the two epochs, which it may only ever increment. */
+/** The offboard path's guard: everything above except the revocation writes (two increments, one cutoff). */
 const FORBIDDEN_OFFBOARD_KEYS = FORBIDDEN_WRITE_KEYS.filter(
-  (key) => key !== 'sessionEpoch' && key !== 'mcpCredentialEpoch',
+  (key) =>
+    key !== 'sessionEpoch' &&
+    key !== 'mcpCredentialEpoch' &&
+    key !== 'oidcTokensNotBefore',
 );
 
 interface LocalPerson {
@@ -402,6 +406,8 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     const { data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
     expect(data.sessionEpoch).toEqual({ increment: 1 });
     expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
+    // OIDC mode: a later reappearance must not revive the person's old IdP sessions (#1715).
+    expect(data.oidcTokensNotBefore).toBeInstanceOf(Date);
   });
 
   it('an admin edit lands mid-sweep (the conditional offboard matches 0 rows) → no history, counted as skipped', async () => {

@@ -745,6 +745,11 @@ describe('UsersService', () => {
     expect(updateCalls[0][0].data).toHaveProperty('mcpCredentialEpoch', {
       increment: 1,
     });
+    // …and, in OIDC mode, every IdP session held before it: a restore cannot revive one (#1715).
+    expect(updateCalls[0][0].data).toHaveProperty(
+      'oidcTokensNotBefore',
+      updateCalls[0][0].data.deletedAt,
+    );
 
     // Active grants are revoked inline (revokedAt + actor + audit note).
     const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
@@ -963,6 +968,8 @@ describe('UsersService', () => {
         sessionEpoch: { increment: 1 },
         mcpCredentialEpoch: { increment: 1 },
       });
+      // OIDC mode: a reactivation must not revive the IdP sessions held before it (#1715).
+      expect(arg.data.oidcTokensNotBefore).toBeInstanceOf(Date);
     });
 
     it('does not bump sessionEpoch on reactivation, a repeat deactivation, or a profile edit', async () => {
@@ -989,6 +996,7 @@ describe('UsersService', () => {
       for (const [arg] of user.update.mock.calls as UpdateCall[]) {
         expect(arg.data).not.toHaveProperty('sessionEpoch');
         expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
+        expect(arg.data).not.toHaveProperty('oidcTokensNotBefore');
       }
     });
   });
