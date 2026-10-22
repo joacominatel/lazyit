@@ -41,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { TableCell } from "@/components/ui/table";
 import { useAgentFleet } from "@/lib/api/hooks/use-agent-fleet";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import {
@@ -55,6 +56,7 @@ import {
   isNotReportingNode,
 } from "@/lib/agent/fleet";
 import { AgentCommandBlock, AgentUpdateDialog } from "./agent-update-command";
+import { NodeLifecycleBadges, NodeLifecycleMenu } from "./node-lifecycle";
 
 /**
  * Topology › Agents (ADR-0094 §4/§8, issue #1207) — *"how many agents do I have, on what versions,
@@ -228,6 +230,11 @@ function FleetSummary({
     { key: "current", value: summary.current, tone: false },
     { key: "notReporting", value: summary.notReporting, tone: false },
     { key: "degraded", value: summary.degraded, tone: false },
+    // Retired hosts (#1701) — shown only when there are some, so an estate that never retires
+    // anything sees the summary it always did. An older API sends no count at all.
+    ...(summary.retired
+      ? [{ key: "retired" as const, value: summary.retired, tone: false }]
+      : []),
   ];
 
   return (
@@ -477,6 +484,7 @@ function FleetTable({
   serverVersion: string;
 }) {
   const t = useTranslations("infra.fleet");
+  const canManage = useCan("infra:manage");
   const [openHost, setOpenHost] = useState<string | null>(null);
   const columns = useMemo<ResourceColumn[]>(
     () => [
@@ -570,15 +578,20 @@ function FleetTable({
               </>
             }
             actions={
-              isAgentUpdatable(node) ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setOpenHost(node.id)}
-                >
-                  {t("updateAction")}
-                </Button>
+              isAgentUpdatable(node) || canManage ? (
+                <span className="flex items-center gap-2">
+                  {isAgentUpdatable(node) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setOpenHost(node.id)}
+                    >
+                      {t("updateAction")}
+                    </Button>
+                  ) : null}
+                  {canManage ? <NodeLifecycleMenu node={node} size="icon-sm" /> : null}
+                </span>
               ) : undefined
             }
           />
@@ -610,17 +623,21 @@ function FleetTable({
             </TableCell>
             <TableCell className="text-right">
               {/* ADR-0094 §8: the affordance exists only where there is something to do. */}
-              {isAgentUpdatable(node) ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-row-noclick
-                  onClick={() => setOpenHost(node.id)}
-                >
-                  {t("updateAction")}
-                </Button>
-              ) : null}
+              <span className="inline-flex items-center justify-end gap-2">
+                {isAgentUpdatable(node) ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-row-noclick
+                    onClick={() => setOpenHost(node.id)}
+                  >
+                    {t("updateAction")}
+                  </Button>
+                ) : null}
+                {/* Retire / snooze (#1701). Gated here for the UI; the API is the real gate. */}
+                {canManage ? <NodeLifecycleMenu node={node} size="icon-sm" /> : null}
+              </span>
             </TableCell>
           </LinkableRow>
         ))}
@@ -704,6 +721,8 @@ function RowFlags({ node }: { node: AgentFleetNode }) {
   const warnings = node.diagnostics?.warnings ?? [];
   return (
     <span className="flex flex-wrap items-center gap-1">
+      {/* Retired / alerts snoozed (#1701). A retired host is never also "not reporting". */}
+      <NodeLifecycleBadges node={node} />
       {node.pending ? <Badge variant="outline">{t("flags.pending")}</Badge> : null}
       {isNotReportingNode(node) ? (
         <StatusBadge tone="warning">{t("flags.notReporting")}</StatusBadge>

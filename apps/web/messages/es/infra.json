@@ -238,7 +238,8 @@
       "unknown": "versión desconocida",
       "current": "al día",
       "notReporting": "sin reportar",
-      "degraded": "reportando incompleto"
+      "degraded": "reportando incompleto",
+      "retired": "retirados"
     },
     "columns": {
       "host": "Host",
@@ -529,7 +530,8 @@
       "hostDisksCount": "Cantidad de discos",
       "hostHardwareSerial": "Número de serie",
       "containerImage": "Imagen del contenedor",
-      "containerImageDigest": "Digest de la imagen"
+      "containerImageDigest": "Digest de la imagen",
+      "nodeLifecycle": "Ciclo de vida"
     }
   },
   "delete": {
@@ -635,5 +637,38 @@
     "authorUnknown": "Autor ya no está en el directorio",
     "lastMatched": "{count, plural, one {Usada # vez} other {Usada # veces}}, la última el {when}",
     "neverMatched": "Todavía no se usó"
+  },
+  "lifecycle": {
+    "retired": "Retirado",
+    "retiredSince": "Retirado el {at}. Ya no se vigila su actividad; vuelve solo si el equipo reporta de nuevo.",
+    "snoozed": "Alertas pausadas",
+    "snoozedUntil": "Alertas de desconexión pausadas hasta el {at}",
+    "menu": "Ciclo de vida",
+    "menuAria": "Retirar o pausar alertas de {label}",
+    "retire": "Retirar",
+    "retireHint": "Dado de baja, no desconectado: sigue en el mapa con su historial, deja de vigilarse y su activo no cambia.",
+    "unretire": "Volver a activar",
+    "snooze": "Pausar alertas de desconexión",
+    "snoozeChange": "Cambiar la pausa",
+    "unsnooze": "Terminar la pausa ahora",
+    "preset": {
+      "4h": "Durante 4 horas",
+      "1d": "Durante 1 día",
+      "3d": "Durante 3 días",
+      "7d": "Durante 1 semana",
+      "30d": "Durante 30 días"
+    },
+    "retiredToast": "{label} retirado",
+    "retiredToastDescription": "No se marcará como desconectado ni se avisará de nuevo. Si vuelve a reportar, se reactiva solo.",
+    "unretiredToast": "{label} vuelve a vigilarse",
+    "snoozedToast": "Alertas de desconexión de {label} pausadas hasta el {at}",
+    "unsnoozedToast": "Las alertas de desconexión de {label} vuelven a estar activas",
+    "undo": "Deshacer",
+    "error": "No se pudo actualizar el nodo",
+    "value": {
+      "active": "activo",
+      "retired": "retirado"
+    },
+    "sectionDescription": "Retira un nodo dado de baja: conserva su historial y su activo, y vuelve solo si reporta de nuevo. Pausa las alertas de desconexión durante un mantenimiento planificado; el estado sigue cambiando."
   }
 }

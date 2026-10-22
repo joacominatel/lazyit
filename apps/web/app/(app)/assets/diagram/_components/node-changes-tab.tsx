@@ -1,7 +1,11 @@
 "use client";
 
 import { ClockIcon } from "@heroicons/react/24/outline";
-import type { InfraFactChangeKind } from "@lazyit/shared";
+import {
+  INFRA_NODE_LIFECYCLE_FACT,
+  INFRA_NODE_LIFECYCLE_VALUES,
+  type InfraFactChangeKind,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { EmptyState, ErrorState } from "@/components/resource-table";
 import { Badge } from "@/components/ui/badge";
@@ -103,8 +107,16 @@ export function NodeChangesTab({
             </div>
             <ChangeValues
               kind={change.kind}
-              previousValue={change.previousValue}
-              currentValue={change.currentValue}
+              previousValue={
+                change.previousValue === null
+                  ? null
+                  : changeValue(change.fact, change.previousValue, t)
+              }
+              currentValue={
+                change.currentValue === null
+                  ? null
+                  : changeValue(change.fact, change.currentValue, t)
+              }
             />
           </li>
         ))}
@@ -182,7 +194,24 @@ const FACT_MESSAGE_KEYS: Record<string, string> = {
   "host.hardware.serial": "hostHardwareSerial",
   "container.image": "containerImage",
   "container.imageDigest": "containerImageDigest",
+  // The retire lifecycle (#1701): an agent's own decommission, or an automatic un-retire.
+  [INFRA_NODE_LIFECYCLE_FACT]: "nodeLifecycle",
 };
+
+/**
+ * A lifecycle row's values (`active` / `retired`) are words, not facts, so they are translated; every
+ * other value — a version, a kernel, a digest — is data and renders verbatim. An unknown value a newer
+ * server records falls back to the stored string, like an unknown fact key.
+ */
+function changeValue(fact: string, value: string, t: (key: string) => string): string {
+  if (
+    fact === INFRA_NODE_LIFECYCLE_FACT &&
+    (INFRA_NODE_LIFECYCLE_VALUES as readonly string[]).includes(value)
+  ) {
+    return t(`lifecycle.value.${value}`);
+  }
+  return value;
+}
 
 function factLabel(fact: string, t: (key: string) => string): string {
   const key = FACT_MESSAGE_KEYS[fact];
