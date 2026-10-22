@@ -23,6 +23,7 @@ import {
   type Harness,
 } from '../../../test/oauth/oauth-harness';
 import { PrincipalLoaderService } from '../../auth/principal-loader.service';
+import { UserSessionsService } from '../../auth/local/user-sessions.service';
 import { OAuthAuditService } from '../oauth-audit.service';
 import {
   MAX_LIVE_PERSONAL_TOKENS,
@@ -416,6 +417,28 @@ describe('verify (the /mcp check)', () => {
     row.sessionEpoch += 1; // what LoginService.logout does — and nothing else
     expect(await service.verify(created.token)).toMatchObject({ ok: true });
     expect(await service.listMine(row as never)).toHaveLength(1);
+  });
+
+  it('is refused after "Sign out everywhere and disconnect AI apps", and leaves the list (#1699)', async () => {
+    const user = seedUser(h);
+    const created = await service.create(user, input());
+    expect(created.token).toMatch(/^lzit_pat_/);
+    expect(await service.verify(created.token)).toMatchObject({ ok: true });
+
+    // The real action, over the same in-memory database (session store and audit default to it).
+    const sessions = new UserSessionsService(
+      h.prisma as any,
+      { record: jest.fn() } as any,
+    );
+    await sessions.signOutEverywhere({ id: user.id }, null);
+
+    expect(await service.verify(created.token)).toMatchObject({
+      ok: false,
+      reason: 'session_revoked',
+      status: 401,
+    });
+    const row = h.prisma.tables.user.find((u) => u.id === user.id)!;
+    expect(await service.listMine(row as never)).toEqual([]);
   });
 
   it('dies with the user: credential-epoch bump, deactivation, offboarding, forced password change', async () => {
