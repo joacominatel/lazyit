@@ -58,8 +58,7 @@ SEC-003).
 > - **Not encrypted by the sidecar**, like the dumps: the off-host copy is the operator's to encrypt
 >   (per-blob encryption stays rejected, below).
 >
-> The purchase documents panel still shows its "not in the backup" notice; retiring that copy is a
-> frontend follow-up, outside this infrastructure change.
+> The purchase documents panel's "not in the backup" notice is updated separately, in the web app (#1690).
 
 ## Context
 
