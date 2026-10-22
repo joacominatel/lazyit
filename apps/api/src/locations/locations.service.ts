@@ -280,8 +280,10 @@ export class LocationsService {
     const location = await this.prisma.$transaction(
       async (tx) => {
         await this.lockLocationTree(tx);
-        // Own row FOR UPDATE before the dependents (#1604): a write pointing a row here holds it FOR SHARE,
-        // so it commits first and is scanned below, or waits and then finds the location archived.
+        // Lock order (ADR-0023, #1604 / #1696): own row, child locations, open purchases, then assets — parents
+        // before the rows that point at them, and purchases before assets as every link and apply takes them.
+        // Own row FOR UPDATE: a write pointing a row here holds it FOR SHARE, so it commits first and is
+        // scanned below, or waits and then finds the location archived.
         const live = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "locations"
          WHERE "id" = ${id} AND "deletedAt" IS NULL
@@ -289,15 +291,17 @@ export class LocationsService {
         if (live.length === 0) {
           throw new NotFoundException(`Location ${id} not found`);
         }
+        // The children are re-parented below, and a write moving an asset or a purchase into one holds it
+        // FOR SHARE before that row: take them now, before any asset or purchase, or the two cross (40P01).
+        const children = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "locations"
+         WHERE "parentId" = ${id} AND "deletedAt" IS NULL
+         ORDER BY "id" FOR NO KEY UPDATE`;
+        const purchases = await this.openPurchases(tx, id, true);
         const assets = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "assets"
          WHERE "locationId" = ${id} AND "deletedAt" IS NULL
          ORDER BY "id" FOR UPDATE`;
-        const children = await tx.location.findMany({
-          where: { parentId: id },
-          select: { id: true },
-        });
-        const purchases = await this.openPurchases(tx, id, true);
         if (assets.length + children.length + purchases.length > 0) {
           if (!resolution) {
             throw deleteResolutionRequired(`Location ${id}`, {
@@ -434,6 +438,7 @@ export class LocationsService {
        ORDER BY po."id" ASC
        ${lock ? Prisma.sql`FOR UPDATE OF po` : Prisma.empty}`;
     // Locked in id order like the model delete and supplier merge, so they cannot deadlock; listed oldest first.
+    // The delete takes them before its assets, as a link or apply does (purchase, then assets — #1696).
     return rows
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map(({ id, reference }) => ({ id, reference }));
