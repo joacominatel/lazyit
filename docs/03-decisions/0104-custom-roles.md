@@ -36,12 +36,13 @@ Option C below.
 ## Context
 
 [[0046-roles-permissions-v2]] kept three fixed roles with configurable per-role permissions and
-deferred dynamic custom roles to a future ADR, for three reasons:
+deferred dynamic custom roles to a future ADR, for four reasons:
 
 1. **The fixed-role invariants.** The last-admin guard and the first-user-is-ADMIN bootstrap
-   ([[INVARIANTS]] INV-7).
+   ([[INVARIANTS]] INV-7 and the [[0040-rbac-roles]] last-admin guard).
 2. **The IdP mirror** of exactly three project roles.
 3. **The cost** of a role-management UI and lifecycle.
+4. **Fit.** It "over-serves a 5–20-person single-org team".
 
 Since then:
 
@@ -50,6 +51,11 @@ Since then:
 - **Reason 1 holds if ADMIN stays special.** Both invariants are about ADMIN. A design that keeps
   ADMIN a protected, built-in role leaves them untouched.
 - **Reason 3 is a real cost** and is priced into the phased plan below.
+- **Reason 4 no longer blocks the decision, and still governs the build.** A team of 5–20 already
+  needs roles the three fixed ones cannot express (the Help desk example below). The design stays
+  opinionated: one role per user, a cap of 10 custom roles, and no groups or overrides. The build
+  stays deferred until a concrete first custom role exists, so the cost is paid only when a real team
+  needs it.
 
 The groundwork already exists. All 325 `@RequirePermission` sites in the API and the 130 `useCan()`
 call sites in the web check a **permission**, never a role. A custom role is therefore a named
@@ -130,7 +136,8 @@ to U4.
   resolver short-circuit ([[0046-roles-permissions-v2]] §5, INV-8).
 - ADMIN alone holds the new **`role:manage`** permission. It replaces `settings:manage` plus
   `AdminOnlyGuard` as the gate on matrix editing.
-- The last-admin and first-user-ADMIN invariants (INV-7) are unchanged.
+- The last-admin and first-user-ADMIN invariants (INV-7 and the [[0040-rbac-roles]] last-admin guard) are
+  unchanged.
 
 ### 4. Defaults and directory persons
 
