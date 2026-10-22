@@ -30,6 +30,7 @@ import {
   getLicenseProposal,
   getLinkPreview,
   getPendingLines,
+  getPendingSummary,
   getPurchaseOrder,
   getPurchaseOrderEvents,
   getPurchaseOrders,
@@ -65,6 +66,9 @@ export const purchaseOrderKeys = {
   events: (id: string) => [...purchaseOrderKeys.all, "detail", id, "events"] as const,
   pending: (params: { supplierId?: string; limit?: number; offset?: number }) =>
     [...purchaseOrderKeys.all, "pending", params] as const,
+  /** The dashboard's pending-deliveries counts for the viewer's day (#1498); refreshed by any purchase write. */
+  pendingSummary: (expectedBefore: string) =>
+    [...purchaseOrderKeys.all, "pending-summary", expectedBefore] as const,
   /** Every open line, read to the end (the *From purchase* picker). */
   openLines: () => [...purchaseOrderKeys.all, "pending", "all"] as const,
   linkPreview: (lineId: string, assetIds: readonly string[]) =>
@@ -198,6 +202,18 @@ export function usePendingLines(
     queryKey: purchaseOrderKeys.pending(params),
     queryFn: ({ signal }) => getPendingLines(params, signal),
     placeholderData: keepPreviousData,
+    enabled,
+  });
+}
+
+/**
+ * The dashboard's *Pending deliveries* counts (#1498). Idle unless `enabled` — the caller gates on
+ * `purchaseOrder:read`, so a viewer without it never makes the request.
+ */
+export function usePendingSummary(expectedBefore: string, { enabled }: { enabled: boolean }) {
+  return useQuery({
+    queryKey: purchaseOrderKeys.pendingSummary(expectedBefore),
+    queryFn: ({ signal }) => getPendingSummary(expectedBefore, signal),
     enabled,
   });
 }

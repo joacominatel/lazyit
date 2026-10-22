@@ -11,6 +11,7 @@ import type {
   LinkAssetsResult,
   LinkAssetsToLine,
   PendingPurchaseLinePage,
+  PendingPurchaseSummary,
   PurchaseExtractionDraft,
   PurchaseExtractionStatus,
   PurchaseLinkPreview,
@@ -271,6 +272,16 @@ export function getPendingLines(
     search ? `${BASE}/pending-lines?${search}` : `${BASE}/pending-lines`,
     { signal },
   );
+}
+
+/**
+ * The dashboard's *Pending deliveries* row (#1498, `purchaseOrder:read`): the purchases with units pending, the
+ * units, and how many of those purchases are overdue — over exactly the *Pending units* rows. `expectedBefore`
+ * is the viewer's today (`YYYY-MM-DD`), the same day `isOverdue` compares against.
+ */
+export function getPendingSummary(expectedBefore: string, signal?: AbortSignal): Promise<PendingPurchaseSummary> {
+  const qs = new URLSearchParams({ expectedBefore });
+  return apiFetch<PendingPurchaseSummary>(`${BASE}/pending-summary?${qs.toString()}`, { signal });
 }
 
 /**
