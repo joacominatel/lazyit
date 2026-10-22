@@ -113,23 +113,32 @@ export class WorkflowsService {
    * SEC-077: an optional `expectedVersion` is the latest version number the caller reviewed (0 = none).
    * When present, the write runs in a transaction that locks the workflow row, re-reads the latest
    * version and refuses with 409 if it differs — so enabling never makes live a version authored after
-   * the review. {@link authorVersion} takes the same row lock, so the two serialize. Omitted = today's
-   * unconditioned write.
+   * the review. {@link authorVersion} takes the same row lock, so the two serialize. An optional
+   * `expectedEnabled` (#1688) is checked under the same lock: 409 unless the workflow's `enabled` still
+   * equals it. Omitted (both) = today's unconditioned write.
    */
   async update(id: string, dto: UpdateApplicationWorkflow) {
     await this.assertWorkflowLive(id);
     await this.assertEngineExecutor(dto.executedAsServiceAccountId);
-    const { expectedVersion } = dto;
-    if (expectedVersion === undefined) {
+    const { expectedVersion, expectedEnabled } = dto;
+    if (expectedVersion === undefined && expectedEnabled === undefined) {
       return this.prisma.applicationWorkflow.update(this.headerUpdate(id, dto));
     }
     return this.prisma.$transaction(async (tx) => {
-      await this.lockWorkflowAndAssertLatest(tx, id, expectedVersion);
+      await this.lockWorkflowAndAssertLatest(
+        tx,
+        id,
+        expectedVersion,
+        expectedEnabled,
+      );
       return tx.applicationWorkflow.update(this.headerUpdate(id, dto));
     });
   }
 
-  /** The header columns a patch writes (`expectedVersion` is a precondition, never a column). */
+  /**
+   * The header columns a patch writes (`expectedVersion` and `expectedEnabled` are preconditions, never
+   * columns).
+   */
   private headerUpdate(id: string, dto: UpdateApplicationWorkflow) {
     return {
       where: { id },
@@ -153,13 +162,31 @@ export class WorkflowsService {
    * Lock the workflow row (`SELECT … FOR UPDATE`) for the rest of the transaction and, when `expected`
    * is given, 409 unless it is still the latest version number (0 = none authored). Every version
    * allocation takes the same lock, so no version can land between this check and the caller's write.
+   *
+   * With `expectedEnabled` (#1688), also 409 unless the row's `enabled` equals it. The lock waits for an
+   * in-flight update of the row and reads its committed value, and an enable that starts later waits for
+   * this transaction — so "author only while disabled" (MCP, ADR-0097 decision 3 as amended 2026-10-21)
+   * holds even when the workflow is enabled between the caller's check and this write.
    */
   private async lockWorkflowAndAssertLatest(
     tx: Prisma.TransactionClient,
     id: string,
     expected: number | undefined,
+    expectedEnabled?: boolean,
   ): Promise<number> {
-    await tx.$queryRaw`SELECT "id" FROM "application_workflows" WHERE "id" = ${id} FOR UPDATE`;
+    const locked = await tx.$queryRaw<
+      Array<{ enabled?: boolean }>
+    >`SELECT "id", "enabled" FROM "application_workflows" WHERE "id" = ${id} FOR UPDATE`;
+    if (
+      expectedEnabled !== undefined &&
+      locked[0]?.enabled !== expectedEnabled
+    ) {
+      throw new ConflictException(
+        `The workflow is now ${expectedEnabled ? 'disabled' : 'enabled'}, not ${
+          expectedEnabled ? 'enabled' : 'disabled'
+        } as when it was checked. Reload and review it again.`,
+      );
+    }
     const last = await tx.workflowVersion.findFirst({
       where: { workflowId: id },
       orderBy: { version: 'desc' },
@@ -207,8 +234,14 @@ export class WorkflowsService {
     return this.prisma.$transaction(async (tx) => {
       // SEC-077: the row lock serializes authoring with a version-checked enable; an optional
       // `baseVersion` (the version this graph was edited from) 409s if another version landed since.
+      // #1688: an optional `expectedEnabled` 409s if the workflow was enabled (or disabled) since.
       const version =
-        (await this.lockWorkflowAndAssertLatest(tx, id, dto.baseVersion)) + 1;
+        (await this.lockWorkflowAndAssertLatest(
+          tx,
+          id,
+          dto.baseVersion,
+          dto.expectedEnabled,
+        )) + 1;
       return tx.workflowVersion.create({
         data: {
           workflowId: id,
