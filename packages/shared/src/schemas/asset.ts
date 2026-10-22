@@ -50,6 +50,25 @@ export const WARRANTY_EXPIRING_WITHIN_DAYS = 90;
  */
 export const AssetWarrantyFilterSchema = z.enum(["expiring90d", "expired"]);
 
+/**
+ * The acquisition-date window of `GET /assets` and `/assets/export` (#1503): `acquiredFrom` / `acquiredTo`,
+ * ISO datetimes, both inclusive, either optional, `acquiredFrom <= acquiredTo`. An asset's acquisition date
+ * is its `purchaseDate`, or — when it has none — the day it was recorded (`createdAt`). Behind the link
+ * picker's "created near the order date" chip; needs only `asset:read`, like every other plain-column filter.
+ */
+export const AssetAcquiredWindowQuerySchema = z
+  .object({
+    acquiredFrom: z.iso.datetime().optional(),
+    acquiredTo: z.iso.datetime().optional(),
+  })
+  .refine(
+    (window) =>
+      window.acquiredFrom === undefined ||
+      window.acquiredTo === undefined ||
+      new Date(window.acquiredFrom).getTime() <= new Date(window.acquiredTo).getTime(),
+    { message: "acquiredFrom must not be after acquiredTo", path: ["acquiredFrom"] },
+  );
+
 // specs stays an OPEN record here on purpose. Per-category governance (ADR-0007 amendment, #851) is
 // ADVISORY: an AssetCategory can declare a `specsSchema` dictionary, but it drives soft warnings +
 // hints via `validateSpecsAgainstDictionary` (asset-specs-dictionary.ts) — NOT hard validation. The
@@ -259,6 +278,7 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
 export type AssetStatusLabelRef = z.infer<typeof AssetStatusLabelRefSchema>;
 export type AssetWarrantyFilter = z.infer<typeof AssetWarrantyFilterSchema>;
+export type AssetAcquiredWindowQuery = z.infer<typeof AssetAcquiredWindowQuerySchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type CreateAsset = z.infer<typeof CreateAssetSchema>;
 export type UpdateAsset = z.infer<typeof UpdateAssetSchema>;

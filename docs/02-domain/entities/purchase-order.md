@@ -3,7 +3,7 @@ title: PurchaseOrder
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # PurchaseOrder
@@ -104,6 +104,17 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   pending > 0 on live purchases that are neither `DRAFT` nor `CANCELLED`, oldest order date first, each with
   its purchase header and supplier; paged, filterable by `supplierId`. The *Pending units* tab reads it.
   `GET /purchase-orders/pending-lines/export` streams the same lines as CSV ([[purchase-order-line]] § Export).
+  **Overdue** (#1503): both take `expectedBefore`, the viewer's today as a calendar date (`YYYY-MM-DD`;
+  anything else → `400`), and then keep only the lines of purchases expected on an **earlier** day —
+  `expectedDate < expectedBefore 00:00 UTC`, the web's `isOverdue` rule: due today is not late, and a
+  purchase with no expected date is never overdue. The date is the client's, because "today" is the
+  viewer's. The AI tool `purchase_pending_lines` takes it too.
+- **Pending summary** (`GET /purchase-orders/pending-summary?expectedBefore=`, `purchaseOrder:read`, #1498):
+  `{ purchases, units, overduePurchases }` over **exactly** the Pending units rows (the same SQL fragment) —
+  the purchases with at least one pending line, the units pending on them, and how many of those purchases
+  are overdue by the rule above (`expectedBefore` omitted → the server's UTC today). The dashboard's
+  *Pending deliveries* row reads it; `GET /dashboard/summary` is unchanged. Not an AI tool
+  (`purchase_pending_lines` answers the same question with the lines).
 - **Totals are derived, never stored**: the sum of its lines' quantity × unit price, in the purchase's
   currency label ([[0100-money-as-64-bit-minor-units]]). On the wire `totals` is a list of
   `{ currency, amount, unpricedLines }` built by the shared `groupMoneyTotals` — one entry for a purchase
