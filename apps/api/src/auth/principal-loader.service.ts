@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type {
-  Prisma,
-  ServiceAccount,
-  User,
-} from '../../generated/prisma/client';
+import type { Prisma, ServiceAccount } from '../../generated/prisma/client';
+import type { ServiceAccountRow, UserRow } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   resolveServiceAccountPermissions,
@@ -24,8 +21,7 @@ export type PrincipalLoadFailure =
   | 'expired';
 
 export type PrincipalLoadResult<P> =
-  | { ok: true; principal: P }
-  | { ok: false; reason: PrincipalLoadFailure };
+  { ok: true; principal: P } | { ok: false; reason: PrincipalLoadFailure };
 
 /**
  * DB-FIRST principal re-load (INV-1), shared by every path that turns an identity into a principal:
@@ -87,7 +83,7 @@ export class PrincipalLoaderService {
     if (!UUID_REGEX.test(userId)) {
       return { ok: false, reason: 'not_found' };
     }
-    const user: User | null = await this.prisma.user.findFirst({
+    const user: UserRow | null = await this.prisma.user.findFirst({
       where: { id: userId },
     });
     if (!user) {
@@ -126,11 +122,26 @@ export class PrincipalLoaderService {
    */
   findServiceAccountIncludingRevoked(
     serviceAccountId: string,
-  ): Promise<ServiceAccount | null> {
+  ): Promise<ServiceAccountRow | null> {
     return this.prisma.serviceAccount.findFirst({
       where: { id: serviceAccountId },
       includeSoftDeleted: true,
     } as Prisma.ServiceAccountFindFirstArgs);
+  }
+
+  /**
+   * {@link findServiceAccountIncludingRevoked} WITH the `tokenHash` the global omit leaves out
+   * (ADR-0105). Only the bearer-token authenticator calls it, to compare the presented secret; it
+   * strips the hash before the row becomes a principal.
+   */
+  findServiceAccountCredentialIncludingRevoked(
+    serviceAccountId: string,
+  ): Promise<ServiceAccount | null> {
+    return this.prisma.serviceAccount.findFirst({
+      where: { id: serviceAccountId },
+      omit: { tokenHash: false },
+      includeSoftDeleted: true,
+    } as Prisma.ServiceAccountFindFirstArgs) as Promise<ServiceAccount | null>;
   }
 
   /**
@@ -139,7 +150,7 @@ export class PrincipalLoaderService {
    * the principal's permission set — never a token claim, never a role.
    */
   async serviceAccountPrincipal(
-    account: ServiceAccount,
+    account: ServiceAccountRow,
   ): Promise<PrincipalLoadResult<ServicePrincipal>> {
     if (account.deletedAt !== null) {
       return { ok: false, reason: 'revoked' };
@@ -175,7 +186,7 @@ export class PrincipalLoaderService {
    * verbs only.
    */
   private warnInertGrants(
-    account: ServiceAccount,
+    account: ServiceAccountRow,
     grantRows: readonly { permission: string }[],
   ): void {
     if (this.warnedInertGrants.has(account.id)) return;

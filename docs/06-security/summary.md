@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # Security summary
@@ -133,7 +133,9 @@ Snapshot of the security review. Updated each sweep. Method:
    `/users/:id`), every caller of `/users/me`, and every `asset:read` holder, VIEWER included
    (`/assets/:id`, `/assets/:id/assignments`). Affects every release from v1.3.0 through v1.11.0 (current
    `master`). **✅ Closed the same day**: the wire shape is built from the `PUBLIC_USER_SELECT` allowlist,
-   which is pinned to `UserSchema`. A client-level Prisma `omit` is an escalated follow-up.
+   which is pinned to `UserSchema`. The client-level Prisma `omit` follow-up landed on 2026-10-21
+   ([[0105-prisma-global-omit-for-secret-columns|ADR-0105]], #1518): `passwordHash` and the other secret
+   columns are left out of every Prisma result unless a read opts back in.
 
 15. **2026-10-05 — Infra shortcut URL scheme guard (born closed, #1327).**
    [[SEC-086-infra-shortcut-url-executable-scheme\|SEC-086]] (**Low**): `InfraShortcutSchema.url` was
@@ -149,7 +151,10 @@ Snapshot of the security review. Updated each sweep. Method:
    unselected Prisma rows, so any `category:write` holder, MEMBER included, read a folder's raw
    `accessRules` (user ids, role, application, asset) by renaming it. Affects v1.0.0 through v2.0.0.
    **✅ Closed the same day**: every write selects through `CATEGORY_PUBLIC_SELECT`. A runtime response
-   serializer, which would close the class across the API, is the approved follow-up.
+   serializer was the approved follow-up; the CEO instead adopted a client-level Prisma `omit` for
+   `accessRules` and the other secret columns, which closes the class on every Prisma path
+   ([[0105-prisma-global-omit-for-secret-columns|ADR-0105]], #1518, 2026-10-21). The global serializer
+   stays deferred.
 
 17. **2026-10-09 — Bundled Zitadel removed (epic #1543, posture change).** Not a sweep:
    [[0102-remove-bundled-zitadel|ADR-0102]] removed the bundled IdP, the role and profile write-back, the

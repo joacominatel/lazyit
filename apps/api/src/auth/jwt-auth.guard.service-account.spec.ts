@@ -104,10 +104,17 @@ describe('JwtAuthGuard — service-account branch (ADR-0048)', () => {
     const principal = (r as { principal?: Principal }).principal;
     expect(principal?.kind).toBe('service');
     expect(r.serviceAccount).toBeDefined();
+    // The hash is compared, then stripped: it never rides on the principal (ADR-0105).
+    expect(r.serviceAccount).not.toHaveProperty('tokenHash');
+    expect(
+      (principal as { serviceAccount?: object } | undefined)?.serviceAccount,
+    ).not.toHaveProperty('tokenHash');
     expect(r.user).toBeUndefined();
     // Looked up by id INCLUDING soft-deleted rows (so a revoked account is seen).
+    // ...WITH the globally omitted tokenHash, the one read that compares it (ADR-0105).
     expect(saFindFirst).toHaveBeenCalledWith({
       where: { id: SA_ID },
+      omit: { tokenHash: false },
       includeSoftDeleted: true,
     });
     // Resolved its direct grants DB-first.

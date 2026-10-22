@@ -5,7 +5,11 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { AssetAssignmentsService } from './asset-assignments.service';
+import { AssetListAssignmentSchema } from '@lazyit/shared';
+import {
+  AssetAssignmentsService,
+  SELF_ASSIGNMENT_SELECT,
+} from './asset-assignments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService } from '../common/actor.service';
@@ -596,6 +600,57 @@ describe('AssetAssignmentsService', () => {
       expect(history.record).not.toHaveBeenCalled();
       expect(tx.findUnique).not.toHaveBeenCalled();
       expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    // #1518: the route has no permission gate (self-service), so its response is the self-read's
+    // assignment shape — never notes / assignedById / assignedBySaId / releasedById.
+    it('returns the assignment in the self-read shape, never the admin-side columns', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID,
+        assignedById: ASSIGNER_ID,
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+      const projected = {
+        id: 'ckg9z1a2b0000qzrmn831k4d8',
+        userId: ACTOR_ID,
+        user: {
+          id: ACTOR_ID,
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+          deletedAt: null,
+        },
+      };
+      tx.findUnique.mockResolvedValue(projected);
+
+      const res = await service.acknowledge('as1', {}, HUMAN_PRINCIPAL);
+
+      expect(tx.findUnique).toHaveBeenCalledWith({
+        where: { id: 'as1' },
+        select: SELF_ASSIGNMENT_SELECT,
+      });
+      expect(res).toEqual(projected);
+    });
+
+    it('SELF_ASSIGNMENT_SELECT is exactly the self-read assignment contract (AssetListAssignmentSchema)', () => {
+      expect(Object.keys(SELF_ASSIGNMENT_SELECT).sort()).toEqual(
+        Object.keys(AssetListAssignmentSchema.shape).sort(),
+      );
+      expect(Object.keys(SELF_ASSIGNMENT_SELECT.user.select).sort()).toEqual(
+        Object.keys(AssetListAssignmentSchema.shape.user.shape).sort(),
+      );
+      for (const leaked of [
+        'notes',
+        'assignedById',
+        'assignedBySaId',
+        'releasedById',
+        'releasedBySaId',
+      ]) {
+        expect(SELF_ASSIGNMENT_SELECT).not.toHaveProperty(leaked);
+      }
     });
 
     it('double acknowledge → the second call 409s (set-once)', async () => {

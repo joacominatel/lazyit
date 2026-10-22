@@ -5,7 +5,7 @@ description: The lazyit decision record — an index of every ADR by number, tit
 
 # lazyit decisions
 
-104 accepted, proposed, and superseded ADRs live in `docs/03-decisions/`, MADR-lite and numbered.
+105 accepted, proposed, and superseded ADRs live in `docs/03-decisions/`, MADR-lite and numbered.
 They are the answer to "why is it like this", and they are binding: a change that contradicts an
 accepted decision is escalated to the CEO, never made quietly.
 

@@ -14,6 +14,7 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AppTransactionClient } from '../../prisma/prisma-omit';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import { type Principal, isServicePrincipal } from '../../auth/principal';
 import { ConnectorRegistry } from '../connectors.registry';
@@ -133,7 +134,7 @@ export class WorkflowConnectionsService {
   /** The raw, UNREDACTED live row — internal only (the patch merge, the probe); never returned. */
   private async findLive(
     id: string,
-    db: Pick<Prisma.TransactionClient, 'workflowConnection'> = this.prisma,
+    db: Pick<AppTransactionClient, 'workflowConnection'> = this.prisma,
   ) {
     const connection = await db.workflowConnection.findFirst({
       where: { id, deletedAt: null },
@@ -172,7 +173,7 @@ export class WorkflowConnectionsService {
   }
 
   private async updateLocked(
-    tx: Prisma.TransactionClient,
+    tx: AppTransactionClient,
     id: string,
     dto: UpdateWorkflowConnectionInput,
     principal?: Principal,
