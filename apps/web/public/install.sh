@@ -289,7 +289,8 @@ while [ $# -gt 0 ]; do
       echo "                       network path - the token on every report, not only today."
       echo "  --require-checksum   accepted for compatibility and IGNORED - checksum verification"
       echo "                       is required by default now."
-      echo "  --uninstall          stop and remove the agent, its units, its state and its token"
+      echo "  --uninstall          retire this host's node in lazyit, then stop and remove the agent,"
+      echo "                       its units, its state and its token"
       echo "  --keep-config        with --uninstall: keep this host's own limits (never the token)"
       echo "  --interval <dur>     accepted for compatibility and IGNORED - the reporting cadence"
       echo "                       is set centrally in lazyit (Settings -> Instance -> Reporting agents)."
@@ -319,6 +320,26 @@ if [ "$UNINSTALL" = "1" ]; then
     systemctl disable --now lazyit-agent.timer >/dev/null 2>&1 || true
     systemctl stop lazyit-agent.service >/dev/null 2>&1 || true
   fi
+
+  # TELL LAZYIT THIS HOST IS GOING AWAY (#1701), while the binary, its config and the token still
+  # exist. Its node is RETIRED - gone, not silent - instead of going OFFLINE in a few minutes and being
+  # announced as an outage. It runs only AFTER the timer is disarmed, because a tick landing after it
+  # would report again and un-retire the node. It is best-effort: an unreachable instance, an old one,
+  # or a host it has never heard of must never stop an uninstall, so a failure only says how to finish
+  # by hand. Bounded, so a black-holed instance cannot hang the uninstall either.
+  if [ -x "$BIN_PATH" ] && [ -f "$CONFIG_FILE" ]; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout 120 "$BIN_PATH" decommission --config "$CONFIG_FILE" || DECOMMISSION_FAILED=1
+    else
+      "$BIN_PATH" decommission --config "$CONFIG_FILE" || DECOMMISSION_FAILED=1
+    fi
+    if [ "${DECOMMISSION_FAILED:-0}" = "1" ]; then
+      echo "lazyit-agent install: lazyit was not told this host is going away (see above) - retire its node by hand in lazyit, or it will be announced as offline." >&2
+    fi
+  else
+    echo "lazyit-agent install: no agent binary or config left to tell lazyit with - retire this host's node by hand in lazyit if it should stop being watched." >&2
+  fi
+
   rm -f "$SERVICE" "$TIMER"
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -353,8 +374,9 @@ if [ "$UNINSTALL" = "1" ]; then
   fi
 
   echo "lazyit-agent install: uninstalled - binary, both systemd units, $STATE_DIR and the token are gone."
-  echo "This host stops reporting immediately. Its entry in lazyit is untouched: discard it there if you"
-  echo "want it off the map, and revoke the Service Account token if no other host uses it."
+  echo "This host stops reporting immediately. When lazyit confirmed it above, its node is retired, not"
+  echo "deleted: it keeps its history, and its Asset is untouched. Discard it there if you want it off the"
+  echo "map, and revoke the Service Account token if no other host uses it."
   exit 0
 fi
 

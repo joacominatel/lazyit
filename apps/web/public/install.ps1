@@ -118,7 +118,8 @@
   Accepted for compatibility and IGNORED - checksum verification is required by default (#1190).
 
 .PARAMETER Uninstall
-  Stop and remove the agent, its task, its state, its PATH entry and its token.
+  Retire this host's node in lazyit (#1701), then stop and remove the agent, its task, its state, its
+  PATH entry and its token.
 
 .PARAMETER KeepConfig
   With -Uninstall: keep this host's own limits for a later re-install. The token is destroyed either
@@ -417,6 +418,27 @@ if ($Uninstall) {
   # turns every tick into a failed run and an event-log entry, on a host somebody believes is clean.
   try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null }
   catch { }
+
+  # TELL LAZYIT THIS HOST IS GOING AWAY (#1701), while the executable, its config and the token still
+  # exist. Its node is RETIRED - gone, not silent - instead of going OFFLINE and being announced as an
+  # outage. It runs only AFTER the task is gone, because a run landing after it would report again and
+  # un-retire the node. Best-effort: an unreachable instance, an old one, or a host it has never heard
+  # of must never stop an uninstall, so a failure only warns and says how to finish by hand.
+  if ((Test-Path -LiteralPath $BinPath) -and (Test-Path -LiteralPath $ConfigFile)) {
+    $decommissioned = $false
+    try {
+      & $BinPath decommission --config $ConfigFile
+      $decommissioned = ($LASTEXITCODE -eq 0)
+    }
+    catch { }
+    if (-not $decommissioned) {
+      Write-Warning 'lazyit-agent install: lazyit was not told this host is going away (see above) - retire its node by hand in lazyit, or it will be announced as offline.'
+    }
+  }
+  else {
+    Write-Warning 'lazyit-agent install: no agent executable or config left to tell lazyit with - retire this host''s node by hand in lazyit if it should stop being watched.'
+  }
+
   Remove-Item -LiteralPath $BinPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
   # THE PATH ENTRY GOES WITH THE DIRECTORY IT POINTS AT (#1167). An entry naming a directory that no
@@ -455,8 +477,9 @@ if ($Uninstall) {
 
   Say "uninstalled - the executable, the scheduled task, $StateDir and the token are gone."
   if ($pathRemoved) { Say "$InstallDir is off the machine PATH again (a console already open keeps the environment it started with)." }
-  Write-Host 'This host stops reporting immediately. Its entry in lazyit is untouched: discard it there if you'
-  Write-Host 'want it off the map, and revoke the Service Account token if no other host uses it.'
+  Write-Host 'This host stops reporting immediately. When lazyit confirmed it above, its node is retired, not'
+  Write-Host 'deleted: it keeps its history, and its Asset is untouched. Discard it there if you want it off the'
+  Write-Host 'map, and revoke the Service Account token if no other host uses it.'
   exit 0
 }
 
