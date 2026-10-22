@@ -413,8 +413,12 @@ En Windows, desde una PowerShell elevada:
 & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Uninstall
 ```
 
-Detiene y elimina lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea
-programada en Windows — y después el binario, el estado local del agente y su archivo de
+Detiene lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea programada
+en Windows —, después **le avisa a lazyit que esta máquina se va**, para que su nodo quede **retirado**
+en vez de quedar fuera de línea unos minutos más tarde y disparar una alerta (ver **Servidores retirados
+y alertas pausadas** más abajo). La desinstalación muestra si lazyit lo confirmó. Si no pudo llegar a
+lazyit, o tu instancia es anterior a esta función, lo dice y sigue, y podés retirar el nodo a mano.
+Después elimina el binario, el estado local del agente y su archivo de
 configuración, incluido **el token**, que se destruye con cualquiera de las opciones. En Windows
 también saca su directorio del PATH de la máquina, para que no quede nada apuntando a una carpeta
 que ya no existe. Es seguro ejecutarlo dos veces, y seguro sobre una instalación a medias.
@@ -428,10 +432,53 @@ debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`,
 operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
 ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
-Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
-como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
-elimina *de ese host* — si ninguna otra máquina lo usa, revocá la cuenta de servicio en
-[Cuentas de servicio](/help/users-permissions-service-accounts).
+Dos cosas que desinstalar **no** hace, deliberadamente. El nodo del servidor en lazyit queda retirado,
+no borrado: conserva su historial y su activo, y podés descartarlo desde la vista de Servidores si
+querés sacarlo del mapa. Los contenedores y las máquinas virtuales que corría el servidor **no** se
+retiran con él. Y el token solo se elimina *de ese host* — si ninguna otra máquina lo usa, revocá la
+cuenta de servicio en [Cuentas de servicio](/help/users-permissions-service-accounts).
+
+## Servidores retirados y alertas pausadas
+
+"Fuera de línea" y "dado de baja" son cosas distintas. Un servidor que se cayó y uno que diste de baja
+dejan de reportar los dos, y los dos quedaban en el mapa como **Fuera de línea** para siempre, después de
+disparar una notificación de **Agente sin conexión**. Dos acciones le dicen a lazyit cuál de los dos
+está viendo.
+
+**Retirá** un servidor que se fue para siempre. Un nodo retirado:
+
+- sigue en el mapa, en la vista de Servidores y en la vista de Agentes, con una insignia de
+  **Retirado** y con su historial, sus conexiones y su activo vinculado intactos. Retirar un servidor no
+  da de baja el hardware: el activo no se toca.
+- deja de vigilarse. Nunca se marca como fuera de línea ni se avisa, así que deja de llenar la campana.
+- queda fuera de los conteos de la vista de Agentes (no está "atrasado" ni "sin reportar", está dado de
+  baja) y tiene su propio filtro de **retirados**. También queda fuera de los resultados de la lista de
+  software vigilado.
+- **vuelve solo si reporta de nuevo.** Si la máquina en realidad no se había ido, su siguiente reporte
+  la reactiva, y la pestaña **Cambios** del nodo registra cuándo pasó.
+
+Desinstalar el agente retira el nodo por vos (ver **Desinstalar el agente** más arriba), así que solo
+tenés que retirar a mano un servidor cuyo agente no pudiste desinstalar, o uno que nunca reportó un
+agente.
+
+**Pausá las alertas de desconexión** durante un mantenimiento planificado: una ventana de reinicio, un
+cambio de hardware, una mudanza de datacenter. Mientras un nodo está en pausa igual pasa a
+**Fuera de línea** cuando deja de reportar (el mapa sigue siendo fiel), pero no se avisa a nadie, ni en
+la campana ni por correo. Podés pausar por 4 horas, 1 día, 3 días, 1 semana o 30 días (lo máximo que
+acepta lazyit son 90 días), y terminar una pausa antes cuando quieras. Dos cosas para tener en cuenta:
+
+- La pausa cubre una caída que **empieza** dentro de la ventana. Si el servidor sigue fuera de
+  línea cuando termina la ventana, lazyit no lo avisa en ese momento. El estado Fuera de línea ya está
+  en el mapa.
+- Una pausa no es un silenciador permanente. Si un servidor no debería volver a avisar nunca, retiralo.
+
+**Dónde encontrarlas.** Cada nodo tiene un menú de **Ciclo de vida**: en los detalles del nodo en el
+mapa (sección **Ciclo de vida**), en cada fila de la bandeja de **Revisión pendiente** y en cada fila de
+la vista de **Agentes**. Tiene **Retirar** (o **Volver a activar**), **Pausar alertas de desconexión**
+y, mientras haya una pausa en curso, **Terminar la pausa ahora**. Al retirar aparece enseguida un
+**Deshacer**. Estas acciones requieren el permiso **Gestionar topología** (`infra:manage`), y solo una
+persona puede hacerlas, nunca una cuenta de servicio. La única excepción es el agente que retira su
+propio nodo cuando se lo desinstala.
 
 ## Revisión pendiente
 
