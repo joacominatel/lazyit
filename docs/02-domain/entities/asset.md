@@ -208,11 +208,11 @@ concrete instance of a generic [[asset-model]].
 >   `GET /assets/:id/assignments` pick the owner `select` per caller up front:
 >   `assetOwnerUserSelect` (`apps/api/src/users/public-user.ts`) returns the full allowlist for a
 >   `user:read` holder, else `ASSET_OWNER_USER_SELECT`, so the directory columns are never read for a
->   caller who may not see them (no principal → trimmed, fail-closed). The list row and the CSV export
+>   caller who may not see them (no principal → trimmed, fail-closed). The list row and the export (CSV or XLSX)
 >   already carried only the trimmed owner. The wire schema (`AssetOwnerUserSchema`) keeps id, name,
 >   email and `deletedAt` required and the rest optional, so both shapes validate; the web reads only
 >   the four. **Filtering by person needs `user:read`** (`403` otherwise): `GET /assets?assignedToUserId=`,
->   the export's `assignedToUserId`, `GET /asset-assignments?userId=`, and the AI `asset_search`
+>   the export's (CSV or XLSX) `assignedToUserId`, `GET /asset-assignments?userId=`, and the AI `asset_search`
 >   tool's `assignedToUserId` (it runs through the list route). Listing a named person's assets is a
 >   directory-relational lookup, like `GET /users/:id/assignments`. The `/assets/mine` self-read is
 >   unaffected: it filters by the caller's own id from the principal.

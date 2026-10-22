@@ -311,8 +311,8 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   Scope: name and email only; the other owner fields and the by-person filters are #1685, below.
 - **2026-10-22 (#1685) — built.** Without `user:read`, an owner on the asset detail, the restore
   response and `GET /assets/:id/assignments` is selected as id, name, email and `deletedAt` only (an
-  explicit `select` chosen per caller, fail-closed with no principal); the list row and the CSV export
-  already were. The by-person filters — `GET /assets?assignedToUserId=`, its export,
+  explicit `select` chosen per caller, fail-closed with no principal); the list row and the export (CSV or
+  XLSX) already were. The by-person filters — `GET /assets?assignedToUserId=`, the export (CSV or XLSX),
   `GET /asset-assignments?userId=`, and the AI `asset_search` tool through the list route — answer `403`
   without `user:read`. `/assets/mine` is unaffected. Covered by
   `apps/api/src/assets/assets.owner-fields.authz.spec.ts` (real controllers, services and guard; VIEWER
