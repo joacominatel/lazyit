@@ -3,7 +3,7 @@ title: DataExportLog
 tags: [domain, entity, audit, export, reports, security]
 status: accepted
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # DataExportLog
@@ -37,6 +37,9 @@ and it is the fourth source of Reports › Audit ([[0081-audit-log-read-surface]
 - **`filters` is sanitized**: flat JSON of scalars and scalar arrays, strings cut at 200 characters,
   arrays at 50 items, nested objects and empty values dropped. It holds list filter values, never a
   secret.
+- **The file format rides in `filters`** ([[0103-data-export-streaming-path]] §11, 2026-10-22): an XLSX
+  export records `format: "xlsx"` there; a CSV export records no `format` key, so every row written
+  before XLSX existed reads as CSV. No column was added.
 - **`resource` is text, not an enum.** It holds a `DATA_EXPORT_RESOURCES` label from `@lazyit/shared`
   (`ASSETS`, `ACTIVITY`, `AUDIT`, `USERS`, `ACCESS_GRANTS`, `CONSUMABLES`, `PURCHASE_ORDERS`,
   `APPLICATIONS`, `LOCATIONS`, `SUPPLIERS`, `PENDING_UNITS`, `ACCESS_REQUESTS`, `INFRA_NODES`,
@@ -59,7 +62,7 @@ Prisma model `DataExportLog` → table `data_export_logs`.
 | `actorId` | `uuid?` | FK → [[user]] (`@db.Uuid`), `SetNull`. |
 | `serviceAccountId` | `cuid?` | FK → [[service-account]], `SetNull`. |
 | `resource` | `text` | A `DATA_EXPORT_RESOURCES` label. |
-| `filters` | `jsonb` | The sanitized list filters. |
+| `filters` | `jsonb` | The sanitized list filters, plus `format: "xlsx"` for an XLSX export. |
 | `rowCount` | `int` | Matching rows counted before streaming. |
 | `createdAt` | `datetime` | `@default(now())`. |
 
