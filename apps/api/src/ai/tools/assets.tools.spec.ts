@@ -424,6 +424,32 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         error: { code: 'FORBIDDEN', status: 403 },
       });
     });
+
+    // #1685: listing a named person's assets needs user:read — through the route, so the tool cannot
+    // widen it. `mine: true` (the caller's own assets) stays open.
+    it('assignedToUserId: needs user:read, exactly like the route; mine stays open', async () => {
+      const viewer = await h.tools.invoke(
+        'asset_search',
+        { assignedToUserId: ID.ana },
+        ctx(actor('VIEWER')),
+      );
+      expect(viewer).toMatchObject({
+        ok: false,
+        error: { code: 'FORBIDDEN', status: 403 },
+      });
+      const member = await h.tools.invoke(
+        'asset_search',
+        { assignedToUserId: ID.ana },
+        ctx(actor('MEMBER')),
+      );
+      expect(member).toMatchObject({ ok: true });
+      const mine = await h.tools.invoke(
+        'asset_search',
+        { mine: true },
+        ctx(actor('VIEWER')),
+      );
+      expect(mine).toMatchObject({ ok: true });
+    });
   });
 
   describe('asset_get', () => {
