@@ -518,8 +518,9 @@ ships on its own schedule rather than alongside the first one that does.
 
 **Amendment (2026-10-22, #1701) — `decommissioning`.** The report root gains an optional
 `decommissioning: boolean` (`.catch(undefined)`, so an unreadable value degrades to an ordinary report,
-never to a retirement), and the ack gains an optional `retired: boolean`. `lazyit-agent uninstall`
-sends `decommissioning: true` once, before it destroys its token. The server's handling of that report,
+never to a retirement), and the ack gains an optional `retired: boolean`. The installer's uninstall
+(`install.sh --uninstall`, `install.ps1 -Uninstall`) runs the new `lazyit-agent decommission`, which
+sends `decommissioning: true` once, before the token is destroyed. The server's handling of that report,
 and the version-skew story in both directions, are in the §4 amendment of the same date.
 
 ### §3 — Ingestion & reconciliation
@@ -1441,8 +1442,11 @@ additive migration, so every existing row reads as before:
   - **A human** — `POST /infra/nodes/:id/retire`, and `…/unretire` to reverse it. Both are under
     `infra:manage` and human-only, like every other infra write that changes how a node is treated.
     `retiredById` records the user.
-  - **The host itself** — `lazyit-agent uninstall` sends one last report carrying
-    `decommissioning: true` before it destroys its token (§2). The server retires **only** the node that
+  - **The host itself** — the installer's uninstall runs `lazyit-agent decommission`, which sends one
+    last, fully collected report carrying `decommissioning: true` (§2). The installer runs it **after**
+    disarming the timer or scheduled task, because a later tick would report again and un-retire the
+    node. It runs **before** the binary, state and token are removed. The step is best-effort: a
+    failure never stops the uninstall, and it says how to retire the node by hand. The server retires **only** the node that
     report's own `(reportingSource, externalId)` resolves to: the lookup an ordinary check-in makes, so
     a token can retire only what it could already refresh. For a host whose machine-id collided (§3,
     #1141), the same corroboration the ingest path runs picks the clone's own derived-key node, never

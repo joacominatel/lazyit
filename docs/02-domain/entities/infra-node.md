@@ -162,7 +162,8 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   with its history, edges and Asset link intact. **The linked Asset is never touched**: retiring a
   server is not disposing of the hardware. A node is retired in one of two ways:
   - **A human** — `POST /infra/nodes/:id/retire`, which sets `retiredById` to that user.
-  - **Its own agent** on `lazyit-agent uninstall` — a last report with `decommissioning: true`, which
+  - **Its own agent** on uninstall (`lazyit-agent decommission`, run by `install.sh --uninstall` /
+    `install.ps1 -Uninstall`) — a last report with `decommissioning: true`, which
     retires only the node that report's own reporting key resolves to (the clone's derived-key node for
     a collided machine-id) and ingests nothing else.
 
