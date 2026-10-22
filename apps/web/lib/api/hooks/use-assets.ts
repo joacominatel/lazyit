@@ -3,6 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import {
   type AssetFilters,
   getAsset,
@@ -91,6 +92,21 @@ export function useMyAssets({ limit = 200 }: { limit?: number } = {}) {
   return useQuery({
     queryKey: assetKeys.mine(),
     queryFn: () => getMyAssets({ limit }),
+  });
+}
+
+/**
+ * The assets a NAMED person holds right now (`GET /assets?assignedToUserId=`), one page at the hard max
+ * — the asset rows behind the assign dialog's held-assets panel (#1726). The owner filter needs
+ * `user:read` (#1685), so it is idle until the caller passes a user id; pass `undefined` without that
+ * permission. Shares the list cache key with {@link useAssets}, so an asset write invalidates it too.
+ */
+export function useAssetsHeldBy(userId: string | undefined) {
+  const filters: AssetFilters = { assignedToUserId: userId, limit: MAX_PAGE_LIMIT };
+  return useQuery({
+    queryKey: assetKeys.list(filters),
+    queryFn: ({ signal }) => getAssets(filters, signal),
+    enabled: Boolean(userId),
   });
 }
 

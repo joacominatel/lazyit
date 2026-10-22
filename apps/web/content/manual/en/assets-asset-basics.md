@@ -32,7 +32,10 @@ Under **Head start** you can optionally **assign the first owner** right away: p
 you create the asset, they're recorded as its current owner in the same step. Leaving it blank keeps
 the classic flow — ownership is otherwise a separate step you take once the asset exists (see
 [Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
-reason, the asset is still created; you'll just be asked to assign the owner from the asset.
+reason, the asset is still created; you'll just be asked to assign the owner from the asset. Once you
+pick the owner, you also see what they already hold and can tick anything they're handing back; it is
+released right after the asset is created and assigned (see
+[Handing out a replacement](/help/assets-assignments-history#handing-out-a-replacement-what-the-person-already-holds)).
 
 Something a purchase is waiting for? When a [purchase](/help/purchases-recording-purchases) still waits for
 units, the form opens with a **From purchase** picker: choosing a line opens
