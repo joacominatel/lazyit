@@ -129,9 +129,16 @@ Then, all at once:
 Your password is **not** changed. If you think someone knows it, change it too (local accounts) — see
 [Changing your password](#changing-your-password).
 
-It works on single sign-on too: you are signed out of lazyit in this browser and every AI app and
-personal token is disconnected. Your sign-in provider manages your sessions on other devices, so sign out
-there as well if you need to.
+It works on single sign-on too: you are signed out of lazyit in this browser **and on your other devices**
+(each one lands on the sign-in screen the next time it talks to lazyit), and every AI app and personal
+token is disconnected. Signing in again works as usual. What lazyit can't end is your session at the
+sign-in provider itself, so sign out there too if someone else may have used it — otherwise a browser
+still signed in at the provider may be able to sign in to lazyit again.
+
+> **For administrators on single sign-on:** this relies on your provider's access tokens carrying the
+> standard `iat` claim, and preferably `auth_time`. Without `auth_time`, a device that was idle long
+> enough to renew its access token before reaching lazyit again is not signed out. Deactivating or
+> offboarding a person also signs every device of theirs out of lazyit.
 
 The plain **Sign out** is unchanged: it ends your sessions and leaves your AI apps connected.
 

@@ -74,8 +74,9 @@ lazyit notifies you the first time a new AI app or personal token is used on you
 and by email whenever your instance sends email (this security notice can't be turned off). If it wasn't
 you, [revoke it](/help/ai-assistant-connected-apps#revoking) at once, or use
 [Sign out everywhere and disconnect AI apps](/help/getting-started-your-profile#sign-out-everywhere-and-disconnect-ai-apps)
-to end every session and every connection in one step. Change your password (on single sign-on, at your
-sign-in provider), then tell an administrator.
+to end every session and every connection in one step — on single sign-on too, where it signs every
+device out of lazyit (sign out at your sign-in provider as well; lazyit can't end that session). Change
+your password (on single sign-on, at your sign-in provider), then tell an administrator.
 
 ### A shared secret may have leaked
 

@@ -137,9 +137,18 @@ deshacer. Después, todo a la vez:
 Tu contraseña **no** cambia. Si creés que alguien la conoce, cambiala también (cuentas locales) — ver
 [Cambiar tu contraseña](#cambiar-tu-contraseña).
 
-También funciona con inicio de sesión único: se cierra tu sesión de lazyit en este navegador y se
-desconectan todas las apps de IA y los tokens personales. Tu proveedor de inicio de sesión gestiona tus
-sesiones en otros dispositivos, así que cerrá sesión ahí también si hace falta.
+También funciona con inicio de sesión único: se cierra tu sesión de lazyit en este navegador **y en tus
+otros dispositivos** (cada uno vuelve a la pantalla de inicio de sesión la próxima vez que se comunica con
+lazyit), y se desconectan todas las apps de IA y los tokens personales. Volver a iniciar sesión funciona
+como siempre. Lo que lazyit no puede cerrar es tu sesión en el propio proveedor de inicio de sesión, así
+que cerrá sesión ahí también si alguien más pudo haberla usado; si no, un navegador que siga con la sesión
+iniciada en el proveedor podría volver a entrar a lazyit.
+
+> **Para administradores con inicio de sesión único:** esto depende de que los tokens de acceso de tu
+> proveedor incluyan el claim estándar `iat`, y preferentemente `auth_time`. Sin `auth_time`, un
+> dispositivo que estuvo inactivo el tiempo suficiente como para renovar su token de acceso antes de
+> volver a comunicarse con lazyit no se desconecta. Desactivar o dar de baja a una persona también cierra
+> la sesión de lazyit en todos sus dispositivos.
 
 El **Cerrar sesión** de siempre no cambia: termina tus sesiones y deja conectadas tus apps de IA.
 
