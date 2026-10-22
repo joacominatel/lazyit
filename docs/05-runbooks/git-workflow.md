@@ -220,10 +220,16 @@ fully enforced:
    branches and every PR targeting them are all gated. No further action needed (the workflow YAML
    is the DevOps lane — [[0027-ci-pipeline]]).
 3. **Create the labels** listed above (once, by the user).
+4. **Stop auto-delete from removing `master` and `dev`.** The repository deletes a PR's head
+   branch on merge ("Automatically delete head branches"), which is what we want for feature
+   branches — but a promotion PR's head is `dev`, so merging it deleted `dev` (#1664). Keep the
+   setting on and add a ruleset (Settings → Rules → Rulesets) targeting `master` and `dev` with
+   **Restrict deletions**; GitHub does not auto-delete a branch a rule protects. *(Manual.)*
 
 > [!note] `dev` already exists
 > The integration branch `dev` is created and pushed (`origin/dev`). New work branches off it
-> directly — no bootstrap step needed.
+> directly — no bootstrap step needed. If it is ever deleted, recreate it at `master`'s head
+> (after a promotion the two have the same tree) before any work branches off it.
 
 Related: [[claude-workflow]] · [[workflows]] · [[setup]] · [[0027-ci-pipeline]] ·
 the [issue template](../../.github/ISSUE_TEMPLATE/default.md) ·
