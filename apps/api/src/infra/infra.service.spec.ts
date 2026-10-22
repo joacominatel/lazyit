@@ -121,6 +121,7 @@ interface PrismaMock {
     create: Mock;
     update: Mock;
     updateMany: Mock;
+    updateManyAndReturn: Mock;
   };
   infraEdge: {
     findFirst: Mock;
@@ -134,7 +135,12 @@ interface PrismaMock {
   infraNodeSecretRef: { findMany: Mock; upsert: Mock; deleteMany: Mock };
   // The #1143 append-only fact history. `count` backs the per-node write cap, `createMany` is the
   // ONE write path, `findMany` serves the Changes tab.
-  infraNodeFactChange: { count: Mock; createMany: Mock; findMany: Mock };
+  infraNodeFactChange: {
+    count: Mock;
+    createMany: Mock;
+    findMany: Mock;
+    groupBy: Mock;
+  };
   asset: { findFirst: Mock; update: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
@@ -240,6 +246,7 @@ describe('InfraService', () => {
         update: jest.fn(),
         // Default: a conditional write still matches its row (the confirm claim, AUD-059).
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        updateManyAndReturn: jest.fn().mockResolvedValue([]),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -261,6 +268,7 @@ describe('InfraService', () => {
         count: jest.fn().mockResolvedValue(0),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
         findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
       // Two call shapes, because the service uses both: the interactive form (a callback handed a tx
@@ -9758,10 +9766,9 @@ describe('InfraService', () => {
           where: { id: 'node-1', retiredAt: null },
           data: { retiredAt: expect.any(Date) as Date, retiredById: null },
         });
-        // Nothing else: no refresh, no liveness, no create, no child reconcile, no Asset.
+        // Nothing else: no refresh, no liveness, no create, no Asset.
         expect(prisma.infraNode.update).not.toHaveBeenCalled();
         expect(prisma.infraNode.create).not.toHaveBeenCalled();
-        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
         expect(prisma.asset.update).not.toHaveBeenCalled();
         expect(prisma.asset.findFirst).not.toHaveBeenCalled();
         expect(assets.remove).not.toHaveBeenCalled();
@@ -9880,15 +9887,17 @@ describe('InfraService', () => {
             .mockResolvedValueOnce(PEER)
             .mockResolvedValueOnce(null);
 
-          await expect(
-            service.ingestReport(
-              cloneReport([
-                { kind: 'machine-id', value: 'baked' },
-                { kind: 'serial', value: 'SN-BETA' },
-                { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
-              ]),
-            ),
-          ).rejects.toBeInstanceOf(NotFoundException);
+          const outcome = service.ingestReport(
+            cloneReport([
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: 'SN-BETA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+            ]),
+          );
+          await expect(outcome).rejects.toBeInstanceOf(NotFoundException);
+          // The message names what actually happened: a node DOES exist under the key — its peer's.
+          await expect(outcome).rejects.toThrow(/shares its machine id/);
+          expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
           expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
           expect(prisma.infraNode.create).not.toHaveBeenCalled();
         });
@@ -10119,6 +10128,277 @@ describe('InfraService', () => {
         await service.unsnoozeNodeAlerts('node-1');
         expect(prisma.infraNode.update).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("decommissioning retires the host's container and guest children too (#1701 follow-up)", () => {
+    const report = (over: Record<string, unknown> = {}) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.12.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-10-22T12:00:00.000Z',
+        host: { hostname: 'web-01' },
+        decommissioning: true,
+        ...over,
+      });
+    type ChildQuery = {
+      where: {
+        reportingSource: string;
+        source: string;
+        retiredAt: null;
+        OR: { externalId: { startsWith: string } }[];
+      };
+    };
+    const lifecycleRows = () =>
+      (prisma.infraNodeFactChange.createMany.mock.calls as unknown[][]).flatMap(
+        (call) =>
+          (
+            call[0] as {
+              data: { nodeId: string; fact: string; currentValue: string }[];
+            }
+          ).data.filter((row) => row.fact === 'node.lifecycle'),
+      );
+
+    beforeEach(() => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-host',
+        state: 'CONFIRMED',
+        retiredAt: null,
+      });
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-c1' },
+        { id: 'node-g1' },
+      ]);
+      prisma.infraNode.updateManyAndReturn.mockResolvedValue([
+        { id: 'node-c1' },
+        { id: 'node-g1' },
+      ]);
+    });
+
+    it("selects only LIVE, AGENT-reported, active children under the host's OWN key", async () => {
+      await service.ingestReport(report(), AGENT_SA);
+
+      const query = firstArg<ChildQuery>(prisma.infraNode.findMany);
+      expect(query.where).toMatchObject({
+        reportingSource: 'agent:abc123',
+        source: 'AGENT',
+        retiredAt: null,
+      });
+      expect(query.where.OR.map((c) => c.externalId.startsWith)).toEqual([
+        'machine-id-xyz/container/',
+        'machine-id-xyz/guest/',
+      ]);
+    });
+
+    it('retires them in one conditional write and records one lifecycle row each', async () => {
+      const ack = await service.ingestReport(report(), AGENT_SA);
+
+      expect(prisma.infraNode.updateManyAndReturn).toHaveBeenCalledWith({
+        where: { id: { in: ['node-c1', 'node-g1'] }, retiredAt: null },
+        data: { retiredAt: expect.any(Date) as Date, retiredById: null },
+        select: { id: true },
+      });
+      expect(lifecycleRows()).toEqual([
+        expect.objectContaining({
+          nodeId: 'node-host',
+          currentValue: 'retired',
+        }),
+        expect.objectContaining({ nodeId: 'node-c1', currentValue: 'retired' }),
+        expect.objectContaining({ nodeId: 'node-g1', currentValue: 'retired' }),
+      ]);
+      // Never an Asset.
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(ack.retired).toBe(true);
+    });
+
+    it('a child already at its hourly fact cap is retired but gets no row', async () => {
+      prisma.infraNodeFactChange.groupBy.mockResolvedValue([
+        { nodeId: 'node-g1', _count: { _all: 500 } },
+      ]);
+
+      await service.ingestReport(report(), AGENT_SA);
+
+      expect(lifecycleRows().map((r) => r.nodeId)).toEqual([
+        'node-host',
+        'node-c1',
+      ]);
+    });
+
+    it('still sweeps children when the host was ALREADY retired (a second uninstall)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-host',
+        state: 'CONFIRMED',
+        retiredAt: new Date('2026-10-01T00:00:00Z'),
+      });
+
+      await service.ingestReport(report(), AGENT_SA);
+
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateManyAndReturn).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failure retiring children never fails the decommission — the host stays retired', async () => {
+      prisma.infraNode.updateManyAndReturn.mockRejectedValue(
+        new Error('db hiccup'),
+      );
+
+      const ack = await service.ingestReport(report(), AGENT_SA);
+
+      expect(ack.retired).toBe(true);
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    describe('a clone retires ITS children, never its peer’s', () => {
+      const cloneReport = () =>
+        report({
+          reportingSource: 'agent:clone',
+          externalId: 'machine-id-baked',
+          host: {
+            hostname: 'web-02',
+            identifiers: [
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: 'SN-BETA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+            ],
+          },
+        });
+      const peerHost = {
+        hostname: 'web-01',
+        identifiers: [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ],
+      };
+
+      beforeEach(() => {
+        prisma.infraNode.findFirst
+          .mockResolvedValueOnce({
+            id: 'node-peer',
+            state: 'CONFIRMED',
+            retiredAt: null,
+          })
+          .mockResolvedValueOnce({
+            id: 'node-clone',
+            state: 'PENDING',
+            retiredAt: null,
+          });
+      });
+
+      it('scopes the children to the DERIVED key', async () => {
+        prisma.$queryRaw.mockResolvedValue([{ host: peerHost }]);
+
+        await service.ingestReport(cloneReport(), AGENT_SA);
+
+        const query = firstArg<ChildQuery>(prisma.infraNode.findMany);
+        expect(query.where.OR.map((c) => c.externalId.startsWith)).toEqual([
+          'machine-id-baked#SN-BETA/container/',
+          'machine-id-baked#SN-BETA/guest/',
+        ]);
+      });
+
+      it('retires no child once a second machine has been seen on the clone node (#1158, sticky)', async () => {
+        prisma.$queryRaw
+          .mockResolvedValueOnce([{ host: peerHost }]) // the peer's evidence
+          .mockResolvedValueOnce([
+            {
+              host: { hostname: 'web-02' },
+              rest: {
+                identityConflict: {
+                  reportedExternalId: 'machine-id-baked',
+                  sharedKeySeenAt: '2026-10-01T00:00:00.000Z',
+                },
+              },
+            },
+          ]); // the clone node's own blob
+
+        const ack = await service.ingestReport(cloneReport(), AGENT_SA);
+
+        expect(ack.nodeId).toBe('node-clone');
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        expect(prisma.infraNode.updateManyAndReturn).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('a retired GUEST child its hypervisor lists again is un-retired (#1701)', () => {
+    it('clears the lifecycle columns on the refresh and records the transition', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-hv',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'pve-01',
+        agentPolicy: null,
+        policyRevision: null,
+        retiredAt: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-hv',
+        state: 'CONFIRMED',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: null,
+          assetId: null,
+          deletedAt: null,
+          retiredAt: new Date('2026-10-20T00:00:00.000Z'),
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '1.12.0',
+          reportingSource: 'agent:pve',
+          externalId: 'machine-id-pve1',
+          reportedAt: '2026-10-22T12:00:00.000Z',
+          host: {
+            hostname: 'pve-01',
+            hypervisor: {
+              platform: 'proxmox',
+              version: '8.4',
+              nodeName: 'pve1',
+            },
+            guests: [
+              { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+            ],
+          },
+        }),
+        AGENT_SA,
+      );
+
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      expect(childUpdate.data).toMatchObject({
+        retiredAt: null,
+        retiredById: null,
+      });
+      const rows = (
+        prisma.infraNodeFactChange.createMany.mock.calls as unknown[][]
+      ).flatMap(
+        (call) =>
+          (
+            call[0] as {
+              data: { nodeId: string; fact: string; previousValue: string }[];
+            }
+          ).data,
+      );
+      expect(rows).toEqual([
+        expect.objectContaining({
+          nodeId: 'node-g1',
+          fact: 'node.lifecycle',
+          previousValue: 'retired',
+          currentValue: 'active',
+        }),
+      ]);
     });
   });
 });

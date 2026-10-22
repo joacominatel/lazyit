@@ -1200,41 +1200,56 @@ export class InfraService {
   }
 
   /**
-   * The uninstaller's last report (#1701, epic #1146 Q11): retire THIS host's own node, and nothing
-   * else.
+   * The uninstaller's last report (#1701, epic #1146 Q11): retire THIS host's own node and the
+   * container and guest children it reported, and nothing else.
    *
    * WHICH NODE. The one the report's own `(reportingSource, externalId)` resolves to — the same lookup
    * an ordinary check-in makes, so a token can retire only what it could already refresh. A host whose
    * machine-id COLLIDED (#1141) does not own the node under that key: its own node lives under the
    * derived `<externalId>#<discriminator>` key, so the same corroboration the ingest path runs decides
-   * which one is meant. When the evidence cannot name the clone's own node (no discriminator), nothing
-   * is retired — refusing is the only answer that cannot retire a peer.
+   * which one is meant. When the evidence cannot name the clone's own node, nothing is retired —
+   * refusing is the only answer that cannot retire a peer.
+   *
+   * WHICH CHILDREN (CEO decision 2026-10-22). Every live, agent-reported child keyed under THAT node's
+   * own key: `<key>/container/<name>` and `<key>/guest/<ref>`, in the same reporting source — exactly
+   * the rows the ingest path's own reconcile would touch, so a clone's decommission can never reach its
+   * peer's children (their prefix is the peer's key) and a hand-drawn node is never retired. The ingest
+   * path's two refusals apply here too: a key that cannot scope children unambiguously, and a clone node
+   * on which a second machine has been seen, retire the host only. See
+   * {@link retireDecommissionedChildren}.
    *
    * WHAT IT DOES NOT TOUCH. The report's facts are not ingested (the host is leaving; its last in-service
-   * snapshot stands), liveness is not refreshed, no child is retired, and the linked Asset is never
-   * read or written — retiring a server is not disposing of the hardware.
+   * snapshot stands), liveness is not refreshed, and no linked Asset is ever read or written — retiring
+   * a server is not disposing of the hardware.
    *
    * IDEMPOTENT. A node that is already retired keeps its original `retiredAt`/`retiredById`; the ack
-   * still says `retired`. The retirement is recorded in the fact history only when it actually
-   * happened, as a `node.lifecycle` row, because this is a MACHINE transition on the ingest path —
-   * a human retire is curation and is attributed by `retiredById` instead.
+   * still says `retired`. A retirement is recorded in the fact history only when it actually happened,
+   * as a `node.lifecycle` row, because it is a MACHINE transition on the ingest path — a human retire is
+   * curation and is attributed by `retiredById` instead.
    *
    * An unknown host is a 404: there is nothing to retire, and a decommission never creates a node.
    */
   private async decommissionReportingHost(
     report: AgentReport,
   ): Promise<AgentReportAck> {
-    const node = await this.resolveDecommissionTarget(report);
-    if (node === null) {
+    const target = await this.resolveDecommissionTarget(report);
+    if (target.kind === 'unknown') {
       throw new NotFoundException(
         'No live node is reporting under this host key, so there is nothing to retire.',
       );
     }
+    if (target.kind === 'cloneWithoutNode') {
+      throw new NotFoundException(
+        "This host shares its machine id with another server and has no node of its own in lazyit, so nothing was retired. The other server's node was left alone.",
+      );
+    }
+    const { node } = target;
+    const now = new Date();
     if (!node.retiredAt) {
       // Conditional on still being active, so two racing uninstall reports record one transition.
       const { count } = await this.prisma.infraNode.updateMany({
         where: { id: node.id, retiredAt: null },
-        data: { retiredAt: new Date(), retiredById: null },
+        data: { retiredAt: now, retiredById: null },
       });
       if (count > 0) {
         await this.recordFactChanges(node.id, [
@@ -1250,6 +1265,15 @@ export class InfraService {
         );
       }
     }
+    // Attempted even when the host was already retired: a second uninstall still sweeps up a child the
+    // first one missed. Never fails the decommission — the host's own retirement already stands.
+    if (target.childScope) {
+      await this.retireDecommissionedChildren(
+        report.reportingSource,
+        target.hostKey,
+        now,
+      );
+    }
     return this.finishAck(
       { nodeId: node.id, state: node.state, accepted: true, retired: true },
       undefined,
@@ -1257,12 +1281,21 @@ export class InfraService {
     );
   }
 
-  /** The node a decommissioning report means — see {@link decommissionReportingHost}. */
-  private async resolveDecommissionTarget(report: AgentReport): Promise<{
-    id: string;
-    state: InfraNodeState;
-    retiredAt: Date | null;
-  } | null> {
+  /**
+   * The node a decommissioning report means — see {@link decommissionReportingHost}. `hostKey` is that
+   * node's OWN reporting key (the derived one for a clone), which is what its children are keyed under.
+   * `childScope` is false when the ingest path itself would refuse to reconcile children under it.
+   */
+  private async resolveDecommissionTarget(report: AgentReport): Promise<
+    | { kind: 'unknown' }
+    | { kind: 'cloneWithoutNode' }
+    | {
+        kind: 'found';
+        node: { id: string; state: InfraNodeState; retiredAt: Date | null };
+        hostKey: string;
+        childScope: boolean;
+      }
+  > {
     const select = { id: true, state: true, retiredAt: true } as const;
     const existing = await this.prisma.infraNode.findFirst({
       where: {
@@ -1271,20 +1304,124 @@ export class InfraService {
       },
       select,
     });
-    if (!existing) return null;
+    if (!existing) return { kind: 'unknown' };
     const stored = await this.storedNodeSpecs(existing.id);
     const incoming = hostIdentityEvidence(report.host);
-    if (!isClonedMachineId(stored.identity, incoming)) return existing;
+    if (!isClonedMachineId(stored.identity, incoming)) {
+      return {
+        kind: 'found',
+        node: existing,
+        hostKey: report.externalId,
+        childScope: isUniqueContainerScope(report.externalId),
+      };
+    }
     // A clone (#1141): the node under the reported key is its PEER's.
     const discriminator = identityDiscriminator(incoming);
-    if (discriminator === undefined) return null;
-    return this.prisma.infraNode.findFirst({
-      where: {
-        reportingSource: report.reportingSource,
-        externalId: childSafeDisambiguatedId(report.externalId, discriminator),
-      },
+    if (discriminator === undefined) return { kind: 'cloneWithoutNode' };
+    const hostKey = childSafeDisambiguatedId(report.externalId, discriminator);
+    const own = await this.prisma.infraNode.findFirst({
+      where: { reportingSource: report.reportingSource, externalId: hostKey },
       select,
     });
+    if (!own) return { kind: 'cloneWithoutNode' };
+    // The ingest path's two child refusals for a clone (#1158): a key that cannot scope child keys,
+    // and a clone node on which a second machine has already been seen (sticky).
+    const ownStored = await this.storedNodeSpecs(own.id);
+    return {
+      kind: 'found',
+      node: own,
+      hostKey,
+      childScope:
+        isUniqueContainerScope(hostKey) &&
+        storedSharedKeySeenAt(ownStored.rest) === undefined,
+    };
+  }
+
+  /**
+   * Retire the decommissioned host's live, agent-reported container and guest children (CEO decision
+   * 2026-10-22). Without this, the moment the host stops listing them they go stale on their own clock
+   * and are each announced as an outage — the tray full of ghosts retire exists to prevent.
+   *
+   * Bounded by construction: one read of the children (at most `AGENT_CONTAINERS_MAX` +
+   * `AGENT_GUESTS_MAX` per host), one conditional bulk write, and the lifecycle rows in ONE insert
+   * after one grouped count, so a 500-guest hypervisor costs four statements, not a thousand. The
+   * per-node hourly fact cap is honoured (a child already at its cap gets no row). Like every other
+   * child reconcile it never fails the report: a failure is a warning, and the host stays retired.
+   * A child that is listed again later is un-retired by the ordinary refresh, exactly like its host.
+   */
+  private async retireDecommissionedChildren(
+    reportingSource: string,
+    hostKey: string,
+    now: Date,
+  ): Promise<void> {
+    try {
+      const children = await this.prisma.infraNode.findMany({
+        where: {
+          reportingSource,
+          source: 'AGENT',
+          retiredAt: null,
+          OR: [
+            {
+              externalId: {
+                startsWith: escapeLikePrefix(
+                  containerExternalIdPrefix(hostKey),
+                ),
+              },
+            },
+            {
+              externalId: {
+                startsWith: escapeLikePrefix(guestExternalIdPrefix(hostKey)),
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      if (children.length === 0) return;
+      const retired = await this.prisma.infraNode.updateManyAndReturn({
+        where: { id: { in: children.map((c) => c.id) }, retiredAt: null },
+        data: { retiredAt: now, retiredById: null },
+        select: { id: true },
+      });
+      if (retired.length === 0) return;
+      this.logger.log(
+        `${retired.length} container/guest child node(s) of ${hostKey} retired with their host's uninstall.`,
+      );
+      const ids = retired.map((row) => row.id);
+      const recent = await this.prisma.infraNodeFactChange.groupBy({
+        by: ['nodeId'],
+        where: {
+          nodeId: { in: ids },
+          createdAt: {
+            gte: new Date(now.getTime() - INFRA_FACT_CHANGES_WINDOW_MS),
+          },
+        },
+        _count: { _all: true },
+      });
+      const full = new Set(
+        recent
+          .filter(
+            (row) => row._count._all >= INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW,
+          )
+          .map((row) => row.nodeId),
+      );
+      const rows = ids
+        .filter((id) => !full.has(id))
+        .map((nodeId) => ({
+          nodeId,
+          kind: 'FACT_CHANGED' as const,
+          fact: INFRA_NODE_LIFECYCLE_FACT,
+          previousValue: 'active',
+          currentValue: 'retired',
+        }));
+      if (rows.length > 0) {
+        await this.prisma.infraNodeFactChange.createMany({ data: rows });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not retire the container/guest children of ${hostKey} — the host itself is retired. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
