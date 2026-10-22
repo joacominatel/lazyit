@@ -27,6 +27,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { ExportService } from '../common/export';
 import { ExportLimiter } from '../common/export/export-limiter';
+import { XLSX_CONTENT_TYPE } from '../common/export';
+import { XLSX_STYLE } from '../common/export/xlsx-sheet';
+import { readXlsx, xlsxRecords } from '../../test/xlsx-reader';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import {
   PurchaseOrdersService,
@@ -376,5 +379,126 @@ describe('GET /purchase-orders/export', () => {
     await http()
       .get('/purchase-orders/export?role=ADMIN&supplierId=nope')
       .expect(400);
+  });
+
+  describe('format=xlsx (ADR-0103 §11)', () => {
+    const binary = (path: string) =>
+      http()
+        .get(path)
+        .buffer(true)
+        .parse((res, done) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+          res.on('end', () => done(null, Buffer.concat(chunks)));
+        });
+
+    it('one sheet with the CSV header, typed cells, money in major units beside its currency, one audit row', async () => {
+      const rows = [
+        purchaseRow({
+          lines: [lineRow({ quantity: 2, unitPrice: 123456n })],
+        }),
+        purchaseRow({
+          id: 'clpo00000000000000000002',
+          reference: '+SUM(A1)',
+          supplier: null,
+          status: 'DRAFT',
+          currency: null,
+          orderDate: null,
+          createdAt: new Date('2026-10-01T10:00:00.000Z'),
+          lines: [],
+        }),
+      ];
+      prisma.purchaseOrder.count.mockResolvedValue(rows.length);
+      prisma.purchaseOrder.findMany.mockResolvedValue(rows);
+      prisma.asset.groupBy.mockResolvedValue([
+        {
+          purchaseOrderLineId: 'clline000000000000000001',
+          _count: { _all: 1 },
+        },
+      ]);
+
+      const res = await binary(
+        '/purchase-orders/export?role=MEMBER&status=ORDERED,DRAFT&format=xlsx',
+      ).expect(200);
+
+      expect(res.headers['content-type']).toBe(XLSX_CONTENT_TYPE);
+      expect(res.headers['content-disposition']).toMatch(
+        /^attachment; filename="lazyit-purchases-\d{4}-\d{2}-\d{2}\.xlsx"$/,
+      );
+      const read = await readXlsx(res.body as Buffer);
+      expect(read.parts['xl/workbook.xml']).toContain(
+        '<sheet name="purchases"',
+      );
+      expect(
+        [...read.rows.get(1)!.values()].map((c) => c.value).join(','),
+      ).toBe(HEADER);
+      const [first, second] = xlsxRecords(read);
+      expect(first.reference).toMatchObject({
+        type: 'inlineStr',
+        value: 'OC-1',
+      });
+      expect(first.orderDate).toMatchObject({
+        type: 'n',
+        style: XLSX_STYLE.date,
+        value: '46296',
+      });
+      expect(first.lineCount).toMatchObject({ type: 'n', value: '1' });
+      expect(first.unitsPending).toMatchObject({ type: 'n', value: '1' });
+      // 2 × 1234.56: the total is a number in major units, its currency in the next column.
+      expect(first.total).toEqual({
+        ref: 'N2',
+        style: XLSX_STYLE.money,
+        type: 'n',
+        value: '2469.12',
+      });
+      expect(first.currency).toMatchObject({ ref: 'O2', value: 'USD' });
+      expect(first.createdAt).toMatchObject({
+        style: XLSX_STYLE.dateTime,
+        value: '46297.41666666667',
+      });
+      // Text is never a formula and needs no quote guard.
+      expect(second.reference).toMatchObject({
+        type: 'inlineStr',
+        value: '+SUM(A1)',
+      });
+      expect(second.supplier).toBeUndefined();
+      expect(read.parts['xl/worksheets/sheet1.xml']).not.toContain(
+        'never exported',
+      );
+
+      expect(prisma.dataExportLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.dataExportLog.create).toHaveBeenCalledWith({
+        data: {
+          actorId: USER_ID,
+          serviceAccountId: null,
+          resource: 'PURCHASE_ORDERS',
+          filters: {
+            status: ['ORDERED', 'DRAFT'],
+            deleted: 'active',
+            format: 'xlsx',
+          },
+          rowCount: 2,
+        },
+      });
+    });
+
+    it('keeps the permission and the soft-delete gate', async () => {
+      await http()
+        .get('/purchase-orders/export?role=VIEWER&format=xlsx')
+        .expect(403);
+      await http()
+        .get('/purchase-orders/export?role=MEMBER&deleted=only&format=xlsx')
+        .expect(403);
+      expect(prisma.purchaseOrder.count).not.toHaveBeenCalled();
+      expect(prisma.dataExportLog.create).not.toHaveBeenCalled();
+    });
+
+    it('400 on an unknown format, before any read or audit row', async () => {
+      await http()
+        .get('/purchase-orders/export?role=ADMIN&format=ods')
+        .expect(400);
+      expect(prisma.purchaseOrder.count).not.toHaveBeenCalled();
+      expect(prisma.dataExportLog.create).not.toHaveBeenCalled();
+    });
   });
 });

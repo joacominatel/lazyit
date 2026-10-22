@@ -18,6 +18,13 @@ import {
   type CsvExportSpec,
 } from './export.service';
 import type { KeysetCursor } from './keyset';
+import { XLSX_CONTENT_TYPE } from './stream-xlsx';
+import { XLSX_STYLE } from './xlsx-sheet';
+import {
+  collectBuffer,
+  readXlsx,
+  xlsxRecords,
+} from '../../../test/xlsx-reader';
 
 jest.mock('../../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -225,6 +232,130 @@ describe('ExportService.exportCsv — a batch failing mid-stream', () => {
       boom.stack,
     );
     await expect(service.exportCsv(spec())).resolves.toBeDefined();
+    logged.mockRestore();
+  });
+});
+
+describe('ExportService.exportFile — format xlsx (ADR-0103 §11)', () => {
+  it('streams a workbook with the same header and rows, and records the format on the audit row', async () => {
+    const { service, create } = setup();
+    const file = await service.exportFile({
+      ...spec({ stamp: true }),
+      format: 'xlsx',
+    });
+
+    const headers = file.getHeaders();
+    expect(headers.type).toBe(XLSX_CONTENT_TYPE);
+    expect(headers.disposition).toMatch(
+      /^attachment; filename="lazyit-users-\d{4}-\d{2}-\d{2}\.xlsx"$/,
+    );
+    const read = await readXlsx(await collectBuffer(file.getStream()));
+    expect(read.parts['xl/workbook.xml']).toContain('<sheet name="users"');
+    // No provenance line: the header is row 1 and the formula-looking value is literal text.
+    expect(read.rows.get(1)!.get('A')).toMatchObject({
+      value: 'name',
+      style: XLSX_STYLE.header,
+    });
+    expect(xlsxRecords(read).map((r) => r.name.value)).toEqual(['Dock', '=x']);
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        actorId: '11111111-1111-4111-8111-111111111111',
+        serviceAccountId: null,
+        resource: 'USERS',
+        filters: { q: 'ana', format: 'xlsx' },
+        rowCount: 2,
+      },
+    });
+  });
+
+  it('format csv is exactly exportCsv: no format key on the audit row', async () => {
+    const { service, create } = setup();
+    const file = await service.exportFile({ ...spec(), format: 'csv' });
+    expect(await drain(file)).toBe("\uFEFFname\r\nDock\r\n'=x\r\n");
+    const [[call]] = create.mock.calls as [[{ data: { filters: unknown } }]];
+    expect(call.data.filters).toEqual({ q: 'ana' });
+  });
+
+  it('keeps the cap and the limiter: 422 above the cap, 429 while one runs, slot freed on completion', async () => {
+    const { service, create } = setup();
+    await expect(
+      service.exportFile({
+        ...spec({ count: () => Promise.resolve(100_001) }),
+        format: 'xlsx',
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(create).not.toHaveBeenCalled();
+
+    const first = await service.exportFile({ ...spec(), format: 'xlsx' });
+    await expect(
+      service.exportFile({ ...spec(), format: 'xlsx' }),
+    ).rejects.toMatchObject({ status: HttpStatus.TOO_MANY_REQUESTS });
+
+    await collectBuffer(first.getStream());
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(
+      service.exportFile({ ...spec(), format: 'xlsx' }),
+    ).resolves.toBeDefined();
+  });
+
+  it('frees the slot when the client disconnects mid-download', async () => {
+    const { service } = setup();
+    const res = response();
+    await service.exportFile({ ...spec({ response: res }), format: 'xlsx' });
+
+    res.emit('close');
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(
+      service.exportFile({ ...spec(), format: 'xlsx' }),
+    ).resolves.toBeDefined();
+  });
+
+  it('a batch failing mid-stream destroys the response and frees the slot', async () => {
+    const { service } = setup();
+    const logged = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const res = response();
+    const destroy = jest.fn(() => res.emit('close'));
+    Object.assign(res, { destroy, destroyed: false, headersSent: true });
+
+    const boom = new Error('db down');
+    let calls = 0;
+    const fetchBatch = (_after: KeysetCursor | null, take: number) => {
+      calls += 1;
+      if (calls > 1) return Promise.reject(boom);
+      return Promise.resolve(
+        Array.from({ length: take }, (_, i) => ({
+          id: `r${String(take - i).padStart(5, '0')}`,
+          createdAt: new Date(Date.UTC(2026, 9, 16, 0, 0, 0, take - i)),
+          name: 'row',
+        })),
+      );
+    };
+    const file = await service.exportFile({
+      ...spec({ response: res, fetchBatch }),
+      format: 'xlsx',
+    });
+
+    const stream = file.getStream();
+    const failed = new Promise<void>((resolve) =>
+      stream.once('error', (err: Error) => {
+        file.errorHandler(err, res);
+        resolve();
+      }),
+    );
+    stream.resume();
+    await failed;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(destroy).toHaveBeenCalledWith(boom);
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('db down'),
+      boom.stack,
+    );
+    await expect(
+      service.exportFile({ ...spec(), format: 'xlsx' }),
+    ).resolves.toBeDefined();
     logged.mockRestore();
   });
 });
