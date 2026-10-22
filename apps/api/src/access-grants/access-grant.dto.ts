@@ -5,6 +5,7 @@ import {
   BatchResultSchema,
   BatchRevokeGrantsSchema,
   CreateAccessGrantSchema,
+  MyAccessGrantListPageSchema,
   RevokeAccessGrantSchema,
   UpdateAccessGrantExpirySchema,
   UpdateAccessGrantNotesSchema,
@@ -18,6 +19,10 @@ export class AccessGrantDto extends createZodDto(AccessGrantSchema) {}
 // The paginated `GET /access-grants` envelope ({ items, total, limit, offset }) — ADR-0030.
 export class AccessGrantListPageDto extends createZodDto(
   AccessGrantListPageSchema,
+) {}
+// The self-scope `GET /access-grants/mine` envelope: each grant carries the coarse `provisioning` (#1700).
+export class MyAccessGrantListPageDto extends createZodDto(
+  MyAccessGrantListPageSchema,
 ) {}
 export class CreateAccessGrantDto extends createZodDto(
   CreateAccessGrantSchema,

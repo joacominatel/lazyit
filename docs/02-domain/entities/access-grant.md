@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # AccessGrant
@@ -147,7 +147,9 @@ create/revoke (see the note above). Documented via Swagger ([[0018-api-documenta
 - `GET /access-grants/mine?activeOnly=&includeExpired=&limit=&offset=&page=` — the caller's **own**
   grants, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to false** (revoked
   history included). A self-read: any authenticated human, no `accessGrant:read` needed; the user id
-  comes only from the principal, never a parameter. Service accounts get `403`.
+  comes only from the principal, never a parameter. Service accounts get `403`. Each grant carries the
+  coarse `provisioning` status (#1700) — see [Provisioning status](#provisioning-status). Only this
+  self-read returns it; the admin lists do not.
 - `GET /access-grants/:id` — one by id (`404` if missing).
 - `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()` and the principal in
   `revokedById` or `revokedBySaId`. Already revoked, or revoked concurrently first → `409`.
@@ -204,12 +206,49 @@ follows the read the screen would need to resolve it: user names and the email c
 Without it the cell holds the id the list already returns, and the email column is left out. Every
 export writes a [[data-export-log]] row.
 
+## Provisioning status
+
+The coarse, requester-facing answer to "was my account in the application set up?" (#1700, CEO
+decision Q2 on #1344). Run history stays behind `workflow:read` ([[workflow-engine/security]] §4), so a
+grantee cannot read it; instead the self-scope reads carry one of four values
+(`GrantProvisioningSchema` in `@lazyit/shared`):
+
+| The grant's latest `ACCESS_GRANTED` [[workflow-run]] | `provisioning` | Shown as |
+| --- | --- | --- |
+| none | `NONE` | No automation |
+| `PENDING`, `RUNNING` | `IN_PROGRESS` | Setup in progress |
+| `SUCCEEDED` | `DONE` | Set up |
+| `AWAITING_INPUT` (a manual step), `FAILED`, `COMPENSATED` | `WAITING_ON_IT` | Waiting on IT |
+
+- **Derived on read, no column, no migration.** The source is the latest run linked by `accessGrantId`
+  with trigger `ACCESS_GRANTED`: highest `replaySeq` first (a replay-latest clones to seq + 1,
+  [[0057-retry-fix-and-replay]]), then the newest. A retry resumes the same run, so its status moves
+  with it. A deprovision (`ACCESS_REVOKED`) run is not provisioning and never changes the value.
+- **`NONE`** also covers a grant opened before the application had an enabled workflow, a grant whose
+  trigger lookup failed (the grant path swallows it, [[0054-applications-workflow-engine]]), and a
+  cloned grant the clone did not run the engine for ([[0058-user-manager-and-clone-actions]]).
+- **`COMPENSATED`** reads as waiting on IT: it is a failure whose external effects were rolled back, so
+  the account does not exist. Retry and replay-latest accept only `FAILED`, so this one clears only
+  with a new grant (a new organic run). `AWAITING_INPUT` is only a manual step today (no inbound-callback step
+  ships yet).
+- **One batched query per page** (`AccessGrantsService.provisioningFor`, on the
+  `workflow_runs(accessGrantId)` index): it selects only the grant id and the run status — no workflow
+  name, step, error or payload is read, so none can leak.
+- **Where it appears:** `GET /access-grants/mine` (every grant) and `GET /access-requests/mine` (the grant
+  an approved request created, **while that grant is still active**; `null` otherwise, including after a
+  manual revoke or the expiry sweep — [[access-request]]). The field is optional in the contract and
+  tolerant on read (an unknown value parses as absent), so a client that predates it ignores it, and an
+  older API simply omits it. The web shows it on the active grants of `/profile` and on an approved
+  request whose access is still active; revoked history shows none.
+- The mapping lives in `apps/api/src/access-grants/grant-provisioning.ts`; a run state added later
+  reads `WAITING_ON_IT` until it is mapped there.
+
 ## Not yet implemented (deferred)
 
 - A soft-delete-time guard on apps/users with active grants. (Auto-revoke on `expiresAt` is now
   implemented — see `expiresAt` above.)
 
-Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
+Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] · [[workflow-run]] ·
 [[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
 [[0016-auth-strategy-deferred]] · [[0022-draft-visibility-auth-shim]] ·

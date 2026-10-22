@@ -29,6 +29,7 @@ import { parsePageQuery } from '../common/parse-page-query';
 import {
   AccessGrantDto,
   AccessGrantListPageDto,
+  MyAccessGrantListPageDto,
   BatchResultDto,
   BatchRevokeGrantsDto,
   CreateAccessGrantDto,
@@ -154,7 +155,7 @@ export class AccessGrantsController {
   @Get('mine')
   @ApiOperation({
     summary:
-      "The caller's OWN access grants (active + revoked history). Any authenticated human; no accessGrant:read required (a self-read). Service accounts 403. Paginated (ADR-0030).",
+      "The caller's OWN access grants (active + revoked history). Any authenticated human; no accessGrant:read required (a self-read). Service accounts 403. Paginated (ADR-0030). Each grant carries a coarse `provisioning` status (NONE, IN_PROGRESS, DONE, WAITING_ON_IT) — no workflow detail.",
   })
   @ApiQuery({
     name: 'activeOnly',
@@ -188,7 +189,7 @@ export class AccessGrantsController {
     type: Number,
     description: '1-based page number (alternative to offset).',
   })
-  @ApiOkResponse({ type: AccessGrantListPageDto })
+  @ApiOkResponse({ type: MyAccessGrantListPageDto })
   findMine(
     @Query('activeOnly') activeOnly?: string,
     @Query('includeExpired') includeExpired?: string,
@@ -202,9 +203,11 @@ export class AccessGrantsController {
     if (!user) {
       throw new UnauthorizedException('Not authenticated');
     }
-    return this.grants.findPage(
+    // Each grant carries the coarse `provisioning` status (#1700): only on this self-read, never on the
+    // admin lists, so run history stays behind `workflow:read`.
+    return this.grants.findMine(
+      user.id,
       {
-        userId: user.id,
         activeOnly: parseBooleanQuery(activeOnly, false),
         includeExpired: parseBooleanQuery(includeExpired, true),
       },

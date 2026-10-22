@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChangePasswordPanel } from "./change-password-panel";
 import { ProfileNamePanel } from "./profile-name-panel";
+import { ProvisioningBadge } from "./provisioning-badge";
 import { AccessRequestStatusBadge } from "@/app/(app)/applications/_components/access-request-status-badge";
 import { AssetStatusBadge } from "@/app/(app)/assets/_components/asset-status-badge";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
@@ -20,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { UserAvatar } from "@/components/user-avatar";
+import { requestProvisioning } from "@/lib/access-grants/provisioning";
 import { filedByOther } from "@/lib/access-requests/on-behalf";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useMyAssets } from "@/lib/api/hooks/use-assets";
@@ -44,6 +46,10 @@ import { useCan } from "@/lib/hooks/use-permissions";
  * catalog reads a VIEWER can partly hit and are wired to `user:manage` affordances. The `mine` asset
  * rows already inline model/category/location, so only the grant rows need the applications catalog
  * (VIEWER holds `application:read`) to resolve an application name.
+ *
+ * Active grants and approved requests carry a coarse provisioning pill (#1700): no automation, in
+ * progress, done or waiting on IT — never the workflow, its steps or its errors (run history is
+ * admin-only).
  */
 export function ProfileView() {
   const t = useTranslations("profile");
@@ -216,6 +222,9 @@ export function ProfileView() {
                           {t("access.expired")}
                         </StatusBadge>
                       )}
+                      {grant.provisioning && (
+                        <ProvisioningBadge status={grant.provisioning} />
+                      )}
                     </div>
                     <p className="truncate text-sm text-muted-foreground">
                       {t("access.granted", { date: date(grant.grantedAt) })}
@@ -244,42 +253,46 @@ export function ProfileView() {
           <p className="text-sm text-muted-foreground">{t("requests.empty")}</p>
         ) : (
           <ul className="divide-y">
-            {accessRequests.map((request) => (
-              <li
-                key={request.id}
-                className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link
-                    href={`/applications/${request.applicationId}`}
-                    className="truncate font-medium hover:underline"
-                  >
-                    {appNameById.get(request.applicationId) ??
-                      t("access.applicationFallback")}
-                  </Link>
-                  {request.accessLevel && (
-                    <Badge variant="secondary">{request.accessLevel}</Badge>
+            {accessRequests.map((request) => {
+              const provisioning = requestProvisioning(request);
+              return (
+                <li
+                  key={request.id}
+                  className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/applications/${request.applicationId}`}
+                      className="truncate font-medium hover:underline"
+                    >
+                      {appNameById.get(request.applicationId) ??
+                        t("access.applicationFallback")}
+                    </Link>
+                    {request.accessLevel && (
+                      <Badge variant="secondary">{request.accessLevel}</Badge>
+                    )}
+                    <AccessRequestStatusBadge status={request.status} />
+                    {provisioning && <ProvisioningBadge status={provisioning} />}
+                  </div>
+                  {request.justification && (
+                    <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                      {request.justification}
+                    </p>
                   )}
-                  <AccessRequestStatusBadge status={request.status} />
-                </div>
-                {request.justification && (
-                  <p className="text-sm whitespace-pre-wrap text-muted-foreground">
-                    {request.justification}
+                  {request.status === "DENIED" && request.deniedReason && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("requests.deniedReason", {
+                        reason: request.deniedReason,
+                      })}
+                    </p>
+                  )}
+                  <p className="font-mono text-xs tabular-nums text-muted-foreground">
+                    {t("requests.requestedOn", { date: date(request.createdAt) })}
                   </p>
-                )}
-                {request.status === "DENIED" && request.deniedReason && (
-                  <p className="text-sm text-muted-foreground">
-                    {t("requests.deniedReason", {
-                      reason: request.deniedReason,
-                    })}
-                  </p>
-                )}
-                <p className="font-mono text-xs tabular-nums text-muted-foreground">
-                  {t("requests.requestedOn", { date: date(request.createdAt) })}
-                </p>
-                <FiledFor filerId={filedByOther(request)} filerById={filerById} />
-              </li>
-            ))}
+                  <FiledFor filerId={filedByOther(request)} filerById={filerById} />
+                </li>
+              );
+            })}
           </ul>
         )}
       </DetailPanel>
