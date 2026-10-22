@@ -89,7 +89,8 @@ Repo facts that shape the pipeline:
 - **Lint is two-tier (#591).** Full-repo `eslint .` per app is **report-only**
   (`continue-on-error: true`) because the codebase is not yet eslint-clean — it keeps the legacy
   backlog visible without failing CI. A separate **blocking** "Lint changed files" step lints
-  **only the files changed vs the merge-base with `origin/dev`** (`git diff` filtered to
+  **only the files changed vs the merge-base with the PR's base branch** (`github.base_ref`; a
+  push exits 0, since its PR already gated those files — #1664) (`git diff` filtered to
   `.ts/.tsx/.js/.jsx/.mjs/.cjs`, split per app, piped to each app's eslint with
   `--no-error-on-unmatched-pattern`; no changed files → exit 0). A NEW violation in changed code
   fails CI; the legacy backlog stays exempt. The diff **is** the ratchet — no baseline file.
