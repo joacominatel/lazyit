@@ -10,6 +10,7 @@ import {
   KeyIcon,
   ServerStackIcon,
   ShieldExclamationIcon,
+  TruckIcon,
   WrenchScrewdriverIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -31,11 +32,17 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardSummary } from "@/lib/api/hooks/use-dashboard";
+import { usePendingSummary } from "@/lib/api/hooks/use-purchase-orders";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useMounted } from "@/lib/hooks/use-mounted";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { lift } from "@/lib/recipes";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import {
+  localToday,
+  type PendingDeliveries,
+  pendingDeliveries,
+} from "@/lib/purchases/pending";
 import { cn } from "@/lib/utils";
 import { useAssetStatusLabel } from "../../assets/_components/asset-status-badge";
 import { PulseRail, type QuickAction } from "./pulse-rail";
@@ -602,6 +609,7 @@ const ATTENTION_KEYS = [
   "critical-grants",
   "low-stock",
   "warranty-expiring",
+  "pending-deliveries",
   "in-maintenance",
   "lost",
 ] as const;
@@ -616,6 +624,7 @@ const ATTENTION_KEYS = [
 function buildAttentionItems(
   summary: DashboardSummary,
   t: ReturnType<typeof useTranslations<"dashboard">>,
+  deliveries: PendingDeliveries | null = null,
 ): AttentionItem[] {
   const { assets, access, consumables } = summary;
   const inMaintenance = assets.byStatus.IN_MAINTENANCE ?? 0;
@@ -666,6 +675,21 @@ function buildAttentionItems(
         href: "/assets?warranty=expiring90d",
       },
       {
+        // Pending deliveries (#1498): purchases still waiting for units, from `GET
+        // /purchase-orders/pending-summary` — a separate read, made only for a viewer holding
+        // `purchaseOrder:read`. It links to Pending units, on *Overdue only* when some are overdue.
+        key: "pending-deliveries",
+        icon: TruckIcon,
+        label: t("needsAttention.pendingDeliveries", {
+          purchases: deliveries?.purchases ?? 0,
+          units: deliveries?.units ?? 0,
+          overdue: deliveries?.overdue ?? 0,
+        }),
+        count: deliveries?.purchases ?? 0,
+        tone: "warning",
+        href: deliveries?.href ?? "/purchases/pending",
+      },
+      {
         key: "in-maintenance",
         icon: WrenchScrewdriverIcon,
         label: t("needsAttention.inMaintenance", { count: inMaintenance }),
@@ -692,7 +716,21 @@ function buildAttentionItems(
  */
 function NeedsAttention({ summary }: { summary: DashboardSummary }) {
   const t = useTranslations("dashboard");
-  const items = buildAttentionItems(summary, t);
+  // Pending deliveries (#1498) come from their own read, gated on `purchaseOrder:read` (fail-closed while
+  // the permission set loads) and held until `mounted`, like the other permission-dependent parts of this
+  // page (#931): the server render never has it, so neither does the first client render. "Today" is the
+  // viewer's day — the same one *Pending units* flags as overdue.
+  const isMounted = useMounted();
+  const canReadPurchases = useCan("purchaseOrder:read");
+  const showDeliveries = isMounted && canReadPurchases;
+  const { data: pendingSummary } = usePendingSummary(showDeliveries ? localToday() : "", {
+    enabled: showDeliveries,
+  });
+  const items = buildAttentionItems(
+    summary,
+    t,
+    showDeliveries ? pendingDeliveries(pendingSummary) : null,
+  );
 
   // Permanent, key-only dismissals (issue #194), persisted per-browser. `mounted` is false until
   // hydration so the filter doesn't run on the server / first paint (the hook returns `[]` there) —
