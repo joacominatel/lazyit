@@ -411,10 +411,12 @@ decommissioned. (`--keep-token`, further down, is the opposite operation and bel
 combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
 believing the credential survived.)
 
+The containers and virtual machines the server reported are retired with it, so they do not each set
+off an offline alert once the server stops listing them. Nodes you drew by hand are never touched.
+
 Two things uninstalling does **not** do, deliberately. The server's node in lazyit is retired, not
 deleted: it keeps its history and its asset, and you can discard it from the Servers view if you want
-it off the map. Containers and virtual machines the server was running are **not** retired with it. And
-the token is only removed *from that host* — if no other machine uses it, revoke the service account in
+it off the map. And the token is only removed *from that host* — if no other machine uses it, revoke the service account in
 [Service accounts](/help/users-permissions-service-accounts).
 
 ## Retired servers and snoozed alerts

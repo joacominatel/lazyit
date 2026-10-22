@@ -432,10 +432,13 @@ debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`,
 operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
 ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
+Los contenedores y las máquinas virtuales que reportaba el servidor se retiran con él, para que no
+disparen cada uno una alerta de desconexión cuando el servidor deja de listarlos. Los nodos que
+dibujaste a mano nunca se tocan.
+
 Dos cosas que desinstalar **no** hace, deliberadamente. El nodo del servidor en lazyit queda retirado,
 no borrado: conserva su historial y su activo, y podés descartarlo desde la vista de Servidores si
-querés sacarlo del mapa. Los contenedores y las máquinas virtuales que corría el servidor **no** se
-retiran con él. Y el token solo se elimina *de ese host* — si ninguna otra máquina lo usa, revocá la
+querés sacarlo del mapa. Y el token solo se elimina *de ese host* — si ninguna otra máquina lo usa, revocá la
 cuenta de servicio en [Cuentas de servicio](/help/users-permissions-service-accounts).
 
 ## Servidores retirados y alertas pausadas
