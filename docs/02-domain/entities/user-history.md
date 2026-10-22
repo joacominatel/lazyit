@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-10-14
+updated: 2026-10-22
 ---
 
 # UserHistory
@@ -92,7 +92,10 @@ all from the [[user]] service:
   the flow enumeration- and timing-uniform (issue #1006), actor == subject.
 - Per-device sessions (`UserSessionsService`, [[0086-local-authentication-mode]] §9, #1420) → `SESSION_ENDED`
   on `DELETE /auth/sessions/:id`, in the same transaction as the row delete, actor == subject. "Sign out
-  everywhere" (`POST /auth/logout`) writes no row, as before.
+  everywhere" (`POST /auth/logout`) writes no row, as before. Neither does *Sign out everywhere and
+  disconnect AI apps* (`POST /auth/sessions/revoke-all`, #1699): its audit record is the
+  `SIGNED_OUT_EVERYWHERE` row in `oauth_audit_log` ([[oauth-grant]]), written in the same transaction as the
+  epoch bumps, the session-row delete and — in OIDC mode, #1715 — the `oidcTokensNotBefore` cutoff.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 - `provisionLocalAccount` → `UPDATED` with payload `{ action: 'provisionLocalAccount', directoryOnly: false }`.

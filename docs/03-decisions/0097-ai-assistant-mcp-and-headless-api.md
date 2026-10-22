@@ -441,6 +441,20 @@ The key forks only; each links its analysis.
    >   mode (OIDC included, where `POST /auth/logout` is a no-op), audited `SIGNED_OUT_EVERYWHERE` in the
    >   OAuth audit trail. No password step-up: like every other revocation it only removes access, and
    >   step-up is unavailable outside local mode. The plain logout below is untouched.
+   >   *Amended again 2026-10-22 (#1715, CEO decision: "add a cutoff"):* as first shipped, the action did
+   >   **not** end OIDC web sessions on the user's *other* devices. In OIDC mode the browser carries the
+   >   IdP's access token, the OIDC branch of the guard checked no lazyit-side counter, and Auth.js renews
+   >   that token with the `offline_access` refresh token — so another device stayed signed in for as long
+   >   as the IdP kept honouring its refresh token, and could at once mint a new personal token or approve
+   >   a new OAuth connection. Now the action also stamps `User.oidcTokensNotBefore` (nullable, no
+   >   backfill; deactivation, offboarding and the sync's soft offboard stamp it too), and the OIDC guard
+   >   refuses a token whose `iat` — or `auth_time`, when the token carries one — is earlier than that
+   >   cutoff minus 30 seconds of clock skew, with the 401 of an expired token. `auth_time` is what stops a
+   >   renewed token: renewal gives a fresh `iat` but keeps the original `auth_time`. **What remains:**
+   >   lazyit still cannot end the IdP's own session; the user signs out at the provider for that. With an
+   >   IdP whose access tokens carry no `auth_time` (Entra ID, for one), a device that renews its token
+   >   *before* it next calls the API gets a fresh `iat` and is not caught; the cutoff then ends only the
+   >   tokens it held. Details: [[authorization]] §3.2.
    > - **What does not**: `POST /auth/logout`. It still bumps `sessionEpoch`, so every web session of the
    >   user ends, as ADR-0086 §8 says.
    > - **In-flight tool calls.** An MCP request delegates at the live `sessionEpoch` it re-read while

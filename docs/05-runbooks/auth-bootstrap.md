@@ -3,7 +3,7 @@ title: OIDC Sign-in With Your Own IdP
 tags: [runbook, auth, oidc, byoi]
 status: accepted
 created: 2026-05-26
-updated: 2026-10-09
+updated: 2026-10-22
 ---
 
 # Runbook — sign in with your own OIDC IdP (BYOI)
@@ -33,6 +33,7 @@ before you create the first admin.
 | Redirect URI **`https://<your-domain>/api/auth/callback/oidc`** | The exact path the web listens on. Use your `WEB_ORIGIN`, port included when it is not 443 (e.g. `https://localhost:8443/api/auth/callback/oidc`). |
 | Scopes **`openid profile email offline_access`** | The web asks for all four. `offline_access` yields a refresh token for silent renewal; without it a session simply ends when its access token expires. |
 | **Access tokens as JWTs signed RS256**, with `iss` equal to the issuer | The API verifies the bearer access token against the IdP's JWKS and accepts RS256 only. An IdP that issues opaque access tokens by default must be switched to JWT for this client. |
+| An `iat` claim in the access token, and preferably `auth_time` | *Sign out everywhere*, deactivation and offboarding refuse tokens issued before they happened (#1715). `iat` is standard in JWT access tokens (RFC 9068). With `auth_time` too, a device that renews its token afterwards is also signed out; without it, only the tokens it held at that moment are. Keep the IdP's clock in sync (NTP): 30 seconds of skew are tolerated. |
 | `email` and `email_verified` claims (ID token or userinfo) | A verified email is the only key that links an IdP account to an existing lazyit person, including the first admin (§4). |
 | `name` or `given_name` / `family_name` | Shown in the app; falls back to `preferred_username`. |
 

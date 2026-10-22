@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -99,12 +99,33 @@ device is immediate. A token without a `sid` (issued before that release) keeps 
 guard records `request.localSession = { rememberMe, sessionId }` for the routes that need it
 (change-password, the session list).
 
-The session routes are **self-service and unannotated**: `GET /auth/sessions` and
-`DELETE /auth/sessions/:id` pass every human (INV-8 — each person manages their own sessions; every query is
+The session routes are **self-service and unannotated**: `GET /auth/sessions`,
+`DELETE /auth/sessions/:id` and `POST /auth/sessions/revoke-all` (*Sign out everywhere and disconnect AI
+apps*, #1699) pass every human (INV-8 — each person manages their own sessions; every query and write is
 scoped to the caller's id, another user's session is a `404`) and refuse a service principal outright
-(`ServicePrincipalForbiddenGuard`). There is no admin per-session route: an admin ends a user's sessions with
+(`ServicePrincipalForbiddenGuard`). `revoke-all` acts on the authenticated user only and takes no target id;
+it is not reachable as an AI tool. There is no admin per-session route: an admin ends a user's sessions with
 the existing `user:manage` levers (deactivate, offboard, password reset with *revoke sessions*), which bump
 the epoch. Personal MCP tokens and OAuth grants are not sessions (§9.3).
+
+### 3.2 OIDC sessions — the sign-out cutoff (#1715)
+
+In `AUTH_MODE=oidc` the human branch verifies the IdP's RS256 access token (the one Auth.js forwards as the
+Bearer), JIT-provisions or loads the [[user]] by `sub`, and refuses an inactive or soft-deleted row. lazyit
+mints no session there, so there is no epoch to compare. Instead the row's `oidcTokensNotBefore` is a
+cutoff: when it is set, a token is refused (`401`, the same body as an expired token, so the web signs that
+device out) if its `iat` is earlier than the cutoff minus **30 seconds** of clock-skew tolerance, or if it
+carries an `auth_time` that is. `auth_time` is what catches a device that renews its access token with a
+refresh token after the cutoff: the renewed token has a fresh `iat` but the original `auth_time`. A token
+with neither claim is refused while a cutoff exists (fail closed). A `null` cutoff — every user until they
+use one of the levers — changes nothing.
+
+Set to now by: *Sign out everywhere and disconnect AI apps*, a deactivation, an offboarding, and the directory
+sync's soft offboard (the same levers that bump `sessionEpoch` in local mode, minus the local-credential
+ones). Signing in again works because the web asks the IdP for `prompt=login`, so a new sign-in carries a
+later `iat` and `auth_time`. lazyit cannot end the IdP's own session; that is signed out at the provider.
+An IdP that ignores `prompt=login` and silently reuses its session would hand back the old `auth_time`, so
+the user must sign out at the provider before signing in to lazyit again.
 
 ## 4. Reads tightened (the read-authz gap closed)
 
@@ -342,7 +363,8 @@ Authority on every `/mcp` request = the user's **current** DB permissions ∩ th
 ceiling fails closed to `read`. `navigate`-class tools (chat-only, e.g. `request_input`) are never listed
 over MCP. Tokens are opaque and audience-bound to `/mcp`; they are refused on every REST route, and a
 session JWT is refused on `/mcp`. A grant dies with the user's `mcpCredentialEpoch` (password change or
-reset, admin reset or *revoke sessions*, deactivation, offboarding) — **not** with a normal web logout.
+reset, admin reset or *revoke sessions*, deactivation, offboarding, *Sign out everywhere and disconnect AI
+apps*) — **not** with a normal web logout.
 
 ### 9.3 Personal MCP tokens (`lan` instances)
 

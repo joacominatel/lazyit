@@ -16,7 +16,8 @@ updated: 2026-10-22
 One row per signed-in device in `AUTH_MODE=local`. Before it existed a local session was a stateless token
 checked against the user's `sessionEpoch`, so the only way to end one was to end them all. The row lets a
 user see where they are signed in and end **one** device, while "sign out everywhere" keeps working exactly
-as before. It exists in local mode only — OIDC sessions belong to the IdP.
+as before. It exists in local mode only — OIDC sessions belong to the IdP. Ending the lazyit side of every
+OIDC session at once is the [[user]] `oidcTokensNotBefore` cutoff (#1715), not a row here.
 
 It is **protocol state, not domain data** — the [[oauth-grant]] tokens and `PasswordResetToken` precedent:
 ending a session hard-deletes its row, and the audit trail is a `SESSION_ENDED` row in [[user-history]].
@@ -61,7 +62,10 @@ user's sessions from the list at once, without each of those code paths knowing 
   of the user is deleted in the same transaction. The change itself is conditional on the caller's epoch:
   if a concurrent lever bumped it first, it is refused with `401 SESSION_REVOKED` and nothing is written.
 - **Ended** by `DELETE /auth/sessions/:id` (one row, audited `SESSION_ENDED` with `{ sessionId, current }`),
-  by `POST /auth/logout` (every row, with the epoch bump) and by a password reset (every row).
+  by `POST /auth/logout` (every row, with the epoch bump), by `POST /auth/sessions/revoke-all` — *Sign out
+  everywhere and disconnect AI apps*, #1699 — (every row, with both epoch bumps, audited
+  `SIGNED_OUT_EVERYWHERE` in `oauth_audit_log`, not in [[user-history]]) and by a password reset (every
+  row).
 - **Purged** hourly by `UserSessionSweeper`: rows past `expiresAt`, rows whose `epoch` no longer matches
   their user's `sessionEpoch`, and remember-me rows not seen for 400 days.
 
