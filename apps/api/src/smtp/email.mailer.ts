@@ -77,15 +77,29 @@ function escapeHtml(s: string): string {
 /** The personal email-preferences page every notification recipient can reach (#879). */
 export const NOTIFICATION_EMAIL_PREFERENCES_PATH = '/account/notifications';
 
-/** Recipients are not necessarily admins, so a notification footer points at the per-user opt-out. */
+/** Which footer an email carries. */
+export type NotificationEmailKind =
+  'notification' | 'security-notice' | 'smtp-test';
+
+/**
+ * Recipients are not necessarily admins, so a notification footer points at the per-user opt-out. A
+ * security notice (#1699) cannot be turned off, so its footer says so instead of pointing at a switch
+ * that would change nothing.
+ */
 function emailFooter(
-  kind: 'notification' | 'smtp-test',
+  kind: NotificationEmailKind,
   appUrl: string | null,
   brandName: string,
 ): { text: string; link: string | null } {
   if (kind === 'smtp-test') {
     return {
       text: `This test was sent from Settings → Email in your ${brandName} instance.`,
+      link: null,
+    };
+  }
+  if (kind === 'security-notice') {
+    return {
+      text: `This is a security notice about your ${brandName} account. It is always sent and cannot be turned off. If you did not expect it, review your connected apps under AI & connected apps in your user menu.`,
       link: null,
     };
   }
@@ -112,7 +126,7 @@ export function renderNotificationEmail(input: {
   summary: string | null;
   appUrl: string | null;
   brandName: string;
-  kind?: 'notification' | 'smtp-test';
+  kind?: NotificationEmailKind;
 }): RenderedEmail {
   const { title, summary, appUrl, brandName } = input;
   const footer = emailFooter(input.kind ?? 'notification', appUrl, brandName);
