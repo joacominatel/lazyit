@@ -416,6 +416,10 @@ if ($Uninstall) {
   if ($KeepToken) { Die '-KeepToken has no meaning with -Uninstall: the token NEVER survives an uninstall. -KeepConfig keeps this host''s own limits, never the credential.' }
   # Disarm FIRST. Deleting the executable out from under a registered task does not stop the task; it
   # turns every tick into a failed run and an event-log entry, on a host somebody believes is clean.
+  # A run that is ALREADY in flight is stopped before the task goes (#1701): unregistering does not end
+  # it, and a report landing after the decommission below would un-retire the node.
+  try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null }
+  catch { }
   try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop | Out-Null }
   catch { }
 
@@ -423,12 +427,21 @@ if ($Uninstall) {
   # exist. Its node is RETIRED - gone, not silent - instead of going OFFLINE and being announced as an
   # outage. It runs only AFTER the task is gone, because a run landing after it would report again and
   # un-retire the node. Best-effort: an unreachable instance, an old one, or a host it has never heard
-  # of must never stop an uninstall, so a failure only warns and says how to finish by hand.
+  # of must never stop an uninstall, so a failure only warns and says how to finish by hand. Bounded by
+  # an overall cap (the Linux installer's `timeout 120`), so a black-holed instance cannot hang it.
   if ((Test-Path -LiteralPath $BinPath) -and (Test-Path -LiteralPath $ConfigFile)) {
     $decommissioned = $false
     try {
-      & $BinPath decommission --config $ConfigFile
-      $decommissioned = ($LASTEXITCODE -eq 0)
+      $proc = Start-Process -FilePath $BinPath -ArgumentList @('decommission', '--config', "`"$ConfigFile`"") -NoNewWindow -PassThru
+      # Touching the handle makes ExitCode readable after WaitForExit on Windows PowerShell 5.1.
+      $null = $proc.Handle
+      if ($proc.WaitForExit(120000)) {
+        $decommissioned = ($proc.ExitCode -eq 0)
+      }
+      else {
+        try { $proc.Kill() } catch { }
+        Write-Warning 'lazyit-agent install: telling lazyit took longer than two minutes and was stopped.'
+      }
     }
     catch { }
     if (-not $decommissioned) {
