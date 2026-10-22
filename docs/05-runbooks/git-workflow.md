@@ -176,6 +176,11 @@ others, and the job never turns the promotion red — a failure surfaces as a wa
   it with `dry_run` off on an already-merged promotion closes what that promotion left open.
 - Close an issue by hand only when its PR did not say `Closes` (or when you do not want to wait
   for the promotion).
+- **A PR reverted on `dev` before the promotion still closes its issue.** The workflow sees the
+  original PR's merge commit in the range and reads its `Closes #<n>`; it does not look for a
+  later revert. When you revert, either say `Refs #<n>` (never `Closes`) in the revert PR and
+  reopen the issue after the promotion, or preview the promotion with a dry run and reopen
+  whatever it lists that did not actually ship.
 
 ## Labels (set the user creates in GitHub)
 
