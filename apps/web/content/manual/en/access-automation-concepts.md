@@ -42,6 +42,25 @@ permanent record.** External provisioning is a separate, after-the-fact effect:
 In short: lazyit records who has access, and *then* tries to make the outside world match. A broken
 connector means an account wasn't created yet — not that lazyit lost track of the access.
 
+## What the person with access sees
+
+The person who received access sees a **coarse status** of their own account setup on their profile and
+on their approved requests while that access is active — never the workflow, its steps or its errors,
+which stay with whoever can read workflows. It follows the latest provisioning run of their grant:
+
+| The latest run | The person sees |
+| --- | --- |
+| No workflow ran for the grant | **No automation** |
+| Waiting to start, or running | **Setup in progress** |
+| Succeeded | **Set up** |
+| Waiting on a manual task, failed, or rolled back | **Waiting on IT** |
+
+So a failed run or a manual task you haven't completed reads **Waiting on IT** for them until a retry,
+a re-run or the task finishes it. A rolled-back run can't be retried or re-run, so after one it stays
+**Waiting on IT** until the person is granted the access again (which starts a new run) — set the
+account up by hand and re-grant, or revoke if they should not have it. A deprovisioning run (after a
+revoke) does not change it.
+
 ## Each grant event runs once
 
 When a grant fires a workflow, lazyit creates **one run for that event**. If a step fails and you

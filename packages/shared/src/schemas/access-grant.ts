@@ -42,6 +42,38 @@ export const AccessGrantSchema = z.object({
 });
 
 /**
+ * The COARSE provisioning status a requester sees on their OWN grant (#1700, CEO decision Q2 on
+ * #1344). Derived on read — no column — from the latest `ACCESS_GRANTED` workflow run linked to the
+ * grant; the exact mapping lives in docs/02-domain/entities/access-grant.md ("Provisioning status").
+ *
+ *   - `NONE`          — no automation: no provisioning run was ever linked to the grant.
+ *   - `IN_PROGRESS`   — the run is queued or working.
+ *   - `DONE`          — the run completed.
+ *   - `WAITING_ON_IT` — the run is waiting on a manual step, or it failed: IT has to act.
+ *
+ * Deliberately carries NO workflow name, step or error: run history stays admin-only
+ * (`workflow:read`). Only the self-scope `/mine` reads return it.
+ */
+export const GRANT_PROVISIONING_STATUSES = [
+  "NONE",
+  "IN_PROGRESS",
+  "DONE",
+  "WAITING_ON_IT",
+] as const;
+export const GrantProvisioningSchema = z.enum(GRANT_PROVISIONING_STATUSES);
+export type GrantProvisioning = z.infer<typeof GrantProvisioningSchema>;
+
+/**
+ * A grant as the self-scope `GET /access-grants/mine` returns it: the full {@link AccessGrantSchema}
+ * plus the coarse `provisioning` status. Tolerant on read: absent from an API that predates it, and a
+ * value a newer API adds reads as absent (`.catch`) instead of failing the whole list.
+ */
+export const MyAccessGrantSchema = AccessGrantSchema.extend({
+  provisioning: GrantProvisioningSchema.optional().catch(undefined),
+});
+export type MyAccessGrant = z.infer<typeof MyAccessGrantSchema>;
+
+/**
  * Payload to open a grant. `userId` + `applicationId` are required; both must reference live
  * (non-soft-deleted) rows (the service enforces this → 400). `grantedAt` is optional and defaults
  * to `now()` in the DB — pass it only to backdate an imported/historical record. The actor is NOT
