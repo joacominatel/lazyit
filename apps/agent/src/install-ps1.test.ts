@@ -744,7 +744,7 @@ describe("uninstall", () => {
   // #1701: the host's node is RETIRED rather than left to go OFFLINE and be announced.
   describe("it tells lazyit the host is going away (#1701)", () => {
     const uninstall = script.slice(script.indexOf("if ($Uninstall) {"), script.indexOf("if ($KeepConfig) { Die"));
-    const decommission = uninstall.indexOf("& $BinPath decommission --config $ConfigFile");
+    const decommission = uninstall.indexOf("Start-Process -FilePath $BinPath -ArgumentList @('decommission'");
 
     test("by running the agent's decommission command", () => {
       expect(decommission).toBeGreaterThan(-1);
@@ -752,6 +752,18 @@ describe("uninstall", () => {
 
     test("only AFTER the task is unregistered — a later run would un-retire the node", () => {
       expect(uninstall.indexOf("Unregister-ScheduledTask")).toBeLessThan(decommission);
+    });
+
+    test("a run already in flight is STOPPED before the task is unregistered", () => {
+      const stop = uninstall.indexOf("Stop-ScheduledTask -TaskName $TaskName");
+      expect(stop).toBeGreaterThan(-1);
+      expect(stop).toBeLessThan(uninstall.indexOf("Unregister-ScheduledTask"));
+    });
+
+    test("bounded by an overall two-minute cap, like Linux's `timeout 120`", () => {
+      const block = uninstall.slice(decommission, uninstall.indexOf("Remove-Item -LiteralPath $BinPath"));
+      expect(block).toContain("WaitForExit(120000)");
+      expect(block).toContain("$proc.Kill()");
     });
 
     test("BEFORE the executable, the state or the token are removed", () => {
@@ -762,7 +774,7 @@ describe("uninstall", () => {
 
     test("best-effort: a failure warns and never stops the uninstall", () => {
       const block = uninstall.slice(decommission, uninstall.indexOf("Remove-Item -LiteralPath $BinPath"));
-      expect(block).toContain("$LASTEXITCODE -eq 0");
+      expect(block).toContain("$proc.ExitCode -eq 0");
       expect(block).toContain("Write-Warning");
       expect(block).not.toContain("Die ");
     });
