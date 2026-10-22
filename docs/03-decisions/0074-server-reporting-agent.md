@@ -1348,6 +1348,29 @@ behaves exactly as it did. The sweep filters the per-node comparison
 in memory over the candidates already past the shortest possible threshold; that is a deliberate
 bound for a few-dozen-host product, not a claim that it scales indefinitely.
 
+**Amendment (2026-10-21, #1674 — split from #1146 item 8) — no OFFLINE flip for one window after the
+server boots.** While the API is down nobody is listening, so after any outage, upgrade or host reboot
+every agent's `lastReportedAt` is old for a reason that says nothing about the host. Without a grace the
+first sweeps flipped the whole estate `OFFLINE` and broadcast one `infra.agent_offline` per node — every
+one of them a lie, undone by the next report — and a bell that cries wolf on every restart is one nobody
+reads. The sweep now measures a node's silence from **`max(lastReportedAt, process boot)`** instead of
+from `lastReportedAt`: for one staleness window after the API process boots — the node's **own**
+window, the served `policyStaleAfterSeconds` or the `INFRA_AGENT_STALE_AFTER_MS` fallback, so no new
+setting — a node is not flipped, and therefore not announced. The window is long enough by
+construction: an agent's due-ness keys on its last **successful** report (§7), so a host whose report
+failed during the outage retries on its very next tick, well inside its window. The boundary is the
+existing strict comparison — exactly one window after boot is still inside, a millisecond later is not
+— and a node that reported after boot is judged on that report, so the grace never lengthens a
+post-boot silence. Nothing else is suppressed: reports are ingested normally during the grace, and a
+node already `OFFLINE` stays so until it reports. The boot instant is per process, captured when the
+provider is constructed (seconds before the listener opens); that is the right scope for the one-API
+single-host topology ([[0015-deployment-model]]), and it would stay right under replicas — a replica
+that stayed up while another restarted kept receiving reports, so its own sweep is not fooled, while a
+full outage restarts every replica's grace. **Cost:** an agent that genuinely died during the outage,
+or in the window before it, is reported up to one window later than it would have been. The rest of
+#1146 item 8 — per-group routing, snooze windows, digests — remains open and still needs a product
+call.
+
 ### §5 — Auth & permission
 
 - The agent authenticates as a **Service Account** ([[0048-service-accounts]]) —
@@ -2412,6 +2435,8 @@ would be a separate ADR and arguably a separate product).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- The boot grace (no OFFLINE flip or `infra.agent_offline` nudge for one staleness window after the API
+  process boots): §4 Amendment (2026-10-21), issue #1674 — split from #1146 item 8.
 - A re-run authenticates with the token already on the host (`--keep-token` / `-KeepToken`, an
   explicit flag and a hard error against every other token source): §7 Amendment (2026-08-04), issue
   #1208 — the upgrade path stops needing a secret lazyit structurally cannot re-issue.

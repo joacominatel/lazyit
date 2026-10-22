@@ -1,0 +1,94 @@
+name: Promotion auto-close
+
+# Close the issues a dev → master promotion delivers (#1666).
+#
+# Our PRs target `dev`. GitHub honours `Closes #N` in a PR body only when that PR merges into the
+# default branch, and dev PRs are merged with merge commits that carry the PR title, not the body —
+# so the keyword never reaches master and the issue never closes (v3.0.0, #1639: 19 left open).
+#
+# When the promotion PR (head `dev`, base `master`, this repository) merges, this job walks every
+# commit the promotion brought in (git, uncapped — the PR-commits API stops at 250 and v3.0.0 had
+# 648), resolves each commit that landed on dev to the PR whose merge commit it is, reads the
+# closing keywords in those PRs' bodies, and closes each referenced open issue as `completed` with a
+# comment naming the delivering PR and the promotion. Pull requests, already-closed issues and other
+# repositories are skipped. The logic and its tests live in .github/scripts/promotion-autoclose.mjs.
+#
+# Preview: run it by hand (Actions → Promotion auto-close → Run workflow) with the promotion PR number;
+# `dry_run` defaults to true and only logs the plan. An open promotion can be previewed too.
+#
+# Never fails the promotion: it runs after the merge, a failure on one issue does not stop the others,
+# and errors surface as warnings in the run, not as a red check.
+#
+# PR bodies are untrusted input: they are read through the API inside the script and only matched with
+# a regular expression — nothing from them is interpolated into this file, a shell, or a git argument.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      promotion_pr:
+        description: Number of the dev → master promotion PR
+        required: true
+        type: number
+      dry_run:
+        description: Only log what would be closed
+        required: true
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: promotion-autoclose-${{ github.event.pull_request.number || inputs.promotion_pr }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    name: Close the issues the promotion delivered
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'dev' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout + the promotion's commit range
+      issues: write # comment on and close the delivered issues
+      pull-requests: read # the promotion PR and the PRs it carries
+    steps:
+      # Full history: the promotion range is `head ^merge^1` (or `head ^origin/master` when previewing
+      # an open promotion). Commit SHAs, not the `dev` ref — `dev` is deleted on the promotion merge
+      # (#1664), but its commits stay reachable from master.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Close delivered issues
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PROMOTION_PR: ${{ github.event.pull_request.number || inputs.promotion_pr }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        with:
+          script: |
+            // Everything, the module import included, sits inside the try: a failure anywhere is a
+            // warning annotation, never a red check on the promotion.
+            const promotion = Number(process.env.PROMOTION_PR);
+            const dryRun = process.env.DRY_RUN !== 'false';
+            try {
+              const { run } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/promotion-autoclose.mjs`);
+              const git = async (args) => (await exec.getExecOutput('git', args, { silent: true })).stdout;
+              const log = { info: (m) => core.info(m), warning: (m) => core.warning(m) };
+              core.info(`Promotion #${promotion} — ${dryRun ? 'DRY RUN, nothing will change' : 'closing'}.`);
+              const out = await run({ github, repo: context.repo, promotion, dryRun, git, log });
+              const rows = out.decisions.map((d) => [`#${d.issue ?? d.pr}`, d.action, d.reason]);
+              await core.summary
+                .addHeading(`Promotion #${promotion} auto-close${dryRun ? ' (dry run)' : ''}`, 3)
+                .addRaw(`${out.prs.length} PRs carried. ${dryRun ? `Would close: ${out.wouldClose.length}` : `Closed: ${out.closed.length}`}. Failed: ${out.failed.length}.`, true)
+                .addTable([[{ data: 'Ref', header: true }, { data: 'Decision', header: true }, { data: 'Why', header: true }], ...rows])
+                .write();
+            } catch (err) {
+              core.warning(`Promotion auto-close did not run: ${err.message}`);
+            }

@@ -918,7 +918,9 @@ What you can set there, in three groups:
   second how long lazyit waits before calling a host offline. The second must be longer than the first,
   or a perfectly healthy host gets marked offline between two of its own reports — the editor will not
   let you save a value that would do that, and it says so under the sentence rather than after you press
-  Save.
+  Save. That wait is also counted from when lazyit itself last started: after an upgrade, a restart or
+  an outage of lazyit, no host is marked offline until it has had that much time to report again, so
+  coming back does not turn the whole map offline and fill the bell with false alarms.
 - **What agents collect** — a grid of checkboxes, one per collector: hardware, disks, network
   interfaces, installed software, containers and hypervisor guests, plus a hard cap on how many packages
   a host may report. **A collector that is off is never run**, on

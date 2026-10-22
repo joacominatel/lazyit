@@ -975,7 +975,10 @@ Lo que podés configurar ahí, en tres grupos:
   máquina), el segundo cuánto espera lazyit antes de marcarlo fuera de línea. El segundo valor tiene que
   ser mayor que el primero, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
   propios reportes — el editor no te deja guardar un valor que provoque eso, y lo aclara debajo de la
-  frase en lugar de después de que presiones Guardar.
+  frase en lugar de después de que presiones Guardar. Esa espera también se cuenta desde la última vez
+  que arrancó lazyit: después de una actualización, un reinicio o una caída de lazyit, ningún host se
+  marca fuera de línea hasta que tuvo ese tiempo para volver a informar, así que la vuelta no deja todo
+  el mapa fuera de línea ni llena la campana de falsas alarmas.
 - **Qué recolectan los agentes** — una grilla de casillas, una por recolector: hardware, discos,
   interfaces de red, software instalado, contenedores e invitados del hipervisor, más un tope estricto
   de cuántos paquetes puede informar un host. **Un recolector

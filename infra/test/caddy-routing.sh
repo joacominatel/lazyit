@@ -77,6 +77,9 @@ CORPUS = [
     ("/api/auth/forgot-password", "api", "/auth/forgot-password"),
     ("/api/auth/reset-password", "api", "/auth/reset-password"),
     ("/api/auth/login", "api", "/auth/login"),  # server-side today, but never Auth.js
+    # Server-side session revocation on every deliberate sign-out (#1307, #1312). The web swallows a
+    # failure here by design, so a narrowed matcher sending it to Auth.js would fail silently.
+    ("/api/auth/logout", "api", "/auth/logout"),
     ("/api/users", "api", "/users"),            # generic API routes, /api stripped
     ("/api/assets", "api", "/assets"),
     ("/api/health/ready", "api", "/health/ready"),

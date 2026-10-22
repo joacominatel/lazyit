@@ -773,7 +773,11 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       resolveConfig.mockResolvedValue(null);
       await expect(
         service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
-      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      ).rejects.toMatchObject({
+        reason: 'smtp-not-configured',
+        // #1536: points the admin at the current Settings → Email page, not the pre-#1533 location.
+        message: expect.stringContaining('Settings → Email') as unknown,
+      });
       expect(tokCreate).not.toHaveBeenCalled();
       expect(sendMail).not.toHaveBeenCalled();
     });

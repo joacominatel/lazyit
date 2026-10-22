@@ -4,8 +4,8 @@ import { z } from "zod";
  * Update awareness & guided update — wire contracts (ADR-0084, issue #904). Extends the ADR-0083
  * version identity (`GET /instance/version`) with the CONSUMPTION half: "is a newer release out, how
  * far behind am I, and let me enqueue a guided host update". The single source of truth for `api`
- * (endpoint typing + the update-check cache) and `web` (the Settings → Instance "Version & updates"
- * card). See docs/03-decisions/0084-update-awareness-and-guided-update.md.
+ * (endpoint typing + the update-check cache) and `web` (the Settings → General & version
+ * "Version & updates" card). See docs/03-decisions/0084-update-awareness-and-guided-update.md.
  *
  * The model in one paragraph: an opt-in, beacon-free, fail-soft weekly check caches the latest known
  * GitHub release in a singleton config row; an ADMIN "update" action ENQUEUES an append-only
@@ -66,8 +66,8 @@ export function isActiveUpdateRun(status: UpdateRunStatus): boolean {
 // ── UpdateRun (one guided update, append-only ledger row) ────────────────────
 
 /**
- * One guided update as the Settings → Instance card renders it (ADR-0084 §4). An append-only ledger
- * row (autoincrement id, never deleted) whose `status` transitions during execution — the same shape
+ * One guided update as the Settings → General & version card renders it (ADR-0084 §4). An append-only
+ * ledger row (autoincrement id, never deleted) whose `status` transitions during execution — the same shape
  * as a WorkflowRun. `requestedByUserId` is the human who enqueued it (null once that user is deleted).
  * `logTail` is a short, REDACTED tail of host-script output (operational lines only — never secrets or
  * env values). All timestamps are ISO-8601 strings (wire shape).

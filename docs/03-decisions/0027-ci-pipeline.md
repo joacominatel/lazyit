@@ -3,7 +3,7 @@ title: "ADR-0027: CI on GitHub Actions; CD deferred"
 tags: [adr, infra, ci]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -25,8 +25,10 @@ Repo facts that shape the pipeline:
 
 - **Bun** is the pinned package manager (`bun@1.4.2`); install should be cached on `bun.lock`.
 - The API unit specs **mock the generated Prisma client** (`jest.mock('../../generated/prisma/client')`)
-  → **no database is needed in CI**. But the generated client must **exist** for compilation, so
-  `prisma generate` must run **before** typecheck/test ([[0012-testing-strategy]]).
+  → **the unit suite needs no database**. But the generated client must **exist** for compilation, so
+  `prisma generate` must run **before** typecheck/test ([[0012-testing-strategy]]). The one exception
+  is the Postgres-backed suite (`apps/api/test/*.db.spec.ts`, see below), which CI gives its own
+  throwaway database.
 - The api `lint` script is `eslint --fix`, which **mutates files and can mask failures**; a CI gate
   must run eslint **without `--fix`** so it reports rather than rewrites.
 - e2e tests are deferred ([[0012-testing-strategy]]); CI runs **unit** tests only.
@@ -46,8 +48,29 @@ Repo facts that shape the pipeline:
 - **Job `verify`** (ordered): checkout (`fetch-depth: 0`, for the diff-lint merge-base) →
   setup-bun `1.4.2` → cache `~/.bun/install/cache` (key on `bun.lock`) →
   `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`** (in `apps/api`)
-  → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; shared
-  `bun test`) → `turbo build` → **API boot smoke** (see below).
+  → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; the
+  **Postgres-backed API suite**; shared, web and agent with `bun test --isolate`) → `turbo build` →
+  **API boot smoke** (see below).
+- **Postgres-backed API suite (#1656).** `apps/api/test/*.db.spec.ts` (`bun run test:db`, config
+  `test/jest-db.json`) covers what a mocked client cannot — today the raw-SQL notification grouping,
+  time-zone day windows and mark-group-read ([[0056-in-app-notification-bell]]). `verify` starts
+  `compose.yaml`'s `db` service detached at the top of the job — the same digest pin and Postgres major
+  as production, read from the compose file rather than repeated in a GitHub `services:` block, so the
+  two cannot drift (the search-wire job does the same for Meilisearch) — then, after the unit suite,
+  waits on its healthcheck, runs `prisma migrate deploy` (the command production runs) and the suite
+  with `DB_TEST_URL`. The suite fails, never skips, without `DB_TEST_URL`, and wipes the notification
+  tables, so it only ever points at that ephemeral database. Credentials are a throwaway job-level
+  value, not a secret.
+- **`bun test --isolate` (#1318).** Without it every file of a `bun test` run shares one global and one
+  module registry, and `mock.module(...)` lasts for the rest of the process and cannot be undone — a
+  file that stubs a module leaks the stub into every later file, so a result depends on file order,
+  which differs between macOS and Linux (it broke #1313). `--isolate` gives each file a fresh global
+  and registry (Bun re-runs `--preload` per file and caches transpiled code across files). The flag is
+  in the CI steps, in each workspace's `test` script and in the charter's validation list, so local
+  runs match CI. **Rule:** a test may rely on isolation instead of restoring what it stubs; the
+  `afterAll` restores added before isolation (8d05fc8c) stay — they are harmless and keep a file correct
+  if it is ever run without the flag. Isolation is per file: tests inside one file still share state,
+  so `--randomize` (which also reorders tests within a file) is not part of the gate.
 - **API boot smoke (#929).** After `turbo build`, `node -e "require('./dist/src/main.js')"` in
   `apps/api` requires the compiled entrypoint, so every module file's top-level import runs — the
   full `AppModule` require graph, exactly what `nest start` loads before `NestFactory.create`. A
@@ -66,7 +89,8 @@ Repo facts that shape the pipeline:
 - **Lint is two-tier (#591).** Full-repo `eslint .` per app is **report-only**
   (`continue-on-error: true`) because the codebase is not yet eslint-clean — it keeps the legacy
   backlog visible without failing CI. A separate **blocking** "Lint changed files" step lints
-  **only the files changed vs the merge-base with `origin/dev`** (`git diff` filtered to
+  **only the files changed vs the merge-base with the PR's base branch** (`github.base_ref`; a
+  push exits 0, since its PR already gated those files — #1664) (`git diff` filtered to
   `.ts/.tsx/.js/.jsx/.mjs/.cjs`, split per app, piped to each app's eslint with
   `--no-error-on-unmatched-pattern`; no changed files → exit 0). A NEW violation in changed code
   fails CI; the legacy backlog stays exempt. The diff **is** the ratchet — no baseline file.
@@ -82,10 +106,13 @@ Repo facts that shape the pipeline:
 
 ## Consequences
 
-- **Positive:** consistent gate for humans and AI contributors; no DB needed (fast, simple);
+- **Positive:** consistent gate for humans and AI contributors; the unit suite needs no DB (fast,
+  simple), and the SQL that a mock cannot check runs against the production Postgres major;
   Dockerfile breakage is caught in CI; lint actually fails instead of silently rewriting; **new
   lint violations are blocked (diff-lint) without forcing a clean-up of the legacy backlog** (#591).
-- **Trade-offs:** building three images per run adds minutes (mitigated by layer cache); CI lint
+- **Trade-offs:** building three images per run adds minutes (mitigated by layer cache); the
+  Postgres suite adds a container and a migrate to `verify` (the boot overlaps install and typecheck);
+  `--isolate` re-evaluates each file's imports, measured at about +1–6 s per `bun test` suite; CI lint
   diverges from the repo's `--fix` script by design — documented so contributors aren't surprised;
   the diff-lint gate needs full git history (`fetch-depth: 0`) and only covers `apps/api`/`apps/web`
   (the linted workspaces) — `packages/shared` has no eslint config, so it's not gated.
