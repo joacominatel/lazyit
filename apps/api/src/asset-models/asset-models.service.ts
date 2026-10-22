@@ -279,16 +279,18 @@ export class AssetModelsService {
         if (!locked.some((row) => row.id === id)) {
           throw new NotFoundException(`AssetModel ${id} not found`);
         }
-        const assets = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "assets"
-         WHERE "modelId" = ${id} AND "deletedAt" IS NULL
-         ORDER BY "id" FOR UPDATE`;
-        // Purchase before line, as every purchase write locks; SHARE also waits out a status change or archive in flight.
+        // Purchases, assets, then lines (ADR-0023, #1696): the order a link takes them in (purchase KEY SHARE,
+        // the assets, then the line through the asset's FK), and a location delete takes purchases before assets
+        // too — so none of them can cross this delete. SHARE also waits out a status change or archive in flight.
         await tx.$queryRaw`
         SELECT "id" FROM "purchase_orders"
          WHERE "id" IN (SELECT "purchaseOrderId" FROM "purchase_order_lines"
                          WHERE "assetModelId" = ${id} AND "deletedAt" IS NULL)
          ORDER BY "id" FOR SHARE`;
+        const assets = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "assets"
+         WHERE "modelId" = ${id} AND "deletedAt" IS NULL
+         ORDER BY "id" FOR UPDATE`;
         const lines = await this.openLines(tx, id, true);
         if (assets.length + lines.length > 0) {
           if (!resolution) {

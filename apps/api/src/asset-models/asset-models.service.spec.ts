@@ -570,7 +570,7 @@ describe('AssetModelsService', () => {
     expect(lineQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
   });
 
-  it('locks the purchases of the mapped lines, in id order, after the assets and before the lines', async () => {
+  it('locks the purchases of the mapped lines in id order, then the assets, then the lines — the order a link and a location delete take (#1696)', async () => {
     seedDependents({
       assets: ['a1'],
       lines: [{ id: 'l1', purchaseOrderId: 'po1' }],
@@ -591,8 +591,8 @@ describe('AssetModelsService', () => {
     const assetLock = sqls.findIndex((sql) => sql.includes('FROM "assets"'));
     expect(sqls[purchaseLock]).toContain('ORDER BY "id" FOR SHARE');
     expect(sqls[purchaseLock]).toContain('"assetModelId" = ?');
-    expect(assetLock).toBeLessThan(purchaseLock);
-    expect(purchaseLock).toBeLessThan(lineLock);
+    expect(purchaseLock).toBeLessThan(assetLock);
+    expect(assetLock).toBeLessThan(lineLock);
   });
 
   it('gives the delete transaction more than the 5 s default, so a model with many assets can still be deleted', async () => {
