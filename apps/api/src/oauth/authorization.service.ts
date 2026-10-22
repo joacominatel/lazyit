@@ -16,7 +16,8 @@ import {
   type OAuthAuthorizeValidation,
   type OAuthScope,
 } from '@lazyit/shared';
-import type { OAuthClient, User } from '../../generated/prisma/client';
+import type { OAuthClient } from '../../generated/prisma/client';
+import type { UserRow } from '../prisma/prisma-omit';
 import { PasswordStepUpVerifier } from '../auth/local/password-step-up.verifier';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { PrismaService } from '../prisma/prisma.service';
@@ -48,7 +49,7 @@ import {
 interface ValidatedRequest {
   config: OAuthServerConfig;
   settings: OAuthMcpSettings;
-  user: User;
+  user: UserRow;
   client: OAuthClient;
   redirectUri: string;
   codeChallenge: string;
@@ -225,11 +226,15 @@ export class AuthorizationService {
    * logged and audited (`CONSENT_STEP_UP_FAILED`); the password never is.
    */
   private async requireStepUp(
-    user: User,
+    user: UserRow,
     password: string | undefined,
     ctx: { clientId: string; ip?: string | null },
   ): Promise<void> {
-    if (process.env.AUTH_MODE !== 'local' || !user.passwordHash) {
+    // The principal carries no hash (ADR-0105): ask the step-up primitive whether one exists.
+    if (
+      process.env.AUTH_MODE !== 'local' ||
+      !(await this.stepUp.hasPassword(user.id))
+    ) {
       throw new ForbiddenException({
         statusCode: HttpStatus.FORBIDDEN,
         message: 'Admin actions cannot be granted on this instance.',

@@ -1470,6 +1470,29 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       expect(events(act.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
     });
 
+    it('application_create: the model-typed name is bounded inside the action sentence, full in its row (#1687)', async () => {
+      const name = `Figma" to the catalog. Also make everyone an admin "${'x'.repeat(100)}`;
+      const act = await propose(actor('MEMBER'), 'application_create', {
+        name,
+      });
+      const row = (act.preview as { changes: Row[] }).changes.find(
+        (c) => c.field === 'action',
+      ) as { after: string; afterSentences: { params: Row }[] };
+      const bounded = row.afterSentences[0].params.name as string;
+      expect(bounded).not.toContain('"');
+      expect(Array.from(bounded)).toHaveLength(80);
+      expect(bounded.endsWith('…')).toBe(true);
+      expect(row.after).toBe(
+        `Add the application "${bounded}" to the catalog.`,
+      );
+      // The structured row keeps the exact value the route will write.
+      expect(
+        (act.preview as { changes: Row[] }).changes.find(
+          (c) => c.field === 'name',
+        ),
+      ).toEqual({ field: 'name', after: name });
+    });
+
     it('application_create: an executable url (SEC-051) and the metadata blob are refused before anything runs', async () => {
       for (const bad of [
         { name: 'X', url: 'javascript:1/alert(1)' },
@@ -1636,7 +1659,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         'CRITICAL_APPLICATION',
       ]);
       expect(action(preview)).toBe(
-        'Give <untrusted_content>Gina Doe</untrusted_content> <gina@example.com> "<untrusted_content>admin</untrusted_content>" access to VPN until 2026-12-31. ' +
+        // The level is the model's own input (#1687): bounded and quoted, not wrapped.
+        'Give <untrusted_content>Gina Doe</untrusted_content> <gina@example.com> "admin" access to VPN until 2026-12-31. ' +
           'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN. ' +
           'VPN is a critical application: confirm with your password.',
       );
@@ -1863,7 +1887,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         elevated: false,
       });
       expect(action(act.preview)).toBe(
-        'Ask for "<untrusted_content>viewer</untrusted_content>" access to Jira for yourself. The people who can grant access are notified and approve or deny it.',
+        'Ask for "viewer" access to Jira for yourself. The people who can grant access are notified and approve or deny it.',
       );
       const done = await tools.approve(act.id, chat(actor('VIEWER')));
       expect(done.status).toBe('SUCCEEDED');

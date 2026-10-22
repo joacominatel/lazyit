@@ -148,9 +148,9 @@ describe('WorkflowsService — SEC-077 version preconditions', () => {
     },
   ];
 
-  function buildTx(latest: number | null) {
+  function buildTx(latest: number | null, enabled = false) {
     const tx = {
-      $queryRaw: jest.fn().mockResolvedValue([{ id: 'wf1' }]),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'wf1', enabled }]),
       workflowVersion: {
         findFirst: jest
           .fn()
@@ -228,5 +228,57 @@ describe('WorkflowsService — SEC-077 version preconditions', () => {
       [{ data: { version: number } }]
     >;
     expect(calls.map((c) => c[0].data.version)).toEqual([5, 5]);
+  });
+
+  // #1688 — MCP authors only on a DISABLED workflow: `expectedEnabled` is checked under the same lock.
+  it('authoring with expectedEnabled false on a workflow enabled meanwhile is a 409 and creates no version', async () => {
+    const h = buildTx(2, true);
+    await expect(
+      h.service.authorVersion('wf1', {
+        steps: MANUAL_STEPS,
+        baseVersion: 2,
+        expectedEnabled: false,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(1); // checked under the row lock
+    expect(h.tx.workflowVersion.create).not.toHaveBeenCalled();
+  });
+
+  it('authoring with expectedEnabled matching the row allocates the version', async () => {
+    const h = buildTx(2, false);
+    await h.service.authorVersion('wf1', {
+      steps: MANUAL_STEPS,
+      expectedEnabled: false,
+    });
+    expect(h.tx.workflowVersion.create).toHaveBeenCalledTimes(1);
+    // The precondition is never written.
+    const calls = h.tx.workflowVersion.create.mock.calls as Array<
+      [{ data: Record<string, unknown> }]
+    >;
+    expect(calls[0][0].data).not.toHaveProperty('expectedEnabled');
+  });
+
+  it('a header update with expectedEnabled locks the row and 409s when the state moved', async () => {
+    const h = buildTx(1, true);
+    await expect(
+      h.service.update('wf1', { name: 'Renamed', expectedEnabled: false }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.applicationWorkflow.update).not.toHaveBeenCalled();
+    expect(h.applicationWorkflow.update).not.toHaveBeenCalled();
+
+    const ok = buildTx(1, false);
+    await ok.service.update('wf1', { name: 'Renamed', expectedEnabled: false });
+    expect(ok.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(ok.tx.applicationWorkflow.update).toHaveBeenCalledWith({
+      where: { id: 'wf1' },
+      data: { name: 'Renamed' },
+    });
+  });
+
+  it('expectedEnabled is ignored when omitted (no lock for a plain update)', async () => {
+    const h = buildTx(1, true);
+    await h.service.update('wf1', { name: 'Renamed' });
+    expect(h.tx.$queryRaw).not.toHaveBeenCalled();
+    expect(h.applicationWorkflow.update).toHaveBeenCalledTimes(1);
   });
 });

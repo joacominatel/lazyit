@@ -247,7 +247,7 @@ Legend:
 | workflow-engine | definitions, connections, runs, tasks (read) | workflow:read | R | ✅ built, W2-13 (every channel) |
 | workflow-engine | retry / replay | workflow:run | W + ext | ✅ built, W2-13 (every channel; no `overrides`) |
 | workflow-engine | task submit / skip / fail | workflow:task + assignee | W + ext | ✅ built, W2-13 (every channel; the assignee guard decides) |
-| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | ✅ built (W2-14), `elevated`, **chat only** (MCP/headless deferred, #1344); the dry-run is embedded in the enable card (§7 W13) |
+| workflow-engine | definitions, versions, connections (incl. test), dry-run, enable/disable | workflow:manage (+workflow:secrets, CSEC-1) | W | ✅ built (W2-14), `elevated`; **chat**, plus **MCP for disabled workflows only** (W10–W12, #1688); never headless (INV-AI-17); the dry-run is embedded in the enable card (§7 W13) |
 | workflow-engine | workflow secrets | workflow:secrets | W | EXCL (the secret value would enter model context, INV-AI-5) |
 | imports (Migrator) | multi-step upload / plan / commit | import:run, human-only | W | EXCL v1 (upload; later) |
 | config | `my-permissions` | open | R | v1 `session_context` |
@@ -560,9 +560,9 @@ domain. W3 was folded out of W2 as its own tool, and W8 is two tools.
 | W7 | `workflow_run_replay` ✅ | WorkflowRunsController.replayLatest | workflow:run | write, ext | all | W2-13 |
 | W8 | `workflow_task_list` ✅ / `workflow_task_get` ✅ | ManualTasksController.findAll / .findOne | workflow:read | read | all | W2-13 |
 | W9 | `workflow_task_resolve` ✅ (submit\|skip\|fail) | ManualTasksController.submit (primary) / .skip / .fail | workflow:task + assignee | write, ext | all (an SA passes the assignee guard only on unassigned tasks) | W2-13 |
-| W10 | `workflow_create` ✅ built (W2-14) — always created disabled; the input has no `enabled` | WorkflowsController.create (+findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
-| W11 | `workflow_author_version` ✅ built (W2-14) | WorkflowsController.authorVersion (+findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
-| W12 | `workflow_update` ✅ built (W2-14) — name, description, deprovision policy. Executed-as is **not** exposed: the route accepts only the engine Service Account, already the default (CSEC-3) | WorkflowsController.update (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
+| W10 | `workflow_create` ✅ built (W2-14) — always created disabled; the input has no `enabled`. Like every authoring tool (W10–W16) it is `humanOnly` (descriptor flag, #1688): core never lists or runs it for a Service Account, on any channel, though the route admits one | WorkflowsController.create (+findAll, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
+| W11 | `workflow_author_version` ✅ built (W2-14) — over MCP only on a **disabled** workflow: on an enabled one it carries `OUTBOUND_INTEGRATION`, refused over MCP (`AI_CHANNEL_REFUSED_WARNINGS`); sends `baseVersion` and `expectedEnabled` (checked under the row lock, 409 if the workflow was enabled meanwhile) | WorkflowsController.authorVersion (+findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
+| W12 | `workflow_update` ✅ built (W2-14) — name, description, deprovision policy. Executed-as is **not** exposed: the route accepts only the engine Service Account, already the default (CSEC-3). Over MCP only on a **disabled** workflow (refused by the tool otherwise); sends `expectedEnabled` | WorkflowsController.update (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated | chat, MCP (#1688) | W2-14 |
 | W13 | `workflow_set_enabled` ✅ built (W2-14) — enabling takes `sampleAccessGrantId`; the card embeds the dry-run | WorkflowsController.update (+ WorkflowDryRunController.run, findOne, findAll, Connections findOne, Applications findAll/findOne) | workflow:manage | elevated | chat | W2-14 |
 | W14 | `workflow_archive` ✅ built (W2-14) | WorkflowsController.remove (+findOne, findAll, Applications findAll/findOne) | workflow:manage | elevated·D | chat | W2-14 |
 | W15 | `workflow_connection_create` / `_update` / `_archive` ✅ built (W2-14) | WorkflowConnectionsController.create / .update (+ConfigController.myPermissions for the CSEC-1 pre-check) / .remove (+Workflows findAll/findOne for "used by") | workflow:manage (+workflow:secrets, CSEC-1) | elevated | chat | W2-14 |
@@ -1932,8 +1932,9 @@ sentence as **codes + params**, and the web renders the code's template in the u
 - **The closed list** is `AI_SENTENCES` in `@lazyit/shared` (`schemas/ai-sentences.ts`): each code carries
   its English template in ICU MessageFormat (the syntax `next-intl` reads, so the web's `en` catalog can
   copy it) and the kind of each param — `text` (verbatim; it may carry the same `<untrusted_content>`
-  wrappers the English does, stripped to plain text by the web), `number` (ICU `plural`), `date` (as the
-  English shows it) or `enum:<Name>` (a raw code the template `select`s on; `enum:YesNo` is `yes` / `no`).
+  wrappers the English does, stripped to plain text by the web), `input` (a value the **model** supplied
+  in its tool input — #1687, below), `number` (ICU `plural`), `date` (as the English shows it) or
+  `enum:<Name>` (a raw code the template `select`s on; `enum:YesNo` is `yes` / `no`).
   Codes are `<tool_name>.<part>` for a tool's own sentences, `access.*`, `kb.audience.*`, `taxonomy.*`,
   `workflow.*`, `workflows.*` for shared parts, and `refusal.*` for core and runtime refusals.
 - **One source for both.** The API builds each sentence with `phrase(code, params)`
@@ -1942,6 +1943,20 @@ sentence as **codes + params**, and the web renders the code's template in the u
   row, the output or the error. An edge case the list does not model is `englishOnly(text)`: the phrase,
   and any phrase joined with it, then carries no codes and the web shows the English — a sentence is
   localized whole or not at all.
+- **Model-supplied values (`input`, #1687; CEO decision Q6 on #1344).** A server-built sentence may embed
+  words the model chose: `application_create.action` and `supplier_create.action` (`name`),
+  `access_grant_create.action` and `access_request_create.action` (`level`), `purchase_line_add.action`
+  (`line`). Those params are kind `input`. `phrase()` applies `boundAiSentenceInput` (`@lazyit/shared`) to
+  every `input` param before it renders the English or stores the params — control characters turned
+  into spaces and invisible characters removed (bidi marks and controls, zero-width characters, the Unicode
+  tag block) **first**, then `<untrusted_content>` tags removed until none is left (so neither an invisible
+  character inside a tag nor a nested tag can leave one behind), quote characters (`"`, `“ ”`, `« »`,
+  fullwidth `＂`) turned into `'`, whitespace runs collapsed to one space, trimmed, at most
+  `AI_SENTENCE_INPUT_MAX` (80) characters ending in `…` — so no tool can forget it and the English the
+  ledger and MCP read matches what the web renders. Every template quotes an `input` param (`"{name}"`,
+  checked by the shared test). The full value stays in the preview's structured rows. The web renders it
+  as a distinct chip ([[ai-assistant/frontend|frontend]] §11a); a web build that predates the kind reads
+  its own compiled list, where the param is `text`, and shows the plain sentence.
 - **Web rule (read-tolerant).** Render the localized form only when this build knows **every** code of the
   list and has every param its template names; otherwise show the English. An older web ignores the
   fields (zod strips unknown keys); a newer web reading a row stored before #1384 finds none and shows the
@@ -1955,7 +1970,7 @@ sentence as **codes + params**, and the web renders the code's template in the u
   PENDING → APPROVED`, `COMPLETED`, `CANCELLED`, `DRAFT`, `active → revoked`) are codes the web maps with
   its own value labels.
 - **Tests.** `ai-sentences.test.ts` (shared) checks every template names exactly its declared params, never
-  uses ICU apostrophe quoting, and renders; `ai/core/sentences.spec.ts` checks every write tool's summary
+  uses ICU apostrophe quoting, quotes every `input` param, and renders, and covers `boundAiSentenceInput`; `ai/core/sentences.spec.ts` checks every write tool's summary
   and every `action` row are built from a code, that every listed code is used and every used code is
   listed, and that a restricted KB audience renders the same English as before.
 - **Upgrade.** No migration and no change to hashing: `isStale` compares only the `precondition`, step 0

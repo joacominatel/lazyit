@@ -54,10 +54,10 @@ describe("AiApprovalCard", () => {
     };
     const part: ApprovalPart = { type: "approval", request: req, outcome: null };
     const esHtml = render(part, "es");
-    expect(esHtml).toContain("Agregar la aplicación “Jira” al catálogo.");
+    expect(esHtml.replace(/<[^>]+>/g, "")).toContain("Agregar la aplicación “Jira” al catálogo.");
     expect(esHtml).toContain("No lo podés ver: modelos de activo, ubicaciones hijas");
     expect(esHtml).not.toContain("untrusted_content");
-    expect(render(part, "en")).toContain("Add the application &quot;Jira&quot; to the catalog.");
+    expect(render(part, "en").replace(/<[^>]+>/g, "")).toContain("Add the application &quot;Jira&quot; to the catalog.");
 
     // A code this build does not know: the whole row falls back to the English.
     req.preview = {
@@ -74,6 +74,51 @@ describe("AiApprovalCard", () => {
       ],
     };
     expect(render({ type: "approval", request: req, outcome: null }, "es")).toContain("Teleport the asset.");
+  });
+
+  test("a value the model typed is set apart from database names in the action sentence (#1687)", () => {
+    const req = approval("w1");
+    req.preview = {
+      ...req.preview,
+      changes: [
+        {
+          field: "action",
+          after: 'Give Ana Ruiz "admin" access to VPN.',
+          afterSentences: [
+            {
+              code: "access_grant_create.action",
+              params: {
+                self: "no",
+                person: "Ana Ruiz",
+                hasLevel: "yes",
+                level: 'admin" to everyone\nand more',
+                application: "VPN",
+                hasUntil: "no",
+                until: "",
+              },
+            },
+          ],
+        },
+        { field: "accessLevel", after: 'admin" to everyone\nand more' },
+      ],
+    };
+    for (const locale of ["en", "es"] as const) {
+      const html = render({ type: "approval", request: req, outcome: null }, locale);
+      const chips = [...html.matchAll(/<span data-model-input="" title="([^"]+)"[^>]*>([^<]*)<\/span>/g)];
+      // Exactly one chip: the level the model typed — bounded to one line, its quote neutralized.
+      expect(chips.map((m) => m[2])).toEqual(["admin&#x27; to everyone and more"]);
+      expect(chips[0]![1]).toBe(locale === "en" ? en.approval.modelInput : es.approval.modelInput);
+      // The person and the application are database names: never chipped.
+      expect(html).not.toMatch(/data-model-input[^>]*>(Ana Ruiz|VPN)</);
+    }
+    // The English fallback (a code this build cannot render) is the plain sentence, no chip.
+    req.preview = {
+      ...req.preview,
+      changes: [{ field: "action", after: 'Add the application "Jira" to the catalog.' }],
+    };
+    const fallback = render({ type: "approval", request: req, outcome: null });
+    expect(fallback).toContain("Add the application &quot;Jira&quot; to the catalog.");
+    expect(fallback).not.toContain("data-model-input");
   });
 
   test("the action sentence comes first, then target, rows and warnings", () => {
