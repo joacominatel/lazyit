@@ -110,7 +110,9 @@ export function AssignUserDialog({
   const held = useHeldAssets({ userId: userId || undefined, excludeAssetId: assetId });
 
   // Every close path (Cancel, the X, Escape, the overlay, Done) lands here: nothing marked is sent.
+  // While the assignment and its releases run, the dialog stays open so their outcome lands in it.
   function handleOpenChange(next: boolean) {
+    if (!next && assign.isPending) return;
     if (!next) {
       dispatchMarks({ type: "close" });
       setReport(null);
