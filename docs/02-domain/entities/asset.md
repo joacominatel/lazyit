@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Asset
@@ -201,11 +201,21 @@ concrete instance of a generic [[asset-model]].
 >   what tells two holders apart, and it is the person key the importer resolves an owner by
 >   ([[0069-migrator-import]] A.3). `user:read` protects the **directory** — listing and browsing
 >   people. Seeing the holder of one item you may already read does not enumerate the directory.
-> - **Scope.** The decision covers the owner's id, name and email (plus `deletedAt`) only. Today the
->   detail and assignment reads still return the rest of `PUBLIC_USER_SELECT` (role, `legajo`,
->   `username`, `directoryAttrs`); the CEO decided on 2026-10-21 that callers without `user:read` will
->   not get those fields, and that filtering by person (`?userId=`, `?assignedToUserId=`) will require
->   `user:read` (#1685 — decided, not built yet).
+> - **Scope (#1685, built).** The decision covers the owner's id, name and email (plus `deletedAt`)
+>   only. Every other owner column — role, `legajo`, `username`, `directoryAttrs`, `externalId`,
+>   `isActive`, `directoryOnly` and the rest of `PUBLIC_USER_SELECT` — is directory data and needs
+>   `user:read`. The detail (`GET /assets/:id`, and `POST /assets/:id/restore`) and
+>   `GET /assets/:id/assignments` pick the owner `select` per caller up front:
+>   `assetOwnerUserSelect` (`apps/api/src/users/public-user.ts`) returns the full allowlist for a
+>   `user:read` holder, else `ASSET_OWNER_USER_SELECT`, so the directory columns are never read for a
+>   caller who may not see them (no principal → trimmed, fail-closed). The list row and the CSV export
+>   already carried only the trimmed owner. The wire schema (`AssetOwnerUserSchema`) keeps id, name,
+>   email and `deletedAt` required and the rest optional, so both shapes validate; the web reads only
+>   the four. **Filtering by person needs `user:read`** (`403` otherwise): `GET /assets?assignedToUserId=`,
+>   the export's `assignedToUserId`, `GET /asset-assignments?userId=`, and the AI `asset_search`
+>   tool's `assignedToUserId` (it runs through the list route). Listing a named person's assets is a
+>   directory-relational lookup, like `GET /users/:id/assignments`. The `/assets/mine` self-read is
+>   unaffected: it filters by the caller's own id from the principal.
 > - **The CSV export.** Its `owners` column carries live owners' **names** only; there is no email
 >   column today. If one is added, this decision applies to it: it is not `user:read`-gated, and it
 >   is appended at the end, because the columns are an importer contract (ADR-0069).
@@ -289,7 +299,9 @@ three stored fields are echoed on create/update.
   facet, not an access boundary), `q` is a case-insensitive substring over `name` / `serial` /
   `assetTag` **plus the related model's `name` / `manufacturer`** (#943), `assignedToUserId`
   (a [[user]] `uuid`; invalid → `400`) restricts to assets with a **live** assignment
-  (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation — and
+  (`releasedAt = null`) to that user — the owner filter, over the timestamped-join relation; it
+  **needs `user:read`** (`403` otherwise, #1685), and the web drops a `?owner=` link for a caller
+  without it — and
   `warranty` (#955; invalid → `400`) filters on `warrantyEnd`: `expiring90d` = `now < warrantyEnd <=
   now + 90d` (the not-yet-lapsed window the dashboard "Needs attention" warranty tile deep-links to),
   `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. `ownership`
