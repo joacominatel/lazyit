@@ -174,7 +174,7 @@ class FakeAuthGuard implements CanActivate {
 
 describe('asset owner fields and by-person filters need user:read (#1685)', () => {
   let app: INestApplication;
-  const exportCsv = jest.fn();
+  const exportFile = jest.fn();
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -191,7 +191,7 @@ describe('asset owner fields and by-person filters need user:read (#1685)', () =
         { provide: AssetTagSchemeService, useValue: {} },
         { provide: NotificationsService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
-        { provide: ExportService, useValue: { exportCsv } },
+        { provide: ExportService, useValue: { exportFile } },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
       ],
@@ -205,8 +205,8 @@ describe('asset owner fields and by-person filters need user:read (#1685)', () =
   });
 
   beforeEach(() => {
-    exportCsv.mockReset();
-    exportCsv.mockResolvedValue(undefined);
+    exportFile.mockReset();
+    exportFile.mockResolvedValue(undefined);
     prisma.asset.findMany.mockClear();
     prisma.assetAssignment.findMany.mockClear();
   });
@@ -264,7 +264,16 @@ describe('asset owner fields and by-person filters need user:read (#1685)', () =
         .set('X-Test-Role', 'VIEWER');
 
       expect(res.status).toBe(403);
-      expect(exportCsv).not.toHaveBeenCalled();
+      expect(exportFile).not.toHaveBeenCalled();
+    });
+
+    it('GET /assets/export?format=xlsx&assignedToUserId= → 403 too: the gate does not depend on the format', async () => {
+      const res = await request(server())
+        .get(`/assets/export?format=xlsx&assignedToUserId=${OWNER_ID}`)
+        .set('X-Test-Role', 'VIEWER');
+
+      expect(res.status).toBe(403);
+      expect(exportFile).not.toHaveBeenCalled();
     });
 
     it('GET /asset-assignments?userId= → 403, and no assignment is read', async () => {
@@ -346,7 +355,10 @@ describe('asset owner fields and by-person filters need user:read (#1685)', () =
           .get(`/assets/export?assignedToUserId=${OWNER_ID}`)
           .set('X-Test-Role', role);
         expect(csv.status).toBe(200);
-        expect(exportCsv).toHaveBeenCalledTimes(1);
+        expect(exportFile).toHaveBeenCalledTimes(1);
+        expect(exportFile).toHaveBeenCalledWith(
+          expect.objectContaining({ format: 'csv', resource: 'ASSETS' }),
+        );
 
         const assignments = await request(server())
           .get(`/asset-assignments?userId=${OWNER_ID}`)
