@@ -1458,7 +1458,9 @@ the oldest unused** one — the sweeper's own rule, re-checked in the delete: `l
 row** and **no authorization code** — and goes through. A client that ever got a grant, or whose user is
 mid-consent (a code exists), is never evicted. 429 only when nothing is evictable; a concurrent registration
 that took the same row retries (3 attempts). The cost: under a flood, a registration whose user has not
-yet approved consent can be displaced; the client registers again. Evictions are logged (warn), not
+yet approved consent can be displaced; the client registers again. An approval that races the eviction —
+the row deleted between the decision's checks and its code insert — hits the code's FK (P2003) and answers
+the `INVALID_CLIENT` refusal, never a 500, with no code issued. Evictions are logged (warn), not
 audited, like the sweeper's collection of the same rows.
 
 **Per-user `/mcp` cap** (`mcp-rate-limit.ts`, `mcp.constants.ts`; CEO Q8). On top of the per-grant / per-SA

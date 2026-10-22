@@ -187,20 +187,30 @@ export class AuthorizationService {
       state,
       iss: config.issuer,
     });
-    await this.prisma.oAuthAuthorizationCode.create({
-      data: {
-        codeHash: code.hash,
-        userId: user.id,
-        clientRefId: client.id,
-        redirectUri,
-        codeChallenge: request.codeChallenge,
-        scopes: granted,
-        resource: config.resource,
-        expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
-        // The exchange is refused if this moved in between (a password change during the code's 60 s).
-        mcpCredentialEpoch: user.mcpCredentialEpoch,
-      },
-    });
+    try {
+      await this.prisma.oAuthAuthorizationCode.create({
+        data: {
+          codeHash: code.hash,
+          userId: user.id,
+          clientRefId: client.id,
+          redirectUri,
+          codeChallenge: request.codeChallenge,
+          scopes: granted,
+          resource: config.resource,
+          expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
+          // The exchange is refused if this moved in between (a password change during the code's 60 s).
+          mcpCredentialEpoch: user.mcpCredentialEpoch,
+        },
+      });
+    } catch (err) {
+      // The client row vanished between the checks above and this insert: a DCR registration evicted at
+      // the pending cap (#1683) or swept. The FK refuses the code (P2003) — answer as an unknown client,
+      // never a 500, and issue nothing.
+      if ((err as { code?: unknown }).code === 'P2003') {
+        throw new OAuthAuthorizeRefusedException('INVALID_CLIENT');
+      }
+      throw err;
+    }
     return { redirectTo };
   }
 

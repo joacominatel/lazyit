@@ -6,10 +6,13 @@ jest.mock('../../generated/prisma/client', () => ({
 }));
 
 import {
+  CLAUDE_CODE_REDIRECT,
   RESOURCE,
   authorize,
   buildHarness,
   enableMcp,
+  human,
+  pkcePair,
   registerClient,
   seedUser,
   useHttpsInstance,
@@ -22,6 +25,7 @@ import {
   DCR_MAX_PENDING_REGISTRATIONS,
 } from './oauth.constants';
 import { OAuthSweeper } from './oauth.sweeper';
+import { OAuthAuthorizeRefusedException } from './authorization.service';
 
 /**
  * The OAuth/MCP limits unit (#1683, split from #1344): DCR evicts the oldest unused pending registration
@@ -139,6 +143,56 @@ describe('DCR at the pending-registration cap (#1683)', () => {
     expect(h.prisma.tables.oAuthClient).toHaveLength(
       DCR_MAX_PENDING_REGISTRATIONS,
     );
+  });
+});
+
+describe('consent racing an eviction (#1683 review)', () => {
+  function approve(user: any, clientId: string) {
+    return h.authorization.decision(human(user), {
+      params: {
+        response_type: 'code',
+        client_id: clientId,
+        redirect_uri: CLAUDE_CODE_REDIRECT,
+        code_challenge: pkcePair().challenge,
+        code_challenge_method: 'S256',
+        state: 'st',
+        scope: 'lazyit.read lazyit.write',
+        resource: RESOURCE,
+      },
+      decision: 'approve',
+      scopes: ['lazyit.read'],
+    });
+  }
+
+  it('answers INVALID_CLIENT (not a 500) when the client was evicted before the code insert (P2003)', async () => {
+    const user = seedUser(h);
+    const clientId = await registerClient(h);
+    h.prisma.oAuthAuthorizationCode.create.mockRejectedValueOnce(
+      Object.assign(new Error('Foreign key constraint violated'), {
+        code: 'P2003',
+      }),
+    );
+    await expect(approve(user, clientId)).rejects.toBeInstanceOf(
+      OAuthAuthorizeRefusedException,
+    );
+    h.prisma.oAuthAuthorizationCode.create.mockRejectedValueOnce(
+      Object.assign(new Error('Foreign key constraint violated'), {
+        code: 'P2003',
+      }),
+    );
+    await expect(approve(user, clientId)).rejects.toMatchObject({
+      refusal: 'INVALID_CLIENT',
+    });
+    expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(0);
+  });
+
+  it('lets any other insert failure propagate', async () => {
+    const user = seedUser(h);
+    const clientId = await registerClient(h);
+    h.prisma.oAuthAuthorizationCode.create.mockRejectedValueOnce(
+      new Error('connection reset'),
+    );
+    await expect(approve(user, clientId)).rejects.toThrow('connection reset');
   });
 });
 
