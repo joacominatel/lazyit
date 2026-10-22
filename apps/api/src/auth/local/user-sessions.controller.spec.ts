@@ -15,7 +15,11 @@ import { ServicePrincipalForbiddenGuard } from '../service-principal-forbidden.g
 /** The thin `/auth/sessions` controller (issue #1420): authenticated humans only, own sessions only. */
 describe('UserSessionsController (#1420)', () => {
   const SID = '33333333-3333-4333-8333-333333333333';
-  let service: { list: jest.Mock; end: jest.Mock };
+  let service: {
+    list: jest.Mock;
+    end: jest.Mock;
+    signOutEverywhere: jest.Mock;
+  };
   let controller: UserSessionsController;
 
   beforeEach(() => {
@@ -24,6 +28,7 @@ describe('UserSessionsController (#1420)', () => {
         .fn()
         .mockResolvedValue({ sessions: [], currentIsLegacy: true }),
       end: jest.fn().mockResolvedValue(undefined),
+      signOutEverywhere: jest.fn().mockResolvedValue(undefined),
     };
     controller = new UserSessionsController(
       service as unknown as UserSessionsService,
@@ -34,7 +39,7 @@ describe('UserSessionsController (#1420)', () => {
     expect(
       Reflect.getMetadata(GUARDS_METADATA, UserSessionsController),
     ).toContain(ServicePrincipalForbiddenGuard);
-    for (const name of ['list', 'end'] as const) {
+    for (const name of ['list', 'end', 'revokeAll'] as const) {
       const handler = Object.getOwnPropertyDescriptor(
         UserSessionsController.prototype,
         name,
@@ -64,6 +69,15 @@ describe('UserSessionsController (#1420)', () => {
     expect(service.end).toHaveBeenCalledWith(user, 'target', SID);
   });
 
+  it('signs the caller out everywhere with the request IP (#1699)', async () => {
+    const user = { id: 'u1' } as never;
+    await controller.revokeAll(
+      { headers: {}, ip: '::ffff:203.0.113.9' } as never,
+      user,
+    );
+    expect(service.signOutEverywhere).toHaveBeenCalledWith(user, '203.0.113.9');
+  });
+
   it('401s without a human caller', async () => {
     await expect(
       controller.list({} as never, undefined),
@@ -71,5 +85,9 @@ describe('UserSessionsController (#1420)', () => {
     await expect(
       controller.end('x', {} as never, undefined),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      controller.revokeAll({} as never, undefined),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(service.signOutEverywhere).not.toHaveBeenCalled();
   });
 });

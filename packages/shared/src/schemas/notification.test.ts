@@ -9,6 +9,7 @@ import {
   NotificationGroupKeySchema,
   NotificationGroupPageSchema,
   NotificationGroupSchema,
+  NotificationEmailPreferencesSchema,
   NotificationGroupsQuerySchema,
   NotificationPageSchema,
   NotificationSchema,
@@ -300,5 +301,32 @@ describe("grouped bell contract (#1649)", () => {
       }).success,
     ).toBe(false);
     expect(NotificationGroupSchema.safeParse({ ...group, count: 0 }).success).toBe(false);
+  });
+});
+
+describe("NotificationEmailPreferencesSchema (#879, security notices #1699)", () => {
+  test("carries the security notices the UI shows as fixed on", () => {
+    const parsed = NotificationEmailPreferencesSchema.parse({
+      emailableTypes: ["low_stock", "mcp.client_connected"],
+      optedOutTypes: ["low_stock"],
+      mandatoryTypes: ["mcp.client_connected"],
+    });
+    expect(parsed.mandatoryTypes).toEqual(["mcp.client_connected"]);
+  });
+
+  test("requires mandatoryTypes and rejects an unknown type in it", () => {
+    expect(
+      NotificationEmailPreferencesSchema.safeParse({
+        emailableTypes: [],
+        optedOutTypes: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      NotificationEmailPreferencesSchema.safeParse({
+        emailableTypes: [],
+        optedOutTypes: [],
+        mandatoryTypes: ["not.a.type"],
+      }).success,
+    ).toBe(false);
   });
 });

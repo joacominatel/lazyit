@@ -23,6 +23,7 @@ import {
   type Harness,
 } from '../../test/oauth/oauth-harness';
 import { OAuthSweeper } from './oauth.sweeper';
+import { UserSessionsService } from '../auth/local/user-sessions.service';
 import {
   AUTHORIZATION_CODE_RETENTION_MS,
   AUTHORIZATION_CODE_TTL_MS,
@@ -884,6 +885,52 @@ describe('tokens die with the user', () => {
     expect(
       await h.tokens.verifyAccessToken(refreshed.access_token),
     ).toMatchObject({ ok: true });
+  });
+
+  it('"Sign out everywhere and disconnect AI apps" kills access and refresh tokens, in any mode (#1699)', async () => {
+    for (const mode of ['local', 'oidc']) {
+      process.env.AUTH_MODE = mode;
+      h = buildHarness();
+      enableMcp(h);
+      const user = seedUser(h);
+      const { clientId, tokens } = await connect(h, user);
+      expect(await h.grants.listMine(user)).toHaveLength(1);
+
+      // The real service over the same in-memory database (store and audit default to it).
+      const sessions = new UserSessionsService(
+        h.prisma as never,
+        { record: jest.fn() } as never,
+      );
+      await sessions.signOutEverywhere({ id: user.id }, '192.0.2.1');
+
+      const live = h.prisma.tables.user.find((row) => row.id === user.id)!;
+      expect(live.mcpCredentialEpoch).toBe(1);
+      expect(live.sessionEpoch).toBe(1);
+      expect(
+        await h.tokens.verifyAccessToken(tokens.access_token),
+      ).toMatchObject({ ok: false, reason: 'session_revoked', status: 401 });
+      expect(
+        await oauthError(
+          h.tokens.refresh({
+            refresh_token: tokens.refresh_token,
+            client_id: clientId,
+          }),
+        ),
+      ).toEqual({ error: 'invalid_grant' });
+      expect(await h.grants.listMine(live as never)).toEqual([]);
+      expect(
+        h.prisma.tables.oAuthAuditLog.filter(
+          (row) => row.action === 'SIGNED_OUT_EVERYWHERE',
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          userId: user.id,
+          actorId: user.id,
+          ip: '192.0.2.1',
+          detail: { authMode: mode },
+        }),
+      ]);
+    }
   });
 
   it('a grant the migration marked already dead (-1) stays dead', async () => {

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { OAuthModule } from '../../oauth/oauth.module';
 import { SmtpModule } from '../../smtp/smtp.module';
 import { UserHistoryModule } from '../../user-history/user-history.module';
 import { LocalAuthController } from './local-auth.controller';
@@ -14,7 +15,8 @@ import { UserSessionsService } from './user-sessions.service';
 /**
  * LocalAuthModule — the AUTH_MODE=local first-party auth surface (ADR-0086). Registers:
  *   - `POST /auth/login` (F1b) + its LoginService + per-IP rate-limit guard.
- *   - Per-device sessions (issue #1420, ADR-0086 §9): `GET /auth/sessions`, `DELETE /auth/sessions/:id`
+ *   - Per-device sessions (issue #1420, ADR-0086 §9): `GET /auth/sessions`, `DELETE /auth/sessions/:id`,
+ *     `POST /auth/sessions/revoke-all` (sign out everywhere and disconnect AI apps, #1699, every mode)
  *     + {@link UserSessionsService} + the {@link UserSessionSweeper}. The store they share
  *     (UserSessionStore) is provided by the @Global AuthModule, because the guard needs it too.
  *   - The password LIFECYCLE (F4a, ADR-0086 §F4): `POST /auth/change-password`, `/forgot-password`,
@@ -27,7 +29,8 @@ import { UserSessionsService } from './user-sessions.service';
  * (MustChangePasswordGuard) lives in AuthModule as an APP_GUARD and needs no wiring from here.
  */
 @Module({
-  imports: [SmtpModule, UserHistoryModule],
+  // OAuthModule for its audit trail: "sign out everywhere and disconnect AI apps" (#1699) records there.
+  imports: [SmtpModule, UserHistoryModule, OAuthModule],
   controllers: [
     LocalAuthController,
     PasswordLifecycleController,
