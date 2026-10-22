@@ -20,13 +20,36 @@ export const AssetModelWithCategorySchema = AssetModelSchema.extend({
 });
 
 /**
+ * The owner ([[user]]) an asset read inlines (#1685). `id`, the name, `email` and `deletedAt` are always
+ * present: they are the inventory record every `asset:read` holder sees (#1636). Every other user field
+ * (role, `legajo`, `username`, `directoryAttrs`, …) is directory data the API includes only for a caller
+ * holding `user:read`, so it is OPTIONAL here and both shapes validate. A consumer must not rely on it.
+ */
+export const AssetOwnerUserSchema = UserSchema.pick({
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  deletedAt: true,
+}).extend(
+  UserSchema.omit({
+    id: true,
+    email: true,
+    firstName: true,
+    lastName: true,
+    deletedAt: true,
+  }).partial().shape,
+);
+
+/**
  * An AssetAssignment with its owner ([[user]]) inlined. The user may be **soft-deleted** (its
  * `deletedAt` is non-null): an owner who left the company still shows until the assignment is
  * explicitly released — history is preserved (see docs/02-domain/entities/asset.md, ADR-0023-adjacent
- * auditability rules).
+ * auditability rules). The owner is {@link AssetOwnerUserSchema}: its directory fields are present only
+ * for a caller holding `user:read` (#1685).
  */
 export const AssetAssignmentWithUserSchema = AssetAssignmentSchema.extend({
-  user: UserSchema,
+  user: AssetOwnerUserSchema,
 });
 
 /**
@@ -48,6 +71,7 @@ export const AssetWithRelationsSchema = AssetSchema.extend({
 export type AssetModelWithCategory = z.infer<
   typeof AssetModelWithCategorySchema
 >;
+export type AssetOwnerUser = z.infer<typeof AssetOwnerUserSchema>;
 export type AssetAssignmentWithUser = z.infer<
   typeof AssetAssignmentWithUserSchema
 >;
