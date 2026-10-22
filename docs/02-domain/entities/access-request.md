@@ -46,9 +46,9 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 - **Approval re-checks the person (#1661):** the grant write path refuses a person who is no longer
   live, active and account-holding, so approving a request whose person was deactivated after filing is
   a **400** (`ACCESS_GRANT_PERSON_INACTIVE` for a deactivated person) and the request stays `PENDING`
-  for the approver to deny. Pending requests are **not** closed automatically when the person is
-  deactivated or offboarded: deciding is human-only ([[0085-access-request-flow]]), and a system
-  denial is an open decision for the CEO.
+  for the approver to deny. Decided 2026-10-21: no auto-deny when a person is deactivated or
+  offboarded; deciding stays human-only ([[0085-access-request-flow]]); grants to inactive people are
+  refused with `400 ACCESS_GRANT_PERSON_INACTIVE`.
 - **On behalf of someone else (#1645, CEO 2026-10-17):** `POST /access-requests` takes an optional
   `requesterId`. Omitted or the caller's own id, nothing changes. Another person's id needs
   `accessGrant:grant`, the permission that decides requests (otherwise **403**

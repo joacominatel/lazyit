@@ -175,7 +175,9 @@ The per-application grant export follows the paged Access tab's filters — `sta
 `noAccessLevel` and the person `q` — through the same `where` as
 `GET /applications/:id/access-grants/page`, so "export what I see" holds once the tab filters
 server-side. The older `activeOnly` / `includeExpired` pair is still accepted for clients that send
-it; mixing the two families is a `400`. The audit row records whichever filters were sent.
+it; mixing the two families is a `400`. The audit row records the filters that were sent:
+`activeOnly` / `includeExpired` only when `status` is absent, and `noAccessLevel: true` for a no-level
+export (a `null` level would otherwise be dropped by the audit sanitizer and read as "any level").
 
 ## Consequences
 
