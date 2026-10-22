@@ -66,6 +66,13 @@ describe("MyAccessGrantSchema", () => {
     expect(MyAccessGrantSchema.parse(grant).provisioning).toBeUndefined();
   });
 
+  test("an unknown future value reads as absent instead of failing the list", () => {
+    expect(
+      MyAccessGrantSchema.parse({ ...grant, provisioning: "QUEUED_SOMEWHERE" })
+        .provisioning,
+    ).toBeUndefined();
+  });
+
   test("parses a /mine page", () => {
     const page = MyAccessGrantListPageSchema.parse({
       items: [{ ...grant, provisioning: "WAITING_ON_IT" }],
@@ -95,5 +102,12 @@ describe("MyAccessRequestSchema", () => {
       }).provisioning,
     ).toBeNull();
     expect(MyAccessRequestSchema.parse(request).provisioning).toBeUndefined();
+  });
+
+  test("an unknown future value reads as absent instead of failing the list", () => {
+    expect(
+      MyAccessRequestSchema.parse({ ...request, provisioning: "SOMETHING_NEW" })
+        .provisioning,
+    ).toBeUndefined();
   });
 });

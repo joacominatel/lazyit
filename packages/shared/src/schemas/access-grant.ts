@@ -65,10 +65,11 @@ export type GrantProvisioning = z.infer<typeof GrantProvisioningSchema>;
 
 /**
  * A grant as the self-scope `GET /access-grants/mine` returns it: the full {@link AccessGrantSchema}
- * plus the coarse `provisioning` status. Optional so a client tolerates an API that predates it.
+ * plus the coarse `provisioning` status. Tolerant on read: absent from an API that predates it, and a
+ * value a newer API adds reads as absent (`.catch`) instead of failing the whole list.
  */
 export const MyAccessGrantSchema = AccessGrantSchema.extend({
-  provisioning: GrantProvisioningSchema.optional(),
+  provisioning: GrantProvisioningSchema.optional().catch(undefined),
 });
 export type MyAccessGrant = z.infer<typeof MyAccessGrantSchema>;
 

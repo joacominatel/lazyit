@@ -15,12 +15,14 @@ export type AccessRequestListPage = z.infer<typeof AccessRequestListPageSchema>;
 
 /**
  * A request as the self-scope `GET /access-requests/mine` returns it (#1700): the full
- * {@link AccessRequestSchema} plus the coarse `provisioning` status of the grant an approval created.
- * `null` when there is no grant to provision (PENDING or DENIED); optional so a client tolerates an API
- * that predates it. The estate-wide `GET /access-requests` does not carry it.
+ * {@link AccessRequestSchema} plus the coarse `provisioning` status of the grant an approval created,
+ * while that grant is still active. `null` when there is nothing to show (PENDING, DENIED, or the
+ * grant was revoked since). Tolerant on read: absent from an API that predates it, and a value a newer
+ * API adds reads as absent (`.catch`) instead of failing the whole list. The estate-wide
+ * `GET /access-requests` does not carry it.
  */
 export const MyAccessRequestSchema = AccessRequestSchema.extend({
-  provisioning: GrantProvisioningSchema.nullable().optional(),
+  provisioning: GrantProvisioningSchema.nullable().optional().catch(undefined),
 });
 export type MyAccessRequest = z.infer<typeof MyAccessRequestSchema>;
 
