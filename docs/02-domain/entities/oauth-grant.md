@@ -3,7 +3,7 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # OAuthGrant
@@ -33,7 +33,8 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
   changes them. The scope hierarchy (`write` ⊇ `read`) is applied when tools are listed.
 - **Dies with the user's MCP-credential epoch**: `mcpCredentialEpoch` is a snapshot of
   [[user]]`.mcpCredentialEpoch`; a password change or reset, an admin reset or *revoke sessions*, the
-  recovery CLI, a deactivation or an offboarding bumps it and every grant stops working (and leaves the
+  recovery CLI, a deactivation, an offboarding or the user's own *Sign out everywhere and disconnect AI
+  apps* (#1699) bumps it and every grant stops working (and leaves the
   connected-apps lists). **A normal web logout does not**: it bumps only `sessionEpoch`, so the grant
   survives it ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24). Deactivation,
   `directoryOnly` and `mustChangePassword` also refuse it.

@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # AI Assistant — Security & Threat Model
@@ -591,11 +591,14 @@ the **exfiltration leg** and the **consequential-action leg**.
     Refresh tokens live 30 days from their last use; there is no absolute cap in v1 (reconciled —
     this note recommended an absolute 30 days).
   - Revocation happens on: an `mcpCredentialEpoch` bump (password change or reset, admin reset or
-    *revoke sessions*, the recovery CLI, deactivation, offboarding), a user revoking a client from their
-    profile, or an admin revoking any user's clients. **A normal web logout does not revoke them**: it
-    bumps only `sessionEpoch` and ends web sessions only (ADR-0097 decision 8, amended 2026-09-24 — CEO:
-    "Separarlos"). The trade-off: signing out of a shared browser does not disconnect the user's agents;
-    a password change or a revoke in `/account/ai` does.
+    *revoke sessions*, the recovery CLI, deactivation, offboarding, the user's own *Sign out everywhere
+    and disconnect AI apps*), a user revoking a client from their profile, or an admin revoking any
+    user's clients. **A normal web logout does not revoke them**: it bumps only `sessionEpoch` and ends
+    web sessions only (ADR-0097 decision 8, amended 2026-09-24 — CEO: "Separarlos"). The trade-off:
+    signing out of a shared browser does not disconnect the user's agents; a password change, a revoke
+    in `/account/ai`, or *Sign out everywhere and disconnect AI apps* (`POST /auth/sessions/revoke-all`,
+    #1699 — both counters, every session row, every auth mode, no step-up since it only removes access)
+    does.
   - `/mcp` accepts `lzit_oat_` access tokens whose audience is the canonical URI, `lzit_pat_` personal
     tokens on `lan` only, and `lzit_sa_` tokens only of a Service Account that holds `ai:connect`
     (R10, fail-closed). The global `JwtAuthGuard` rejects OAuth and personal tokens on every other route,
@@ -1030,7 +1033,7 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
 | Sanitized renderer reuse; external links not auto-linked | Taint *tracking* (beyond listing the sources read) |
 | Egress guard for provider and CIMD; AI internal-host allowlist | `AI_SECRET_KEY` rotation runbook |
 | Own key axis, write-only, destination binding, log redaction | — |
-| Opaque, audience-bound OAuth tokens; rotation plus reuse detection; revocation UI | A per-user email opt-out for "new client connected" |
+| Opaque, audience-bound OAuth tokens; rotation plus reuse detection; revocation UI | ~~A per-user email opt-out for "new client connected"~~ — decided against (#1699): it is a security notice and ignores the opt-out |
 | Consent page requirements; `lazyit.admin` never preselected, with step-up | |
 | Per-SA AI access setting, optional mutation cap, `infra:report` refusal | |
 | Budgets, caps, timeouts, persisted spend | |

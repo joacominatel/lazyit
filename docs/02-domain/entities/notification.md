@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-10-17
+updated: 2026-10-22
 ---
 
 # Notification
@@ -73,7 +73,7 @@ every `notification:read` holder. It **upserts the caller's read join**: a missi
 **`infra.identity_conflict`** (two hosts reporting one machine-id — [[0074-server-reporting-agent]] §3
 amendment, #1141; bell-only, not emailed) · **`mcp.client_connected`** (a new external AI agent
 connection used on the recipient's account — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]],
-targeted, emailed).
+targeted, emailed as a **security notice** that ignores the per-user opt-out, #1699).
 Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy) agree
 by construction. Adding a type later is an additive shared-package change (and a web exhaustive-map
 re-typecheck — `TYPE_META` is keyed on the enum).
@@ -130,7 +130,12 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   [[ai-assistant/mcp-and-oauth|MCP]] §14; security §6.3) → **`mcp.client_connected`**, a **targeted**
   security notice to the account's owner (`recipientUserId` = `targetUserId` = the user) when an OAuth
   grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
-  must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to
+  must not go unnoticed. Emailed (on the allowlist) as a **security notice** (#1699, CEO decision on
+  #1344 Q5): the per-user email opt-out does not apply to it. `GET /account/notification-preferences`
+  lists it under `mandatoryTypes` and never in `optedOutTypes`; a `PUT` that names it drops it instead of
+  answering 400. An opt-out entry stored before the rule stays in `User.notificationEmailOptOutTypes`
+  (no migration) and is ignored on read; the next save drops it. Its email footer says it cannot be
+  turned off instead of linking to the preferences page. No `entityType`: the bell deep-links by type to
   `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); whether a grant was
   announced is stored on it ([[oauth-grant]]`.announcedAt`, AUD-014), never inferred from its age, so the
   90-day prune cannot silence a grant first used months after it was created. Metadata = grant id, kind (`oauth` | `personal`), client name or
