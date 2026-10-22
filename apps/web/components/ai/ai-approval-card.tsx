@@ -26,7 +26,7 @@ import {
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
 import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
-import { localizedText } from "@/lib/ai/sentences";
+import { localizedText, type RenderedSentence } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { cn } from "@/lib/utils";
@@ -141,6 +141,43 @@ export function ApprovalValue({ value }: { value: PreviewValue | null }) {
         </span>
       );
   }
+}
+
+/**
+ * The card's `action` sentence (#1687): plain escaped text, with every value the MODEL supplied (the name
+ * of something it creates, a level it typed) set apart from the names lazyit read from its database — a
+ * monospace chip with a tooltip. The full value is in the field rows below. Without segments (the English
+ * fallback, a sentence with no such value) it is the plain sentence, as before.
+ */
+export function ApprovalActionSentence({
+  action,
+  className,
+}: {
+  action: RenderedSentence | null;
+  className?: string;
+}) {
+  const t = useTranslations("ai.approval");
+  if (!action) return <p className={className}>{t("noAction")}</p>;
+  return (
+    <p className={cn(className, action.untrusted && "italic")}>
+      {action.segments
+        ? action.segments.map((segment, index) =>
+            segment.input ? (
+              <span
+                key={index}
+                data-model-input=""
+                title={t("modelInput")}
+                className="rounded-sm bg-muted px-1 font-mono text-[0.92em] font-normal break-all not-italic"
+              >
+                {segment.text}
+              </span>
+            ) : (
+              <span key={index}>{segment.text}</span>
+            ),
+          )
+        : action.text}
+    </p>
+  );
 }
 
 interface ApprovalCardProps {
@@ -304,9 +341,7 @@ export function AiApprovalCard({
       </header>
 
       <div className="space-y-3 px-3 py-3 text-sm">
-        <p className={cn("font-medium", model.action?.untrusted && "italic")}>
-          {model.action ? model.action.text : t("noAction")}
-        </p>
+        <ApprovalActionSentence action={model.action} className="font-medium" />
 
         {target && targetLabel && (
           <p className="text-xs text-muted-foreground">

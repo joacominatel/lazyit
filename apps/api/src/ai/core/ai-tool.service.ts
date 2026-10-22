@@ -229,6 +229,12 @@ export class AiToolService {
         ...messagePhrase(phrase('refusal.notOnChannel', { tool: name })),
       });
     }
+    // A human-only tool (`humanOnly`, #1688) called by a Service Account: refused before anything is
+    // recorded, like a tool it is never listed. (A tool whose ROUTE is human-only still reaches the route,
+    // which answers for itself — some tools turn that refusal into guidance.)
+    if (tool.descriptor.humanOnly === true && ctx.identity.kind !== 'human') {
+      return errorResult(kind, this.kindError(name));
+    }
     if (kind === 'mutation') {
       if (ctx.channel === 'CHAT') {
         return errorResult(kind, {
@@ -1083,6 +1089,10 @@ export class AiToolService {
     if (!(await this.holds(principal, [gate]))) {
       return gateError(gate);
     }
+    // A human-only tool (#1688) is never a Service Account's write, on any path.
+    if (tool.descriptor.humanOnly === true && principal.kind !== 'human') {
+      return this.kindError(tool.descriptor.name);
+    }
     if (options.routeStatic) {
       if (
         !this.admitsKind(tool, principal) ||
@@ -1267,6 +1277,15 @@ export class AiToolService {
     return principal.kind === 'service'
       ? tool.principalKinds.service
       : tool.principalKinds.human;
+  }
+
+  /** 403: a Service Account may not use this human-only tool. */
+  private kindError(name: string): ToolError {
+    return {
+      code: 'FORBIDDEN',
+      status: 403,
+      ...messagePhrase(phrase('refusal.noToolPermission', { tool: name })),
+    };
   }
 
   private async loadPrincipal(

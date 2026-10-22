@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -613,4 +613,9 @@ are the ones the tab already used. A `sort` value is a `400`, not ignored (§11'
 `403` rather than an oracle on directory data. No deprecation header is set on the old route yet —
 that is for when the web has moved. Accent folding is not applied (`ILIKE` only), unlike the old
 in-browser search: "jose" no longer finds "José".
+
+**Web side (2026-10-22, #1660).** The application page's Access tab now reads only the paged route
+and the summary, and its export sends the same filters. Two first-party reads of the unpaged route
+remain: the grant dialog's "already holds" context and the workflow dry-run's sample grants, both
+over active grants only. Deprecating the unpaged route is a separate decision.
 

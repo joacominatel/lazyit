@@ -135,7 +135,8 @@ The key forks only; each links its analysis.
    >   manual tasks its assignee guard admits (in practice, unassigned ones).
    > - **Authoring, chat only in v1**: workflows and their versions, connections (incl. the connection
    >   test), the dry-run, and enabling or disabling a workflow. Every authoring tool is `elevated` and
-   >   declares `channels: ['CHAT']`. MCP authoring is deferred (#1344). A Service Account never
+   >   declares `channels: ['CHAT']`. MCP authoring is deferred (#1344) — *decided 2026-10-21, below:
+   >   disabled workflows only*. A Service Account never
    >   authors, connects or enables a workflow — a permanent exclusion over headless, not a deferral
    >   (CEO, #1344; INV-AI-17 in [[ai-assistant/security|security]] §6.9).
    > - **Workflow secrets stay structurally excluded** (INV-AI-5, INV-AI-14): the AI never reads, creates,
@@ -260,6 +261,40 @@ The key forks only; each links its analysis.
    > in order: step-up, elevated, creates assets or changes money, refused.
    > → [[0099-purchases-scope-model-and-optionality]] *Decisions while building (Phase 3, #1478)* and
    > *(Phase 3 web, #1478)*; [[ai-assistant/frontend|frontend]] §11d.
+
+   > Amended 2026-10-21 (#1688; CEO decision Q1 on #1344): **workflow authoring over MCP, for disabled
+   > workflows only.** The CEO: under `lazyit.admin`, MCP may create and edit workflows and their versions
+   > only while the workflow is **disabled**; anything with `OUTBOUND_INTEGRATION` is refused over MCP —
+   > enabling a workflow, creating or re-pointing a connection, or a new version on an enabled workflow.
+   > This replaces "MCP authoring is deferred" in the 2026-09-24 workflow-engine amendment above.
+   >
+   > - **Three tools reach MCP.** `workflow_create` (always created disabled), `workflow_update` and
+   >   `workflow_author_version` declare `channels: ['CHAT', 'MCP']`. They are `elevated`, so they are listed
+   >   only under `lazyit.admin` (the scope whose consent re-proves the password), and **to human callers
+   >   only**: every authoring tool carries the new descriptor flag `humanOnly`, so core never lists,
+   >   invokes, proposes or approves it for a Service Account on any channel — an SA token connected over
+   >   MCP can carry an `elevated` ceiling and the workflow routes admit a Service Account, so the channel
+   >   alone would not exclude it — and refuses before anything is recorded. They keep the class-derived
+   >   annotations unchanged (`destructiveHint` and `openWorldHint` true — conservative: the client keeps
+   >   asking). Enabling or disabling, archiving, and every connection tool (create, update, test, archive)
+   >   stay chat-only.
+   > - **Disabled only, refused otherwise.** `OUTBOUND_INTEGRATION` joins `AI_CHANNEL_REFUSED_WARNINGS` for
+   >   MCP (and headless, defence in depth): a version on an enabled workflow is refused with a 403 pointing
+   >   to the chat. A header change (name, description, deprovision policy) on an enabled workflow carries
+   >   no warning, so the tool refuses it over MCP itself. Critical applications stay refused over MCP
+   >   (`CRITICAL_APPLICATION`).
+   > - **Server-side and race-safe.** Over MCP no card is built and the client's own confirmation is the
+   >   only review, so the check runs at execute: the tool reads the workflow, and the routes take a new
+   >   optional precondition `expectedEnabled` (`PATCH /workflows/:id`, `POST /workflows/:id/versions`),
+   >   checked under the workflow row lock that already serializes authoring and enabling (SEC-077) — a 409
+   >   when the workflow was enabled in between. The AI tools send it on every channel.
+   > - **Headless unchanged, and no Service Account over MCP either.** No authoring tool lists `HEADLESS`,
+   >   and `humanOnly` excludes Service Accounts on MCP too; a Service Account never authors, connects or
+   >   enables a workflow (INV-AI-17). INV-AI-15 is restated: no **live** outbound integration without a
+   >   human's in-app approval.
+   >
+   > → [[ai-assistant/security|security]] §6.9, T-40, T-42; [[ai-assistant/tools-and-execution|tools]] §7
+   > W10–W12; [[INVARIANTS]] INV-AI-15.
 
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,
@@ -612,8 +647,9 @@ fallback chains or per-user keys; MCP elicitation (the chat's input forms, decis
 2026-09-24 for #1388, have no MCP counterpart), resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; a lazyit-side
 web search or URL fetch (the provider's own search is allowed, decision 3 as amended 2026-09-24 for #1389); admins reading
-other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
-headless (MCP deferred, #1344; headless excluded for good, INV-AI-17); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
+other people's conversations; a per-request headless tool allowlist; workflow authoring over headless
+(excluded for good, INV-AI-17) and, over MCP, anything beyond disabled workflows (enabling, connections, a
+version on an enabled workflow — decision 3 as amended 2026-10-21); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
 
 ## As built (2026-09-26)
 
@@ -666,12 +702,15 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 
 **Deferred** — AI scope only, tracked in #1344 unless noted:
 
-- Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17).
+- Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17). *Decided
+  2026-10-21: disabled workflows only, decision 3 as amended (#1688).*
 - Requester-facing provisioning status; whether an admin may approve their own access request; deferred
   tool loading now that the catalog passes ~60 tools.
 - A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
   sessions* option does).
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
+  *Done 2026-10-21 (#1687): the `input` sentence param kind, bounded on the server and set apart on the
+  card ([[ai-assistant/tools-and-execution|tools]] §9.1).*
 - A route-level expected version on writes (assets, consumables, users, KB, access) to close the
   approve→execute window rather than narrow it.
 - ~~Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.~~

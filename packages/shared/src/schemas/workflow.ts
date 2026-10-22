@@ -743,6 +743,10 @@ export const UpdateApplicationWorkflowSchema = z
     // SEC-077: the latest version number the caller reviewed (0 = none authored yet). When present, the
     // update is refused with 409 if a different version is now the latest. Omitted = no precondition.
     expectedVersion: int4({ min: 0 }),
+    // #1688: the enabled state the caller checked. When present, the update is refused with 409 if the
+    // workflow's `enabled` is now different (checked under the same row lock). A precondition, never a
+    // column: it does not change `enabled` (that is the `enabled` field). Omitted = no precondition.
+    expectedEnabled: z.boolean(),
   })
   .partial();
 export type UpdateApplicationWorkflow = z.infer<
@@ -810,6 +814,10 @@ export const CreateWorkflowVersionSchema = z.strictObject({
   // SEC-077: the latest version number this graph was edited from (0 = none authored yet). When present,
   // authoring is refused with 409 if another version landed since. Omitted = no precondition.
   baseVersion: int4({ min: 0 }).optional(),
+  // #1688: the enabled state the caller checked (MCP authors only on a DISABLED workflow). When present,
+  // authoring is refused with 409 if the workflow's `enabled` is now different — checked under the row
+  // lock that also serializes enabling, so a workflow enabled in between is refused. Omitted = no check.
+  expectedEnabled: z.boolean().optional(),
 });
 export type CreateWorkflowVersion = z.infer<typeof CreateWorkflowVersionSchema>;
 

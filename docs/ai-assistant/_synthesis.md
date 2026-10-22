@@ -166,7 +166,9 @@ Secret Manager, cleartext-credential operations, the AI's own configuration, and
 > engine** is in the catalog. Reads, run retry/replay and manual tasks run on every channel
 > (`workflows.tools.ts`, W2-13); authoring — workflows, versions, connections, connection test, dry-run,
 > enable/disable — is `elevated` and **chat only** (`channels: ['CHAT']`, `workflow-authoring.tools.ts`,
-> W2-14); MCP authoring is deferred (#1344), and a Service Account never authors, connects or
+> W2-14); MCP authoring is deferred (#1344) — *decided 2026-10-21 (#1688): MCP may create and edit
+> disabled workflows and their versions; enabling, connections and versions on an enabled workflow stay
+> chat-only* — and a Service Account never authors, connects or
 > enables — over headless that is permanent, not deferred (INV-AI-17, [[ai-assistant/security|security]]
 > §6.9). Workflow secrets stay a structural exclusion. The step-up list gains **every
 > write on a critical application** (`CRITICAL_APPLICATION`), and core derives step-up from the closed
@@ -685,8 +687,8 @@ change behavior an operator would notice and are also listed in ADR-0097's to-co
 - A "via AI" badge in the activity feed; stamping ledgers beyond asset and user history; a hash-chained
   audit.
 - Admins reading other people's conversations.
-- Workflow authoring over MCP (chat only in v1; deferred, #1344) and over headless (excluded for good,
-  INV-AI-17); any tool over workflow secrets (structural exclusion).
+- Workflow authoring over headless (excluded for good, INV-AI-17) and, over MCP, anything beyond
+  disabled workflows (decided 2026-10-21, #1688); any tool over workflow secrets (structural exclusion).
 
 ---
 
