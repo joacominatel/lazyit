@@ -45,7 +45,9 @@ export interface CsvExportSpec<T extends KeysetCursor> {
 }
 
 /** A {@link CsvExportSpec} plus the file format; `xlsx` only on a route that opted in (ADR-0103 §11). */
-export interface ExportFileSpec<T extends KeysetCursor> extends CsvExportSpec<T> {
+export interface ExportFileSpec<
+  T extends KeysetCursor,
+> extends CsvExportSpec<T> {
   format: DataExportFormat;
 }
 

@@ -1,5 +1,9 @@
 import type { CsvCellKind } from '@lazyit/shared';
-import { moneyCell, type ExportCellValue, type ExportColumn } from './export-column';
+import {
+  moneyCell,
+  type ExportCellValue,
+  type ExportColumn,
+} from './export-column';
 
 // The SpreadsheetML parts of a one-sheet workbook (ADR-0103 §11). Text is always an inline string,
 // never a formula, so a cell starting with `=` is shown, not evaluated, and needs no `'` guard.
@@ -7,7 +11,8 @@ import { moneyCell, type ExportCellValue, type ExportColumn } from './export-col
 const MAIN_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL_NS =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const PKG_REL_NS =
+  'http://schemas.openxmlformats.org/package/2006/relationships';
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 
 /** Excel refuses a cell longer than this; a longer text is cut to it. */
@@ -87,9 +92,10 @@ function escapeXml(value: string): string {
 
 const HEX4 = (code: number) => code.toString(16).toUpperCase().padStart(4, '0');
 // XML 1.0 forbids C0 controls other than tab/LF; CR survives only escaped. Lone surrogates are not text.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const ESCAPED_CONTROL = /[\u0000-\u0008\u000B\u000C\u000D\u000E-\u001F]/g;
 const NOT_XML_CHAR =
-  /[￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+  /[\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 function truncateCell(value: string): string {
   if (value.length <= XLSX_MAX_CELL_CHARS) return value;
@@ -109,7 +115,7 @@ export function xlsxText(value: string): string {
     truncateCell(value)
       .replace(/_(x[0-9A-Fa-f]{4}_)/g, '_x005F_$1')
       .replace(ESCAPED_CONTROL, (c) => `_x${HEX4(c.charCodeAt(0))}_`)
-      .replace(NOT_XML_CHAR, '�'),
+      .replace(NOT_XML_CHAR, '\uFFFD'),
   );
 }
 
@@ -228,7 +234,10 @@ function columnWidth(column: ExportColumn<unknown>): number {
 
 /** Excel's sheet-name rules: at most 31 characters, none of `[]:*?/\`, not blank. */
 export function xlsxSheetName(name: string): string {
-  const clean = name.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31);
+  const clean = name
+    .replace(/[[\]:*?/\\]/g, ' ')
+    .trim()
+    .slice(0, 31);
   return clean === '' ? 'Sheet1' : clean;
 }
 
@@ -298,7 +307,9 @@ export async function* streamSheetXml<T>({
     )
     .join('');
   const header = columns
-    .map((c, i) => inlineCell(`${columnLetter(i)}1`, c.header, XLSX_STYLE.header))
+    .map((c, i) =>
+      inlineCell(`${columnLetter(i)}1`, c.header, XLSX_STYLE.header),
+    )
     .join('');
   yield Buffer.from(
     `${XML_DECL}<worksheet xmlns="${MAIN_NS}" xmlns:r="${REL_NS}">` +
