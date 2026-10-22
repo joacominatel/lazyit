@@ -211,6 +211,10 @@ model User {
   // silently retiring a decision the estate depends on.
   infraAutoConfirmRules InfraAutoConfirmRule[] @relation("InfraAutoConfirmRuleAuthor")
 
+  // Software watches this user added (#1684). SetNull: a watch is a shared fleet view, so losing its
+  // author leaves it in place and visibly unattributed.
+  softwareWatches SoftwareWatch[] @relation("SoftwareWatchAuthor")
+
   // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
   // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
   permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
@@ -3208,6 +3212,32 @@ model InfraAutoConfirmRule {
   @@map("infra_auto_confirm_rules")
 }
 
+/// The software watchlist (#1684, split from epic #1146 item 4): a short, operator-maintained list of
+/// package names, each answered on read with a fleet-wide distribution computed from the package
+/// lists agents already store in `InfraNode.specs.software`. Distribution only — no version
+/// comparison, no EOL flag, no CVE feed (CEO decision Q12 on #1146).
+///
+/// No `updatedAt`: a watch has no editable field. It is created and soft-deleted, nothing else — a
+/// rename is a delete plus a new watch. Uniqueness of `name` among LIVE rows is the raw-SQL partial
+/// unique index `software_watches_name_live_key` in the migration (NOT @unique here), so a deleted
+/// watch frees its name for a new one, the same shape as `secret_vaults_name_live_key`.
+model SoftwareWatch {
+  id   String @id @default(cuid())
+  // Stored NORMALIZED (`normalizeSoftwareName` in @lazyit/shared: whitespace collapsed, trimmed,
+  // lower-cased) — the one spelling a package is matched in.
+  name String
+
+  // The human who added it. SetNull, never cascade. @db.Uuid to match User.id (#1179).
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("SoftwareWatchAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([createdById])
+  @@map("software_watches")
+}
+
 /// Which parent kind an Attachment hangs off (ADR-0082). Polymorphic by design — the model extends
 /// to a CONSUMABLE entityType later without a schema rework (deferred).
 enum AttachmentEntityType {
@@ -3387,6 +3417,10 @@ model AiConversation {
   /// the conversation was started with, or null = no web search (every legacy row). Turning web search
   /// off in Settings → AI makes a conversation that has it read-only (its tool list cannot change).
   webSearchMaxUses Int?
+  /// The frozen system prompt (#1675), built once at creation and sent as `instructions` on every step.
+  /// Null on every conversation created before #1675: the runtime then reads its legacy
+  /// `lazyit-system-prompt-v1` row in ai_messages (never backfilled). Never leaves the API.
+  systemPrompt     String?
   /// CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED; null while the conversation is writable.
   closedReason     String?
   lastActivityAt   DateTime        @default(now())
@@ -3457,6 +3491,10 @@ model AiRun {
   /// Redacted `{ code, message }` — never a provider body or credential.
   error             Json?
   idempotencyKey    String?
+  /// The chat session's `sessionEpoch` at submission (#1675), humans only — the epoch the run's tool
+  /// calls are delegated under. Null for service accounts, and on every run created before #1675: the
+  /// runtime then reads its legacy `lazyit-run-v1` row in ai_messages (never backfilled).
+  sessionEpoch      Int?
   cancelRequestedAt DateTime?
   startedAt         DateTime?
   finishedAt        DateTime?

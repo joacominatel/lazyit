@@ -110,9 +110,11 @@ Backups: `docs/05-runbooks/backups.md`.
 - **Disk/OOM safety**: every long-running compose service has a `logging:` rotation block
   (json-file, 10m x 3) and a modest `mem_limit`/`cpus` so logs can't fill the disk and one runaway
   service can't OOM the single host.
-- **Backups**: an opt-in `backup` profile sidecar runs cron + `pg_dump` of the app database to a
-  host-mounted `./backups` with retention on `app-*.dump` (off by default). Full DR procedure (what to back up,
-  restore order): `docs/05-runbooks/backups.md`.
+- **Backups**: the `backup` sidecar (profiles `prod` + `backup`, so the `--profile prod` bring-up runs it)
+  runs cron: a `pg_dump` of the app database plus a tarball of the attachments volume, as a matched
+  `app-<ts>.dump` + `attachments-<ts>.tar.gz` pair in a host-mounted `./backups` — dumps kept 14 days,
+  tarballs 7 (`BACKUP_ATTACHMENTS_RETENTION_DAYS`), tarball switchable off with `BACKUP_ATTACHMENTS=false`.
+  Full DR procedure (what to back up, restore order): `docs/05-runbooks/backups.md`.
 
 ## Not configured yet (reserved)
 

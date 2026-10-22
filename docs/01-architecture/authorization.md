@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -114,7 +114,9 @@ three roles **except** two tighter tiers:
 - the **pre-tightened reads** — `accessGrant:read`, `accessRequest:read`, `user:read` and
   `purchaseOrder:read` (`VIEWER_DENIED_READS`) — seeded
   to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
-  see purchases and suppliers** (it gets 403). `GET /search` queries only the indexes whose own
+  see purchases and suppliers** (it gets 403). `user:read` guards the directory, not every email: an
+  asset's owners keep their emails for any `asset:read` holder (decided, #1636), while the servers
+  reads hide them without `user:read` (#1627) — see [[role-permission]]. `GET /search` queries only the indexes whose own
   `<domain>:read` the caller holds (`INDEX_READ_PERMISSION` in `search.service.ts`: `asset:read`,
   `article:read`, `user:read`, `location:read`, `application:read`, `infra:read`, `consumable:read`, and
   `purchaseOrder:read` for purchases and suppliers), so a caller lacking one gets no hits from that
@@ -251,7 +253,11 @@ preview, backfill — stays `settings:manage`. See [[asset-tag-scheme]].
 
 **Fully configurable, admin-delegated.** Coarse verbs and `:delete` ARE grantable to MEMBER/VIEWER — the
 UI marks them ⚠ "Admin-level" and confirms, but the server does not block (an admin-initiated delegation
-is accepted by design). The only guardrails are *ADMIN-immutable* + *catalog-membership*.
+is accepted by design). The guardrails are *ADMIN-immutable*, *catalog-membership* and **write implies
+read** (#1518): a role holding a non-read verb on a domain also holds its `:read`. `PUT /config/permissions`
+refuses a new write-without-read with **400** `PERMISSION_READ_REQUIRED` and heals a stored one by adding
+the read; the editor turns the read on with the write ([[0046-roles-permissions-v2]] → *Amendment — write
+implies read*). It does not apply to [[service-account]] grants (§6).
 
 ## 6. Service accounts as a non-human principal
 

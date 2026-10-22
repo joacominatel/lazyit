@@ -57,6 +57,9 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // `deletedAt`: deleting a rule stops it matching but keeps the record of the decision, so reads must
   // auto-exclude it — a deleted rule that kept confirming hosts would be the worst possible bug here.
   'InfraAutoConfirmRule',
+  // The software watchlist (#1684). Delete = soft delete: the watch stops showing, its name is free for
+  // a new one (live-only partial unique index), and the record of who watched what is kept.
+  'SoftwareWatch',
   // File attachments (ADR-0082): delete = soft delete (the blob stays until the GC sweep proves
   // nothing restorable references it). The GC itself reads soft-deleted rows via includeSoftDeleted.
   'Attachment',

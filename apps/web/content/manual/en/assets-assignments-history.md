@@ -40,6 +40,12 @@ the new one.
 > An owner who has left the company still appears as an active owner until you explicitly release the
 > assignment — lazyit never silently drops ownership records.
 
+**Anyone who can view assets sees each owner's name and email**, Viewers included, on the assets
+list, an asset's page and its ownership history. Who holds an item, and how to reach them, is part of
+the inventory record. This is deliberate. It is not the same as browsing the user directory, which
+stays hidden from Viewers by default. The **Servers** pages are the exception: there an owner's email
+appears only if your role can view the user directory.
+
 ## Acknowledging receipt
 
 Assigning an asset records **who is accountable** for it — but it doesn't prove the person actually

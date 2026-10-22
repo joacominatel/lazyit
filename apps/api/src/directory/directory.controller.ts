@@ -31,7 +31,7 @@ class UpdateDirectoryConnectionDto extends createZodDto(
 class DirectorySyncResultDto extends createZodDto(DirectorySyncResultSchema) {}
 
 /**
- * DirectoryController — the Settings → Instance → Directory surface (issue #839, ADR-0091). Lives under
+ * DirectoryController — the Settings → Directory surface (issue #839, ADR-0091). Lives under
  * `/directory` for the singleton AD/LDAP directory-source config + the ad-hoc "Sync now" action.
  *
  * All handlers are gated by `settings:manage` (the instance-config admin permission) and forbidden to

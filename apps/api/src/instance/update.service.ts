@@ -59,8 +59,8 @@ interface GithubRelease {
 
 /**
  * UpdateService — the consumption half of versioning (ADR-0084, issue #904): the opt-in update check
- * cache, the "N behind" status the Settings → Instance card reads, and the ENQUEUE-ONLY guided-update
- * contract. It NEVER executes an update: `enqueue` inserts an append-only `UpdateRun` (status
+ * cache, the "N behind" status the Settings → General & version card reads, and the ENQUEUE-ONLY
+ * guided-update contract. It NEVER executes an update: `enqueue` inserts an append-only `UpdateRun` (status
  * `requested`) and the caller is shown the exact `./infra/update.sh vX.Y.Z` command; the HOST script
  * runs the update and stamps state back over plain Postgres (this service only READS those rows).
  *
@@ -504,8 +504,8 @@ export class UpdateService implements OnModuleInit {
   ): Promise<void> {
     const body =
       behindBy === 1
-        ? `You are running ${this.currentVersion} — one newer release is out. Review it in Settings → Instance.`
-        : `You are running ${this.currentVersion} — ${behindBy} newer releases are out. Review them in Settings → Instance.`;
+        ? `You are running ${this.currentVersion} — one newer release is out. Review it in Settings → General & version.`
+        : `You are running ${this.currentVersion} — ${behindBy} newer releases are out. Review them in Settings → General & version.`;
     const agents = await this.agentsMajorBehindLine();
     await this.notifications.emit({
       type: 'update.available',

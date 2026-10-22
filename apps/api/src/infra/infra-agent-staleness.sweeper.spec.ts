@@ -37,7 +37,12 @@ type FlipArgs = {
  * `infra.agent_offline` nudge per OFFLINE transition (#852), the dedupeKey keys on the last-report
  * instant, and a clean sweep is silent.
  */
-function makeSweeper(transitioning: StaleNode[]) {
+function makeSweeper(
+  transitioning: StaleNode[],
+  // Default: a server that has been up far longer than any window, i.e. no boot grace in play — the
+  // behaviour every test above the boot-grace block is about.
+  clock: { bootedAtMs?: number; nowMs?: number } = {},
+) {
   const findMany = jest.fn().mockResolvedValue(transitioning);
   // Default: every row the per-node filter decided is still stale at write time and flips.
   const updateMany = jest
@@ -51,6 +56,11 @@ function makeSweeper(transitioning: StaleNode[]) {
   const emit = jest.fn().mockResolvedValue('notif-id');
   const notifications = { emit } as unknown as NotificationsService;
   const sweeper = new InfraAgentStalenessSweeper(prisma, notifications);
+  sweeper.bootedAtMs = clock.bootedAtMs ?? 0;
+  if (clock.nowMs !== undefined) {
+    const fixed = clock.nowMs;
+    sweeper.now = () => fixed;
+  }
   return { sweeper, findMany, updateMany, emit };
 }
 
@@ -186,5 +196,118 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
 
     expect(await sweeper.sweep()).toBe(1);
     expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Boot grace (#1674, split from #1146 item 8) ─────────────────────────────────────────────────
+  //
+  // After the API itself was down, every agent's last report is old because nobody was listening.
+  // For one staleness window after boot nothing is flipped OFFLINE (and so nothing is announced).
+
+  describe('boot grace', () => {
+    const BOOT = Date.parse('2026-10-21T08:00:00.000Z');
+    const MIN = 60 * 1000;
+    const DEFAULT_WINDOW = 45 * MIN; // INFRA_AGENT_STALE_AFTER_MS_DEFAULT
+    // Silent since well before the outage — stale by any threshold, if the server had been listening.
+    const lastBeforeOutage = new Date(BOOT - 3 * 60 * MIN);
+
+    it('does not flip or announce a silent node inside the window after boot', async () => {
+      const { sweeper, updateMany, emit } = makeSweeper(
+        [{ id: 'n1', label: 'web-01', lastReportedAt: lastBeforeOutage }],
+        { bootedAtMs: BOOT, nowMs: BOOT + 15 * MIN },
+      );
+
+      expect(await sweeper.sweep()).toBe(0);
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('is still inside the grace at EXACTLY one window after boot', async () => {
+      const { sweeper, updateMany, emit } = makeSweeper(
+        [{ id: 'n1', label: 'web-01', lastReportedAt: lastBeforeOutage }],
+        { bootedAtMs: BOOT, nowMs: BOOT + DEFAULT_WINDOW },
+      );
+
+      expect(await sweeper.sweep()).toBe(0);
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('flips and announces as normal one millisecond past the window', async () => {
+      const { sweeper, updateMany, emit } = makeSweeper(
+        [{ id: 'n1', label: 'web-01', lastReportedAt: lastBeforeOutage }],
+        { bootedAtMs: BOOT, nowMs: BOOT + DEFAULT_WINDOW + 1 },
+      );
+
+      expect(await sweeper.sweep()).toBe(1);
+      const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+      // The flip is still pinned to the REAL last report, and the nudge keys on it: one per outage.
+      expect(arg.where.OR).toEqual([
+        { id: 'n1', lastReportedAt: lastBeforeOutage },
+      ]);
+      expect(emit).toHaveBeenCalledTimes(1);
+      const input = (emit.mock.calls as EmitCall[])[0][0];
+      expect(input.dedupeKey).toBe(
+        `infra.agent_offline:n1:${lastBeforeOutage.toISOString()}`,
+      );
+    });
+
+    it("the window is the node's OWN served threshold, not the env default", async () => {
+      // 10 min after boot: past a 5-minute served window, inside a daily one and the 45-min default.
+      const { sweeper, updateMany, emit } = makeSweeper(
+        [
+          {
+            id: 'n-tight',
+            label: 'edge-02',
+            lastReportedAt: lastBeforeOutage,
+            policyStaleAfterSeconds: 300,
+          },
+          {
+            id: 'n-daily',
+            label: 'backup-01',
+            lastReportedAt: new Date(BOOT - 25 * 60 * MIN),
+            policyStaleAfterSeconds: 90_000,
+          },
+          {
+            id: 'n-default',
+            label: 'web-01',
+            lastReportedAt: lastBeforeOutage,
+          },
+        ],
+        { bootedAtMs: BOOT, nowMs: BOOT + 10 * MIN },
+      );
+
+      expect(await sweeper.sweep()).toBe(1);
+      const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+      expect(arg.where.OR.map((clause) => clause.id)).toEqual(['n-tight']);
+      expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('a node that reported after boot is judged on that report, exactly as without the grace', async () => {
+      // Checked in 2 min after boot, then went silent: it is measured from its report, not from boot,
+      // so it flips once ITS window has elapsed — the grace never lengthens a post-boot silence.
+      const lastAfterBoot = new Date(BOOT + 2 * MIN);
+      const inside = makeSweeper(
+        [{ id: 'n1', label: 'web-01', lastReportedAt: lastAfterBoot }],
+        { bootedAtMs: BOOT, nowMs: BOOT + 2 * MIN + DEFAULT_WINDOW },
+      );
+      expect(await inside.sweeper.sweep()).toBe(0);
+
+      const past = makeSweeper(
+        [{ id: 'n1', label: 'web-01', lastReportedAt: lastAfterBoot }],
+        { bootedAtMs: BOOT, nowMs: BOOT + 2 * MIN + DEFAULT_WINDOW + 1 },
+      );
+      expect(await past.sweeper.sweep()).toBe(1);
+      expect(past.emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('defaults its boot instant to when the provider was constructed', () => {
+      const before = Date.now();
+      const fresh = new InfraAgentStalenessSweeper(
+        {} as PrismaService,
+        {} as NotificationsService,
+      );
+      expect(fresh.bootedAtMs).toBeGreaterThanOrEqual(before);
+      expect(fresh.bootedAtMs).toBeLessThanOrEqual(Date.now());
+    });
   });
 });

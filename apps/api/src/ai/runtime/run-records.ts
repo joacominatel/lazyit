@@ -14,12 +14,16 @@ import type { AiPendingAction } from '../core/pending-action';
  *
  * - `aisdk-v7` — a provider-replayable `ModelMessage` (role `user` | `assistant` | `tool`), stored and
  *   replayed byte for byte. The ONLY rows the model ever sees.
- * - `lazyit-system-prompt-v1` — the conversation's frozen system prompt `{ text }`, at seq 0, role
- *   `system`. Built once at creation (tools §12) and sent as `instructions` on every step, so it never
- *   changes under the conversation (prefix caching, Anthropic preserved thinking).
- * - `lazyit-run-v1` — the run-start record `{ runId, sessionEpoch }`, role `system`, written with the
- *   user message: the chat session epoch the run's tool calls are delegated under (a logout or password
- *   change since then refuses them, like the session token itself).
+ * - `lazyit-system-prompt-v1` — LEGACY, read only (#1675): the frozen system prompt `{ text }` at seq 0,
+ *   role `system`, of a conversation created before `AiConversation.systemPrompt` existed. A new
+ *   conversation stores the prompt in that column instead; `AiRunLifecycle.frozenSystemPrompt` prefers the
+ *   column and falls back to this row. Built once at creation (tools §12) and sent as `instructions` on
+ *   every step, so it never changes under the conversation (prefix caching, Anthropic preserved thinking).
+ * - `lazyit-run-v1` — LEGACY, read only (#1675): the run-start record `{ runId, sessionEpoch }`, role
+ *   `system`, of a run created before `AiRun.sessionEpoch` existed. A new run stores the epoch in that
+ *   column instead; `AiRunLifecycle.runSessionEpoch` prefers the column and falls back to this row. It is
+ *   the chat session epoch the run's tool calls are delegated under (a logout or password change since
+ *   then refuses them, like the session token itself).
  * - `lazyit-step-v1` — a step's call ledger `{ stepIndex, calls, outcomes, untrustedSources }`, role
  *   `system`: the calls of the assistant message just before it, and — when the step pauses for approval
  *   — the results already known (reads) and the invocation ids still pending (writes). The latest record
@@ -33,7 +37,8 @@ import type { AiPendingAction } from '../core/pending-action';
  *
  * Every `lazyit-*` row is runtime state: never replayed to the model and never projected to the web (the
  * conversation projection reads `aisdk-v7` rows only). All rows are append-only and are deleted only with
- * their conversation (retention, owner delete).
+ * their conversation (retention, owner delete); the two legacy formats are never backfilled into their
+ * columns nor removed — they simply stop being written.
  */
 export const AI_MESSAGE_FORMAT_MODEL = 'aisdk-v7';
 export const AI_MESSAGE_FORMAT_SYSTEM_PROMPT = 'lazyit-system-prompt-v1';
@@ -44,10 +49,12 @@ export const AI_MESSAGE_FORMAT_WEB_SEARCH = 'lazyit-web-search-v1';
 /** The role of a runtime record row (never a provider message). */
 export const AI_RUNTIME_RECORD_ROLE = 'system';
 
+/** A legacy `lazyit-system-prompt-v1` row's content (read only, #1675). */
 export interface SystemPromptRecord {
   text: string;
 }
 
+/** A legacy `lazyit-run-v1` row's content (read only, #1675). */
 export interface RunRecord {
   runId: string;
   /** The chat session's `sessionEpoch` at submission (humans only). */

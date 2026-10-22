@@ -3,7 +3,7 @@ title: "ADR-0095: One hypervisor collector with autodetection — the agent inve
 tags: [adr, infra, topology, agent, inventory, backend, shared, installers]
 status: proposed
 created: 2026-08-05
-updated: 2026-08-05
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -360,9 +360,12 @@ a handful.
 
 ## Known limitations (recorded, not hidden)
 
-- `ingestCollidingHost` returns before child reconciliation (`infra.service.ts:1674/1711`) — a
-  hypervisor host with a cloned machine-id reports no guests until its identity conflict is
-  resolved. Pre-existing (#1139 containers have the same property); noted for the tray copy.
+- `ingestCollidingHost` does not reconcile guests or run the §6 identity join — a hypervisor host
+  with a cloned machine-id reports no guests until its identity conflict is resolved. *(2026-10-21,
+  #1158:)* containers no longer share this property — the collision branch now reconciles them under
+  the clone node's own key ([[0074-server-reporting-agent]] §3) — but guests still do; the guest key
+  could take the same derivation, and the identity join's behaviour under suspicion would need its
+  own decision first.
 - XCP-ng: detected and surfaced, not collected (§2). Its recipe (`xe vm-list` +
   `/etc/xensource-inventory`) is recorded in #1217 for when demand exists.
 - PVE cross-node migration produces an OFFLINE/new child pair pending operator merge (§6) —

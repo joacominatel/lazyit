@@ -400,8 +400,8 @@ generate_secrets() {
   fi
   ok "AI_SECRET_KEY generated (exactly 64 hex chars — verified)"
 
-  # DIRECTORY_SECRET_KEY — AES-256-GCM master key for the LDAP BIND PASSWORD at rest (Settings -> Instance
-  # -> Directory sync, ADR-0091). Its OWN key axis, like SMTP_SECRET_KEY and AI_SECRET_KEY, and OPTIONAL at
+  # DIRECTORY_SECRET_KEY — AES-256-GCM master key for the LDAP BIND PASSWORD at rest (Settings ->
+  # Directory, ADR-0091). Its OWN key axis, like SMTP_SECRET_KEY and AI_SECRET_KEY, and OPTIONAL at
   # boot the same way: without it the API runs unchanged and only saving a bind password 409s — and that
   # 409 rejects the WHOLE directory save, not just the password (issue #1271). The example ships it
   # COMMENTED (so infra/update.sh never stops an instance that does not sync a directory); a guided install
@@ -564,7 +564,7 @@ render_env_file() {
   # one when the file carried none. Never regenerated over a present value.
   if [ "$_saw_smtp_key" -eq 0 ]; then
     printf '\n# --- Instance SMTP password at-rest key (ADR-0079) — added by start.sh ---\n' >>"$_tmp"
-    printf '# AES-256-GCM master key for the SMTP password stored in Settings -> Instance -> SMTP. Its OWN\n' >>"$_tmp"
+    printf '# AES-256-GCM master key for the SMTP password stored in Settings -> Email. Its OWN\n' >>"$_tmp"
     printf '# key axis. Losing it costs only a re-typed SMTP password (not a DR linchpin).\n' >>"$_tmp"
     printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp"
   fi
@@ -583,7 +583,7 @@ render_env_file() {
   if [ "$_saw_dir_key" -eq 0 ]; then
     {
       printf '\n# --- LDAP bind password at-rest key (ADR-0091) — added by start.sh ---\n'
-      printf '# AES-256-GCM master key for the bind password stored in Settings -> Instance -> Directory sync.\n'
+      printf '# AES-256-GCM master key for the bind password stored in Settings -> Directory.\n'
       printf '# Its OWN key axis; optional at boot. Losing it costs only a re-typed bind password (not a DR linchpin).\n'
       printf 'DIRECTORY_SECRET_KEY=%s\n' "$DIRECTORY_SECRET_KEY"
     } >>"$_tmp"
@@ -1200,7 +1200,7 @@ ask_questions() {
   fi
 
   # --- backup sidecar opt-in ---
-  if ask_yn "Enable the automated backup sidecar now? (cron pg_dump of both DBs)" "n"; then
+  if ask_yn "Enable the automated backup sidecar now? (cron pg_dump of the app DB + attachments tarball)" "n"; then
     ENABLE_BACKUP=1
   fi
 }

@@ -114,9 +114,14 @@ bunx tsc --noEmit -p apps/agent/tsconfig.json  # compile does not typecheck it (
 bunx tsc --noEmit -p scripts/demo-data/tsconfig.json  # typed against shared's dist
 
 (cd apps/api && node node_modules/.bin/jest)   # Node, NOT bun — jest 30 does not run under Bun
-(cd packages/shared && bun test)
-(cd apps/web && bun test)
-(cd apps/agent && bun test)
+(cd packages/shared && bun test --isolate)     # --isolate: a fresh module registry per file, so a
+(cd apps/web && bun test --isolate)            # mock.module stub cannot leak into later files (#1318)
+(cd apps/agent && bun test --isolate)
+
+# The Postgres-backed API suite (apps/api/test/*.db.spec.ts). It WIPES the notification tables:
+# point it at a throwaway database, never your dev one. CI starts compose.yaml's `db` for it (#1656).
+(cd apps/api && DATABASE_URL=<throwaway-url> bunx prisma migrate deploy)
+(cd apps/api && DB_TEST_URL=<throwaway-url> bun run test:db)
 
 # Lint gate: changed files only, run from inside the app directory.
 (cd apps/api && bunx eslint <changed files>)   # the prettier/prettier rule lives here and bites
