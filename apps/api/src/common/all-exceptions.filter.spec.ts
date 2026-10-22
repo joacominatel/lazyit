@@ -83,21 +83,40 @@ describe('AllExceptionsFilter', () => {
     expect(prismaFilter.catch).toHaveBeenCalledWith(err, host);
   });
 
-  it('warn-logs a lost lock race (a retryable 409, #1696) instead of error-logging it as a 500', () => {
-    const deadlock = new Prisma.PrismaClientKnownRequestError('x', {
-      code: 'P2010',
+  // #1696: a lost lock race answers a retryable 503. A deadlock is a lock-order bug, so it stays an error; a
+  // serialization failure is expected contention, so it is a warning.
+  const raced = (code: string, originalCode?: string) =>
+    new Prisma.PrismaClientKnownRequestError('x', {
+      code,
       clientVersion: 'test',
-      meta: { driverAdapterError: { cause: { originalCode: '40P01' } } },
+      ...(originalCode
+        ? { meta: { driverAdapterError: { cause: { originalCode } } } }
+        : {}),
     });
-    filter.catch(deadlock, host);
-    expect(logger.error).not.toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(prismaFilter.catch).toHaveBeenCalledWith(deadlock, host);
 
-    logger.warn.mockClear();
-    filter.catch(prismaError('P2034'), host);
+  it.each([
+    ['a raw query deadlock (P2010 / 40P01)', raced('P2010', '40P01')],
+    ['a model call deadlock (P2034 / 40P01)', raced('P2034', '40P01')],
+    ['a P2034 with no driver code', raced('P2034')],
+  ])(
+    'error-logs %s as a lock-order bug, once, and delegates the 503',
+    (_what, err) => {
+      filter.catch(err, host);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect((logger.error.mock.calls as unknown[][])[0][1]).toMatch(
+        /deadlock/,
+      );
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(prismaFilter.catch).toHaveBeenCalledWith(err, host);
+    },
+  );
+
+  it('warn-logs a serialization failure (40001) instead of error-logging it', () => {
+    const err = raced('P2010', '40001');
+    filter.catch(err, host);
     expect(logger.error).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(prismaFilter.catch).toHaveBeenCalledWith(err, host);
   });
 
   it('sets the logger context on construction', () => {

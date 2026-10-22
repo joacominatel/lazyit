@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import {
@@ -77,18 +78,42 @@ describe('PrismaExceptionFilter', () => {
       return (superCatch.mock.calls as unknown[][])[0][0];
     };
 
-    it('maps P2034 (a model call aborted by a deadlock or write conflict) to a retryable 409', () => {
-      const ex = mapped({ code: 'P2034' });
-      expect(ex).toBeInstanceOf(ConflictException);
-      expect((ex as ConflictException).message).toMatch(/Try again/);
+    const expectTransactionConflict = (ex: unknown) => {
+      // A 503, never a 409: clients read a 409 as a business conflict and treat it as final.
+      expect(ex).toBeInstanceOf(ServiceUnavailableException);
+      expect((ex as ServiceUnavailableException).getStatus()).toBe(503);
+      expect((ex as ServiceUnavailableException).getResponse()).toEqual({
+        statusCode: 503,
+        code: 'TRANSACTION_CONFLICT',
+        message:
+          'This change ran into another one at the same moment and was not saved. Try again.',
+      });
+    };
+
+    it('maps P2034 (a model call aborted by a deadlock or write conflict) to a retryable 503 TRANSACTION_CONFLICT', () => {
+      expectTransactionConflict(mapped({ code: 'P2034' }));
     });
 
     it.each(['40P01', '40001'])(
-      'maps a raw query aborted with %s to a retryable 409',
+      'maps a raw query aborted with %s to a retryable 503 TRANSACTION_CONFLICT',
       (pg) => {
-        expect(mapped(raw(pg))).toBeInstanceOf(ConflictException);
+        expectTransactionConflict(mapped(raw(pg)));
       },
     );
+
+    it('tells an HTTP client when to retry: Retry-After: 1', () => {
+      const setHeader = jest.fn();
+      const httpHost = {
+        getType: () => 'http',
+        switchToHttp: () => ({ getResponse: () => ({ setHeader }) }),
+      } as unknown as ArgumentsHost;
+      superCatch.mockClear();
+
+      filter.catch({ code: 'P2034' } as never, httpHost);
+
+      expect(setHeader).toHaveBeenCalledWith('Retry-After', '1');
+      expectTransactionConflict((superCatch.mock.calls as unknown[][])[0][0]);
+    });
 
     it('leaves any other raw query failure to the base handler (500)', () => {
       const original = raw('42601');
