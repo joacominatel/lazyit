@@ -3,7 +3,7 @@ title: WorkflowVersion
 tags: [domain, entity, workflow-engine, access, append-only]
 status: accepted
 created: 2026-06-08
-updated: 2026-10-14
+updated: 2026-10-21
 ---
 
 # WorkflowVersion
@@ -86,10 +86,13 @@ single `}` (`default:"n|a"`); `}}` still ends the placeholder.
   `deletedAt` ([[0006-soft-delete-and-auditing]]). The `steps` jsonb is frozen at author time.
 - **`(workflowId, version)` is the natural key** (`@@unique`) — the human handle ("v3") and the
   per-workflow timeline. `version` is **monotonic per-workflow** (1, 2, 3, …), allocated **server-side**
-  (the `CreateWorkflowVersion` DTO carries `steps` and an optional `baseVersion`). Allocation runs in a
+  (the `CreateWorkflowVersion` DTO carries `steps` and the optional `baseVersion` and `expectedEnabled`). Allocation runs in a
   transaction that locks the parent [[application-workflow]] row; when `baseVersion` is given and is not
   the current latest (`0` = none), the author gets **`409`** instead of silently stacking on a version
-  they never saw (SEC-077). The AI `workflow_author_version` tool sends it.
+  they never saw (SEC-077). The AI `workflow_author_version` tool sends it. An optional
+  `expectedEnabled` (#1688) is checked under the same lock: a **`409`** when the workflow's `enabled` no
+  longer matches. The AI tool sends the state it read, so over MCP — which may author versions of a
+  **disabled** workflow only — a workflow enabled between the check and the write is refused.
 - **Author attribution is human XOR service account.** An at-most-one-actor **CHECK** in the migration
   enforces that at most one of (`createdById`, `createdBySaId`) is set ([[0048-service-accounts]],
   the [[article-version]] precedent).

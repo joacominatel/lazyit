@@ -359,7 +359,10 @@ three stored fields are echoed on create/update.
   **archived** one (#1476): a soft-deleted model or location still passes the FK, so `POST`, bulk receive
   (one upfront `400`, also for a receive from a purchase line) and a `PATCH` that **changes** the model or
   location refuse it. Write-only: reads, and a `PATCH` that re-sends the asset's current (legacy archived)
-  model or location, are not checked. Each write
+  model or location, are not checked. The named location is locked `FOR SHARE` for the rest of the write's
+  transaction, before the asset row (#1604), so a concurrent location delete cannot leave the asset on the
+  location it archives; the bulk receive's upfront check is a plain read, and each unit re-checks under the
+  lock. Each write
   takes its actor from the authenticated principal — a human or a [[service-account]] — and emits an
   [[asset-history]] event (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally
   ([[0033-asset-history-event-model]]). `POST` and `PATCH` need `asset:write`; `DELETE` needs

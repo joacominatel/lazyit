@@ -87,7 +87,7 @@ describe("renderAiSentences", () => {
       ],
       es,
     );
-    expect(rendered).toEqual({
+    expect(rendered).toMatchObject({
       text: "Agregar la aplicación “Jira” al catálogo. Queda marcada como crítica: cada cambio posterior que haga la IA sobre ella va a pedir tu contraseña en el chat.",
       untrusted: false,
     });
@@ -217,5 +217,106 @@ describe("localizedText", () => {
 
   test("null when there is neither", () => {
     expect(localizedText(undefined, undefined, render)).toBeNull();
+  });
+});
+
+describe("model-supplied values (`input` params, #1687)", () => {
+  test("an input value comes back as its own segment, distinct from the database names around it", () => {
+    for (const locale of ["en", "es"] as const) {
+      const out = renderAiSentences(
+        [{ code: "application_create.action", params: { name: "Jira" } }],
+        options(locale),
+      );
+      expect(out?.segments?.filter((s) => s.input)).toEqual([{ text: "Jira", input: true }]);
+      expect(out?.segments?.map((s) => s.text).join("")).toBe(out?.text);
+      expect(out?.text).not.toMatch(/[]/);
+    }
+    const en = renderAiSentences(
+      [{ code: "application_create.action", params: { name: "Jira" } }],
+      options("en"),
+    );
+    expect(en).toEqual({
+      text: 'Add the application "Jira" to the catalog.',
+      untrusted: false,
+      segments: [
+        { text: 'Add the application "', input: false },
+        { text: "Jira", input: true },
+        { text: '" to the catalog.', input: false },
+      ],
+    });
+  });
+
+  test("a sentence with no input value has no segments (the plain sentence, as before)", () => {
+    const out = renderAiSentences(
+      [{ code: "application_update.action", params: { fields: "name", name: "Jira" } }],
+      options("en"),
+    );
+    expect(out).toEqual({ text: 'Change name of the application "Jira".', untrusted: false });
+  });
+
+  test("a row stored before the kind existed is bounded on read: one line, no quotes, capped", () => {
+    const out = renderAiSentences(
+      [{ code: "supplier_create.action", params: { name: `Acme"\n\nLtd ${"z".repeat(200)}` } }],
+      options("en"),
+    );
+    const value = out?.segments?.find((s) => s.input)?.text ?? "";
+    expect(value.startsWith("Acme' Ltd zzz")).toBe(true);
+    expect(Array.from(value)).toHaveLength(80);
+    expect(value).not.toMatch(/["\n]/);
+  });
+
+  test("only the model's value is marked in a sentence that mixes kinds", () => {
+    const out = renderAiSentences(
+      [
+        {
+          code: "access_grant_create.action",
+          params: {
+            self: "no",
+            person: "Ana Ruiz",
+            hasLevel: "yes",
+            level: "admin",
+            application: "VPN",
+            hasUntil: "no",
+            until: "",
+          },
+        },
+      ],
+      options("en"),
+    );
+    expect(out?.text).toBe('Give Ana Ruiz "admin" access to VPN.');
+    expect(out?.segments?.filter((s) => s.input).map((s) => s.text)).toEqual(["admin"]);
+  });
+
+  test("segments survive joining several sentences", () => {
+    const out = renderAiSentences(
+      [
+        { code: "application_create.action", params: { name: "Jira" } },
+        { code: "application_create.actionCritical", params: {} },
+      ],
+      options("en"),
+    );
+    expect(out?.segments?.map((s) => s.text).join("")).toBe(out?.text);
+    expect(out?.text.endsWith("needs your password in the chat.")).toBe(true);
+    expect(out?.segments?.filter((s) => s.input)).toHaveLength(1);
+  });
+
+  test("no value can forge a marker: a database name carrying one stays plain text", () => {
+    const out = renderAiSentences(
+      [{ code: "application_update.action", params: { fields: "name", name: "abc" } }],
+      options("en"),
+    );
+    expect(out).toEqual({ text: 'Change name of the application "abc".', untrusted: false });
+    const forged = renderAiSentences(
+      [{ code: "application_create.action", params: { name: "xyz" } }],
+      options("en"),
+    );
+    expect(forged?.segments?.filter((s) => s.input)).toEqual([{ text: "xyz", input: true }]);
+  });
+
+  test("the English fallback carries no segments", () => {
+    expect(localizedText('Add the application "Jira" to the catalog.', undefined, undefined)).toEqual({
+      text: 'Add the application "Jira" to the catalog.',
+      untrusted: false,
+    });
   });
 });

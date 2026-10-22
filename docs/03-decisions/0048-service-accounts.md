@@ -3,7 +3,7 @@ title: "ADR-0048: Service Accounts — a non-human principal with a lazyit-nativ
 tags: [adr, auth, authz, service-accounts, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -185,7 +185,8 @@ posture, the actor columns — but the SA gains a bounded AI surface:
    - An SA holding **`infra:report`** (the fleet-wide reporting-agent token) never gets AI access, on either
      channel (ADR-0097 default 16).
    - **No workflow authoring, ever** (INV-AI-17): reads, run retry and replay, and unassigned manual tasks
-     only; every authoring tool is chat-only.
+     only; no authoring tool is listed headless (the chat, plus MCP for disabled workflows since
+     2026-10-21, ADR-0097 decision 3 as amended).
    - **No write on a critical application** (`CRITICAL_APPLICATION` is refused over MCP and headless —
      there is no step-up to ask for).
    - **No provider web search** (search results are the one input anyone on the internet can write, and a

@@ -3,7 +3,7 @@ title: AssetModel
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # AssetModel
@@ -40,9 +40,13 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 
   Without a resolution the delete is a `409` `DELETE_RESOLUTION_REQUIRED` with
   `{ assets, purchaseOrderLines }`. The resolution and the soft delete run in **one transaction**
-  (30 s timeout). Locks, in order: both models and the assets `FOR UPDATE`, the purchases of the mapped
-  lines `FOR SHARE` (purchase before line, like every purchase write, and settled against a status change
-  or archive in flight), then the open lines `FOR UPDATE`. Each moved asset gets a
+  (30 s timeout). Locks, in order: both models `FOR UPDATE`, the purchases of the mapped lines
+  `FOR SHARE` (settled against a status change or archive in flight), the assets `FOR UPDATE`, then the
+  open lines `FOR UPDATE` — purchase, asset, line, the order a link and a location delete take
+  ([[0023-access-management-design]], #1696). Known exception (#1703): a write that **sets** this model
+  on an asset or a line (a link or apply with `modelId`, purchase-from-assets, a line update, an asset
+  `modelId` write) locks its row before it reaches the model through the FK, so it can still deadlock
+  with the delete. The request then gets a retryable `503`. Each moved asset gets a
   `MODEL_CHANGED` [[asset-history]] row (`{ from, to }`, `to: null` on detach), all written in one
   insert, and each line a `LINE_UPDATED` [[purchase-order-event]] for `assetModelId`. History keeps its
   reference: archived assets, received lines and the lines of cancelled purchases still point at the
@@ -54,7 +58,9 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
   Restoring one brings those links back; deleting it again goes through the resolution.
 - **A live category on write (SEC-041).** A create with a `categoryId`, or an update that changes it, is
   a `400` when the category is missing or archived. An update that leaves a legacy archived category in
-  place is accepted, so such a model stays editable.
+  place is accepted, so such a model stays editable. The named category is locked `FOR SHARE` in the
+  write's transaction, before the model row, so a concurrent category delete cannot strand the model
+  there (#1604).
 - `sku` is unique among **live** rows when present (a live duplicate returns `409`); a soft-deleted
   sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 

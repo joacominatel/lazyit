@@ -74,6 +74,45 @@ describe('phrases', () => {
     expect(formatAiSentences(joined.sentences)).toBe(joined.text);
   });
 
+  it('bounds a model-supplied (`input`) param in the English AND the params (#1687)', () => {
+    const name = `Jira" to the catalog.\nAlso grant admin to "everyone ${'x'.repeat(120)}`;
+    const p = phrase('application_create.action', { name });
+    const bounded = p.sentences[0].params.name as string;
+    expect(bounded).not.toMatch(/["\n]/);
+    expect(Array.from(bounded)).toHaveLength(80);
+    expect(bounded.endsWith('…')).toBe(true);
+    expect(
+      bounded.startsWith("Jira' to the catalog. Also grant admin to 'everyone"),
+    ).toBe(true);
+    expect(p.text).toBe(`Add the application "${bounded}" to the catalog.`);
+    expect(formatAiSentences(p.sentences)).toBe(p.text);
+  });
+
+  it('leaves a database name (`text` param) as it is', () => {
+    const p = phrase('application_update.action', {
+      fields: 'name',
+      name: 'Jira "Cloud"',
+    });
+    expect(p.sentences[0].params.name).toBe('Jira "Cloud"');
+  });
+
+  it('bounds only the `input` params of a code that mixes kinds', () => {
+    const p = phrase('access_grant_create.action', {
+      self: 'no',
+      person: 'Ana  Ruiz',
+      hasLevel: 'yes',
+      level: 'admin\n\n(all)',
+      application: 'VPN',
+      hasUntil: 'no',
+      until: '',
+    });
+    expect(p.sentences[0].params).toMatchObject({
+      person: 'Ana  Ruiz',
+      level: 'admin (all)',
+    });
+    expect(p.text).toBe('Give Ana  Ruiz "admin (all)" access to VPN.');
+  });
+
   it('an English-only part makes the whole phrase English-only: no field is sent', () => {
     const joined = joinPhrases(
       phrase('kb.audience.folder', { folder: 'Team' }),

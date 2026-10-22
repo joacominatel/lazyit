@@ -23,7 +23,12 @@ const { deriveApplicationParams } = await import(
   "@/app/(app)/applications/_components/applications-list-query"
 );
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
-const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
+const {
+  applicationGrantFilterParams,
+  applicationGrantPageFilterParams,
+  getApplicationGrantPage,
+  getApplicationGrants,
+} = await import("./applications");
 const { consumableFilterParams, getConsumables } = await import("./consumables");
 const { getPendingLines, getPurchaseOrders, pendingLineFilterParams, purchaseOrderFilterParams } =
   await import("./purchase-orders");
@@ -176,6 +181,20 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
       () => getApplicationGrants(CUID, options),
       applicationGrantFilterParams(options),
     );
+  });
+
+  test("the paged grants of one application, every filter (#1660)", async () => {
+    const filters = { status: "expiring" as const, accessLevel: "admin", q: "ana" };
+    await expectSameFilters(
+      () => getApplicationGrantPage(CUID, { ...filters, limit: 25, offset: 50 }),
+      applicationGrantPageFilterParams(filters),
+    );
+    const noLevel = { status: "all" as const, noAccessLevel: true };
+    await expectSameFilters(
+      () => getApplicationGrantPage(CUID, { ...noLevel, limit: 25, offset: 0 }),
+      applicationGrantPageFilterParams(noLevel),
+    );
+    expect(calls[0]).toStartWith(`/applications/${CUID}/access-grants/page?`);
   });
 
   test("consumables", async () => {

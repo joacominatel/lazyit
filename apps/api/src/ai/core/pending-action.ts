@@ -112,19 +112,25 @@ export function requiresStepUp(
 }
 
 /**
- * Preview warnings whose action a channel refuses outright. CEO decision 2026-09-24 (#1315, ADR-0097
- * decision 3 as amended), on MCP and headless writes over critical applications: "Rechazar". Step-up is
- * a chat control, and over MCP and headless no preview is built and nothing asks for a password, so an
- * AI write on an application with `isCritical = true` is refused there and happens only in the chat.
- * A tool that detects such a condition in `run` calls {@link assertChannelAllows} with the warnings it
- * would have emitted, before any side effect.
+ * Preview warnings whose action a channel refuses outright. A tool that detects such a condition in `run`
+ * calls {@link assertChannelAllows} with the warnings it would have emitted, before any side effect.
+ *
+ * - `CRITICAL_APPLICATION` — CEO decision 2026-09-24 (#1315, ADR-0097 decision 3 as amended), on MCP and
+ *   headless writes over critical applications: "Rechazar". Step-up is a chat control, and over MCP and
+ *   headless no preview is built and nothing asks for a password, so an AI write on an application with
+ *   `isCritical = true` is refused there and happens only in the chat.
+ * - `OUTBOUND_INTEGRATION` — CEO decision Q1 on #1344 (2026-10-21, #1688; ADR-0097 decision 3 as amended
+ *   2026-10-21): MCP may author workflows only while they are disabled. Anything that creates or changes
+ *   a LIVE outbound integration — enabling a workflow, creating or re-pointing a connection, a version on
+ *   an enabled workflow — needs the in-app approval card, so MCP refuses it. Headless refuses it too (a
+ *   Service Account never authors, INV-AI-17; the tools are not listed there in the first place).
  */
 export const AI_CHANNEL_REFUSED_WARNINGS: Readonly<
   Record<AiChannel, readonly AiPreviewWarningCode[]>
 > = {
   CHAT: [],
-  MCP: ['CRITICAL_APPLICATION'],
-  HEADLESS: ['CRITICAL_APPLICATION'],
+  MCP: ['CRITICAL_APPLICATION', 'OUTBOUND_INTEGRATION'],
+  HEADLESS: ['CRITICAL_APPLICATION', 'OUTBOUND_INTEGRATION'],
 };
 
 /** What the refused caller (and the model) is told, per refused warning. */
@@ -132,6 +138,8 @@ const CHANNEL_REFUSAL_MESSAGES: Partial<Record<AiPreviewWarningCode, string>> =
   {
     CRITICAL_APPLICATION:
       'This application is critical; do it from the lazyit chat, where it is confirmed with your password.',
+    OUTBOUND_INTEGRATION:
+      'This would change a live outbound integration (an enabled workflow, or a connection); do it from the lazyit chat, where you approve it on a card. Over MCP a workflow can be changed only while it is disabled.',
   };
 
 /** The first warning this channel refuses, if any. */
