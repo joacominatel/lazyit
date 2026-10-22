@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Runbook — backups & disaster recovery
@@ -212,9 +212,10 @@ verified, matched pair the schedule writes, into `./backups`.
 > `pg_restore`.
 
 > [!note] gitignore the dumps
-> `*.dump`, `*.sql`, `*.tar.gz` and the sidecar's `./backups/` are **not** auto-ignored by the repo's
-> `.gitignore`. If you keep backups inside the working tree, add them to `.gitignore` so a stray
-> `git add` never commits a file full of secrets or invoices.
+> The repo's `.gitignore` ignores `./backups/` (where the sidecar and `update.sh` write). Dumps and
+> tarballs you save anywhere else in the working tree — the manual commands above write to the current
+> directory — are **not** ignored: move them into `./backups/` or off the host, so a stray `git add`
+> never commits a file full of secrets or invoices.
 
 ## Automated backup — the sidecar
 
@@ -274,6 +275,8 @@ an encrypted bucket, an encrypted disk).
 > argument (`BACKUP_OFFSITE_CMD=/usr/local/bin/ship-backup`). Before #1467 the argument was always
 > appended, so the documented `rclone copy "$1" offsite:lazyit/` actually ran as
 > `rclone copy FILE offsite:lazyit/ FILE` and failed; hooks written for the append form behave as before.
+> The check is textual: a hook that contains `$1` for another reason — `awk '{print $1}'`, say — counts as
+> naming it and no longer gets the path appended. Name `"$1"` explicitly where the path goes.
 
 ### Disk space and run time
 
