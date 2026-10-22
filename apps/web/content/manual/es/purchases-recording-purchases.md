@@ -289,7 +289,9 @@ a su línea de compra después. Hay tres caminos:
   lista empieza filtrada por el modelo de la línea, por activos **sin compra vinculada** y por activos **con
   fecha cercana al pedido** — dentro de los 90 días antes o después de la fecha de pedido (o de la fecha de
   factura, o del día en que se registró la compra, si no tiene fecha de pedido). La fecha de un activo, aquí,
-  es su fecha de compra, o el día en que se cargó en lazyit si no tiene una. Quita una etiqueta para ampliar
+  es su fecha de compra, o el día en que se cargó en lazyit si no tiene una. (Abierta desde **Unidades
+  pendientes**, la etiqueta no mira la fecha de factura: sin fecha de pedido usa el día en que se registró
+  la compra.) Quita una etiqueta para ampliar
   la lista (un activo que ya está en otra compra igual se puede mover aquí, ver más abajo).
 - En un activo sin vincular, **Vincular a una compra** en su panel **Compra**.
 - En la lista de **Activos**, selecciona varias filas y elige **Compra › Vincular a una compra** en la barra

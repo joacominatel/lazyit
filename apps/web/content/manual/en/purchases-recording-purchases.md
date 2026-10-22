@@ -280,7 +280,8 @@ purchase line afterwards. There are three ways in:
   filtered to the line's model, to assets **not linked to a purchase**, and to assets **dated near the
   order** — within 90 days either side of the order date (or the invoice date, or the day the purchase was
   recorded, when there is no order date). An asset's date here is its purchase date, or the day it was
-  added to lazyit when it has none. Remove a chip to widen the list (an asset already on another purchase can
+  added to lazyit when it has none. (Opened from **Pending units**, the chip does not look at the invoice
+  date: with no order date it uses the day the purchase was recorded.) Remove a chip to widen the list (an asset already on another purchase can
   still be moved here, see below).
 - On an asset that is not linked, **Link to purchase** in its **Purchase** panel.
 - On the **Assets** list, select several rows and choose **Purchase › Link to purchase** in the selection bar. Then
