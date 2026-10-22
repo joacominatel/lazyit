@@ -15,6 +15,7 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 
 import { SecretManagerService } from './secret-manager.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { withGlobalOmit } from '../../test/prisma/global-omit';
 import type { Principal } from '../auth/principal';
 import type { ServiceAccount, User } from '../../generated/prisma/client';
 
@@ -491,7 +492,10 @@ class FakePrisma {
 
 function build(): { svc: SecretManagerService; db: FakePrisma } {
   const db = new FakePrisma();
-  const svc = new SecretManagerService(db as unknown as PrismaService);
+  // Answers like the real client: envelopes, wrapped keys and DEKs are globally omitted (ADR-0105).
+  const svc = new SecretManagerService(
+    withGlobalOmit(db) as unknown as PrismaService,
+  );
   return { svc, db };
 }
 
@@ -1574,6 +1578,56 @@ describe('SecretManagerService', () => {
           svc.assertHandleAttachable(serviceAccount(), 'v-1', 'h'),
         ).rejects.toBeInstanceOf(ForbiddenException);
       });
+    });
+  });
+  // ── ADR-0105: the client-side material is globally omitted, so every wire response that must carry it
+  // opts it back in. The FakePrisma answers through `withGlobalOmit`, so a missed opt-in leaves the blob
+  // out of the response here exactly as Postgres would — and the browser could no longer unlock.
+  describe('responses still carry the client-side material (ADR-0105 opt-ins)', () => {
+    it('createMyKeypair and resetMyKeypair echo both wrapped private-key copies and their IVs', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const created = await svc.createMyKeypair(alice, KEYPAIR);
+      const reset = await svc.resetMyKeypair(alice, KEYPAIR);
+      for (const kp of [created, reset]) {
+        expect(kp.privateKeyEncByPassphrase).toBe(
+          KEYPAIR.privateKeyEncByPassphrase,
+        );
+        expect(kp.passphraseIv).toBe(KEYPAIR.passphraseIv);
+        expect(kp.privateKeyEncByRecovery).toBe(
+          KEYPAIR.privateKeyEncByRecovery,
+        );
+        expect(kp.recoveryIv).toBe(KEYPAIR.recoveryIv);
+      }
+    });
+
+    it('listItems and deleteItem return the item envelope', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const item = await svc.createItem(alice, vaultId, {
+        handle: 'omit-1518',
+        label: 'L',
+        ...ENVELOPE,
+      });
+      const [listed] = await svc.listItems(alice, vaultId);
+      const deleted = await svc.deleteItem(alice, vaultId, item.id);
+      for (const wire of [listed, deleted]) {
+        expect(wire.ciphertext).toBe(ENVELOPE.ciphertext);
+        expect(wire.iv).toBe(ENVELOPE.iv);
+        expect(wire.authTag).toBe(ENVELOPE.authTag);
+      }
+    });
+
+    it('grantMembership echoes the wrapped DEK it stored', async () => {
+      const { svc } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const m = await svc.grantMembership(alice, vaultId, {
+        userId: 'carol',
+        ...WRAP,
+      });
+      expect(m.wrappedDek).toBe(WRAP.wrappedDek);
     });
   });
 });

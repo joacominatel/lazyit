@@ -1,6 +1,10 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { SandboxedJob } from 'bullmq';
 import { PrismaClient } from '../../../generated/prisma/client';
+import {
+  PRISMA_GLOBAL_OMIT,
+  type AppPrismaClient,
+} from '../../prisma/prisma-omit';
 import type { ArticleRow } from '../../search/search.documents';
 import {
   runAnyImportJob,
@@ -23,10 +27,10 @@ import type { ImportJobData, ImportJobResult } from './import-job.types';
  * `module.exports`/default per the BullMQ sandbox contract.
  */
 
-let prismaSingleton: PrismaClient | undefined;
+let prismaSingleton: AppPrismaClient | undefined;
 
 /** One PrismaClient per child, reused across jobs. */
-function getPrisma(): PrismaClient {
+function getPrisma(): AppPrismaClient {
   if (!prismaSingleton) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
@@ -34,6 +38,8 @@ function getPrisma(): PrismaClient {
     }
     prismaSingleton = new PrismaClient({
       adapter: new PrismaPg({ connectionString }),
+      // The same client-level omit as PrismaService (ADR-0105).
+      omit: PRISMA_GLOBAL_OMIT,
     });
   }
   return prismaSingleton;

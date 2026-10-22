@@ -34,6 +34,26 @@ export interface FindAssignmentsFilters {
  * account to `assignedBySaId` / `releasedBySaId` (a DB CHECK enforces at-most-one actor per slot).
  * Opening and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
  */
+/**
+ * The assignment as the SELF-READ shows it — `GET /assets/mine` inlines exactly this per assignment
+ * (`assetMineListSelect`, `AssetListAssignmentSchema`): the id, the owner id and the trimmed owner. The
+ * self-service acknowledge response uses it (#1518), so a holder sees the same fields there as on their
+ * own asset list and never `notes`, `assignedById`, `assignedBySaId` or `releasedById`.
+ */
+export const SELF_ASSIGNMENT_SELECT = {
+  id: true,
+  userId: true,
+  user: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      deletedAt: true,
+    },
+  },
+} satisfies Prisma.AssetAssignmentSelect;
+
 @Injectable()
 export class AssetAssignmentsService {
   constructor(
@@ -228,8 +248,13 @@ export class AssetAssignmentsService {
         payload: { userId: caller },
         actor: { userId: caller },
       });
-      // updateMany returns only a count; re-read the row for the response (identity is immutable).
-      return tx.assetAssignment.findUnique({ where: { id } });
+      // updateMany returns only a count; re-read the row for the response (identity is immutable), in
+      // the self-read's shape: this route has no permission gate, so it must not return the admin-side
+      // columns (`notes`, who assigned / released the device) the `GET /assets/mine` read leaves out (#1518).
+      return tx.assetAssignment.findUnique({
+        where: { id },
+        select: SELF_ASSIGNMENT_SELECT,
+      });
     });
     // AFTER commit, best-effort: nudge the human who assigned the device that it was acknowledged.
     await this.emitAcknowledgedNotification(assignment);

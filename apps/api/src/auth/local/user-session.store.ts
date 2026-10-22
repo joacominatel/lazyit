@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Request } from 'express';
-import type { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AppTransactionClient } from '../../prisma/prisma-omit';
 import { normalizeClientIp, normalizeUserAgent } from './user-agent';
 
 /**
@@ -39,7 +39,7 @@ export interface MintedToken {
 }
 
 /** A client that can reach the `userSession` delegate — the root client or an interactive transaction. */
-export type SessionDb = Pick<Prisma.TransactionClient, 'userSession'>;
+export type SessionDb = Pick<AppTransactionClient, 'userSession'>;
 
 /** The device metadata of a request: its User-Agent header and Express's verified client IP (SEC-010). */
 export function sessionMetaFromRequest(

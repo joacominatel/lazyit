@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import type { User } from '../../../generated/prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 import { LocalCredentialService } from './local-credential.service';
+import { readPasswordHash } from './password-hash.read';
 
 /** Step-up backoff (the `LoginService` policy, ADR-0086 §3): no delay for the first N failures. */
 export const STEP_UP_FAILURE_THRESHOLD = 5;
@@ -31,7 +32,8 @@ const MAX_TRACKED = 10_000;
  *
  * The password is checked by the local-auth verifier itself — `LocalCredentialService.verify` (argon2id,
  * constant-time, fail-closed on a missing hash, oversized input refused before the KDF) — against the
- * user's CURRENT stored hash. It is never stored, logged, or passed on.
+ * user's CURRENT stored hash, read here by id ({@link readPasswordHash}): the principal never carries the
+ * hash (ADR-0105 global omit). It is never stored, logged, or passed on.
  *
  * Brute force: at most ONE verification in flight per user (a concurrent attempt is answered `locked`
  * without reaching the KDF), and every attempt is counted as a failure before the KDF runs (cleared by a
@@ -52,9 +54,17 @@ export class PasswordStepUpVerifier {
   /** The clock (tests move it). */
   now: () => number = Date.now;
 
-  constructor(private readonly credentials: LocalCredentialService) {}
+  constructor(
+    private readonly credentials: LocalCredentialService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  async verify(user: User, password: string): Promise<StepUpResult> {
+  /** Whether the user has a local password to step up with (ADR-0086). */
+  async hasPassword(userId: string): Promise<boolean> {
+    return (await readPasswordHash(this.prisma, userId)) !== null;
+  }
+
+  async verify(user: { id: string }, password: string): Promise<StepUpResult> {
     if (process.env.AUTH_MODE !== 'local') {
       return { ok: false, reason: 'unavailable' };
     }
@@ -71,7 +81,8 @@ export class PasswordStepUpVerifier {
     // The attempt counts as a failure BEFORE the KDF runs; a correct password clears it afterwards.
     this.recordFailure(user.id);
     try {
-      const result = await this.credentials.verify(user.passwordHash, password);
+      const passwordHash = await readPasswordHash(this.prisma, user.id);
+      const result = await this.credentials.verify(passwordHash, password);
       if (!result.valid) {
         return { ok: false, reason: 'invalid' };
       }
