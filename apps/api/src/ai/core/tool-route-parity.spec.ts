@@ -320,7 +320,8 @@ const assetsService = {
   ),
 };
 const grantsService = {
-  findPage: jest.fn(() =>
+  // `GET /access-grants/mine` reads the caller's grants with their coarse provisioning (#1700).
+  findMine: jest.fn(() =>
     Promise.resolve({
       items: [
         {
@@ -329,6 +330,7 @@ const grantsService = {
           grantedAt: '2026-01-01T00:00:00.000Z',
           expiresAt: null,
           notes: 'x',
+          provisioning: 'DONE',
         },
       ],
       total: 1,

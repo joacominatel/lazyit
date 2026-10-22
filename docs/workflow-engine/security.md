@@ -3,7 +3,7 @@ title: "Workflow Engine — Security & Threat Model"
 tags: [workflow-engine, security, threat-model, ssrf, secrets, rbac, audit, sandboxing]
 status: accepted
 created: 2026-06-07
-updated: 2026-10-15
+updated: 2026-10-22
 ---
 
 # Workflow Engine — Security & Threat Model
@@ -294,6 +294,13 @@ convention:
 | `workflow:secrets` | Configure / enter / rotate per-app connector **credentials** | **ADMIN-only**, configurable — **kept distinct from `workflow:manage`** to allow separation of duties (who writes the logic ≠ who holds the Jira token) |
 | `workflow:run` | Retry a failed run / replay it on the latest version (runs start only from grant events) | **ADMIN-only**, configurable |
 | `workflow:task` | Resolve a **manual task** step: submit, skip or fail | **ADMIN-only** by default, but expected to be delegated to MEMBERs who do operational provisioning (§6) |
+
+> **Requester-facing projection (#1700, CEO decision Q2 on #1344).** `workflow:read` still gates every
+> run read. The one thing a grantee learns about runs is a coarse `provisioning` value on their OWN
+> grants and on approved requests whose grant is still active (`GET /access-grants/mine`, `GET /access-requests/mine`): no automation,
+> in progress, done, or waiting on IT. It is computed from the run status alone — no workflow name,
+> step, error or payload is read — so it does not reveal who-gets-provisioned-where beyond the caller's
+> own access. Mapping: [[access-grant#Provisioning status]].
 
 > Corrected 2026-09-24 (#1315): this note first named the manual-task verb `workflow:action`; it shipped
 > as `workflow:task` (`packages/shared/src/schemas/permission.ts`), and the note now uses that name.

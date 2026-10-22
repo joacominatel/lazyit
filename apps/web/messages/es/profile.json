@@ -55,5 +55,23 @@
     "deniedReason": "Motivo: {reason}",
     "filedForYouBy": "Cargada para vos por {name}",
     "filedForYou": "Cargada para vos por un aprobador"
+  },
+  "provisioning": {
+    "NONE": {
+      "label": "Sin automatización",
+      "hint": "IT configura tu cuenta en esta aplicación a mano, por fuera de lazyit."
+    },
+    "IN_PROGRESS": {
+      "label": "Configuración en curso",
+      "hint": "lazyit está configurando tu cuenta en esta aplicación."
+    },
+    "DONE": {
+      "label": "Configurada",
+      "hint": "Tu cuenta en esta aplicación se configuró automáticamente."
+    },
+    "WAITING_ON_IT": {
+      "label": "Esperando a IT",
+      "hint": "IT tiene que terminar de configurar tu cuenta en esta aplicación. No tenés que hacer nada."
+    }
   }
 }
