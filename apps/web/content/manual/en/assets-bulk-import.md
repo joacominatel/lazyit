@@ -40,7 +40,8 @@ You can go **Back** at any step before the commit to change your answers.
 Export your spreadsheet as **CSV (UTF-8)**, or provide a **JSON array** of objects. Each row (or
 object) becomes one asset.
 
-- `.xlsx` files are **not** accepted — export them to CSV first.
+- `.xlsx` files are **not** accepted — export them to CSV first. That includes the Excel file of the
+  Assets export: for a round trip, export the inventory as **CSV**.
 - The file is parsed in the background; this usually takes a few seconds.
 - Date-only columns and any `created`/`updated`/`deleted` timestamp columns are rejected — this first
   phase imports the *current state* of an asset, not its history.
