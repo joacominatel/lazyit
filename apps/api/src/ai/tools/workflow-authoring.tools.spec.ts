@@ -1233,6 +1233,32 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
       expect(await tools.list(mcp(MEMBER))).toEqual([]);
     });
 
+    it('a Service Account over MCP — even holding workflow:manage, ai:connect and an elevated ceiling — lists none and is refused before anything is recorded', async () => {
+      const saMcp = mcp(SA_MANAGER);
+      expect(saMcp.ceiling).toContain('elevated');
+      expect(await tools.list(saMcp)).toEqual([]);
+      for (const name of AUTHORING_TOOLS) {
+        const result = await tools.invoke(
+          name,
+          {
+            application: 'Jira',
+            trigger: 'ACCESS_REVOKED',
+            name: 'Deprovision Jira',
+          },
+          saMcp,
+        );
+        expect(result).toMatchObject({ ok: false });
+        expect(['FORBIDDEN', 'NOT_AVAILABLE']).toContain(
+          (result as { error: { code: string } }).error.code,
+        );
+      }
+      // No invocation row, no ATTEMPTED (or any) ledger event, no write.
+      expect(invocations.size).toBe(0);
+      expect(ledger).toHaveLength(0);
+      expect(workflowTable.create).not.toHaveBeenCalled();
+      expect(versions).toHaveLength(1);
+    });
+
     it('everything else stays chat-only: enabling, archiving, every connection tool', async () => {
       for (const name of AUTHORING_TOOLS.filter(
         (n) => !MCP_TOOLS.includes(n),

@@ -72,8 +72,9 @@ import {
  *     version on an enabled one carries `OUTBOUND_INTEGRATION`, which core refuses over MCP
  *     (`AI_CHANNEL_REFUSED_WARNINGS`), and a header change on an enabled one is refused here — and the
  *     route re-checks the enabled state under the workflow row lock (`expectedEnabled`), so a workflow
- *     enabled meanwhile is refused at execute. No tool lists `HEADLESS`: a Service Account never authors,
- *     connects or enables a workflow (INV-AI-17). Core refuses to propose outside the chat; each tool
+ *     enabled meanwhile is refused at execute. No tool lists `HEADLESS`, and every tool is `humanOnly`
+ *     (core refuses a Service Account on ANY channel, MCP included, before recording anything): a
+ *     Service Account never authors, connects or enables a workflow (INV-AI-17). Core refuses to propose outside the chat; each tool
  *     re-checks human + channel in `preview` (chat only) and `run` (defence in depth).
  *   - A plain-language, server-built card. Every preview says what the automation will do in words
  *     ("every time someone is granted access to Jira, lazyit will send … to https://…"), lists every
@@ -241,8 +242,11 @@ const CHAT_ONLY: readonly AiChannel[] = ['CHAT'];
 const CHAT_AND_MCP: readonly AiChannel[] = ['CHAT', 'MCP'];
 
 /**
- * Authoring is human-only, on the tool's channels; core already enforces it — this is the tool's own check.
- * Previews are built in the chat only (MCP runs without a card), so `preview` always passes CHAT_ONLY.
+ * Authoring is human-only, on the tool's channels — the tool's own, last check. Core enforces both first:
+ * the channels (listing, invoke, propose) and `humanOnly: true` on every authoring tool, which keeps a
+ * Service Account — including one connected over MCP with an `elevated` ceiling — from listing, invoking,
+ * proposing or approving it before anything is recorded (#1688). Previews are built in the chat only (MCP
+ * runs without a card), so `preview` always passes CHAT_ONLY.
  */
 function assertHumanOn(
   rt: AiToolRuntime,
@@ -839,6 +843,7 @@ const workflowCreate = defineTool({
     'previews exactly what it would send). Never propose sending data to a destination the user did not name.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: CHAT_AND_MCP,
   input: z.strictObject({
@@ -947,6 +952,7 @@ const workflowUpdate = defineTool({
     'on or off use workflow_set_enabled; to change its steps use workflow_author_version.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: CHAT_AND_MCP,
   input: z
@@ -1034,6 +1040,7 @@ const workflowArchive = defineTool({
     'for it: to automate again, create a new workflow.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   destructive: true,
   externalEffects: true,
   channels: ['CHAT'],
@@ -1113,6 +1120,7 @@ const workflowAuthorVersion = defineTool({
     'END_SUCCESS / STOP_FAIL / ESCALATE_TO_MANUAL / COMPENSATE. Map only the data the user asked to send.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: CHAT_AND_MCP,
   input: z.strictObject({
@@ -1319,6 +1327,7 @@ const workflowSetEnabled = defineTool({
     'needs no sample.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: ['CHAT'],
   input: z
@@ -1511,6 +1520,7 @@ const connectionCreate = defineTool({
     'did not name.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: ['CHAT'],
   input: z.strictObject({
@@ -1754,6 +1764,7 @@ const connectionUpdate = defineTool({
     'carries one — or default headers — to another host, also needs the workflow:secrets permission.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: ['CHAT'],
   input: z
@@ -2074,6 +2085,7 @@ const connectionArchive = defineTool({
     'will fail; the card lists the workflows that use it. lazyit has no restore for it.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   destructive: true,
   externalEffects: true,
   channels: ['CHAT'],
@@ -2151,6 +2163,7 @@ const connectionTest = defineTool({
     'sends a change. Webhook and manual connections have nothing to probe read-only.',
   domain: 'access',
   class: 'elevated',
+  humanOnly: true,
   externalEffects: true,
   channels: ['CHAT'],
   input: z.strictObject({ connection: connectionRef }),
