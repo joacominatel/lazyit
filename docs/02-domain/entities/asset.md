@@ -201,6 +201,11 @@ concrete instance of a generic [[asset-model]].
 >   what tells two holders apart, and it is the person key the importer resolves an owner by
 >   ([[0069-migrator-import]] A.3). `user:read` protects the **directory** — listing and browsing
 >   people. Seeing the holder of one item you may already read does not enumerate the directory.
+> - **Scope.** The decision covers the owner's id, name and email (plus `deletedAt`) only. Today the
+>   detail and assignment reads still return the rest of `PUBLIC_USER_SELECT` (role, `legajo`,
+>   `username`, `directoryAttrs`); the CEO decided on 2026-10-21 that callers without `user:read` will
+>   not get those fields, and that filtering by person (`?userId=`, `?assignedToUserId=`) will require
+>   `user:read` (#1685 — decided, not built yet).
 > - **The CSV export.** Its `owners` column carries live owners' **names** only; there is no email
 >   column today. If one is added, this decision applies to it: it is not `user:read`-gated, and it
 >   is appended at the end, because the columns are an importer contract (ADR-0069).

@@ -308,6 +308,8 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   to answer, and seeing it does not enumerate the directory that `user:read` protects. The #1627 gate
   stays on the infra reads, which only borrow the linked asset's owners. This is a decided posture,
   not a residual: a sweep must not re-file it. Reasoning in [[asset]]; scope in [[role-permission]].
+  Scope: name and email only; the other owner fields and the by-person filters are the #1685 residual
+  (decided, not built).
 
 ## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
 

@@ -167,7 +167,11 @@ Plus the natural sub-resource endpoints on the related entities:
 > (`PUBLIC_USER_SELECT`), email included, behind `asset:read` alone: `GET /assets/:id/assignments`,
 > the asset detail's `activeAssignments`, and the asset list row. VIEWER holds `asset:read` and not
 > `user:read`, so a VIEWER sees owners' emails here. That is a **decision**, not an oversight
-> (2026-10-21, #1636): the holder of an asset is part of the inventory record. The reasoning, and
+> (2026-10-21, #1636): the holder of an asset is part of the inventory record. The decision covers
+> the owner's id, name and email (plus `deletedAt`) only. Today the detail and assignment reads still
+> return the rest of `PUBLIC_USER_SELECT` (role, `legajo`, `username`, `directoryAttrs`); the CEO decided
+> on 2026-10-21 that callers without `user:read` will not get those fields, and that filtering by person
+> (`?userId=`, `?assignedToUserId=`) will require `user:read` (#1685 — decided, not built yet). The reasoning, and
 > the contrast with the servers reads that gate the same email behind `user:read` (#1627), are in
 > [[asset]]. The user-side read, `GET /users/:id/assignments`, starts from a person and is
 > directory-relational, so it needs `user:read` ([[user]]).
