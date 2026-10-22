@@ -96,7 +96,8 @@ written **only when something actually moved**, so a host nobody touched adds no
 - **The retire lifecycle is recorded here too, but only its MACHINE transitions** (#1701,
   [[0074-server-reporting-agent]] §4 amendment of 2026-10-22). A `FACT_CHANGED` row with fact
   `node.lifecycle` (shared `INFRA_NODE_LIFECYCLE_FACT`) records `active → retired` when the host's own
-  agent decommissions it on uninstall, and `retired → active` when a retired node, or a retired
+  agent decommissions it on uninstall (one row for the host and one for each container or guest child
+  retired with it), and `retired → active` when a retired node, or a retired
   container or guest child, reports again and is un-retired automatically. A human retire or un-retire
   is curation, not an ingest fact, so it writes no row here. It is attributed by `InfraNode.retiredById`
   instead. Both rows go through the same capped, never-fail write path as every other row.

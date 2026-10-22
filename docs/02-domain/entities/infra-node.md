@@ -164,18 +164,21 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   - **A human** — `POST /infra/nodes/:id/retire`, which sets `retiredById` to that user.
   - **Its own agent** on uninstall (`lazyit-agent decommission`, run by `install.sh --uninstall` /
     `install.ps1 -Uninstall`) — a last report with `decommissioning: true`, which
-    retires only the node that report's own reporting key resolves to (the clone's derived-key node for
-    a collided machine-id) and ingests nothing else.
+    retires the node that report's own reporting key resolves to (the clone's derived-key node for
+    a collided machine-id) **and its live agent-reported container and guest children** under that same
+    key, and ingests nothing else.
 
   **A retired node that reports again is un-retired automatically**, and so is a container or guest
   child its host lists again. That transition, and an agent's own decommission, is recorded as a
-  `node.lifecycle` row in [[infra-node-fact-change]]. A decommissioned host's children are **not**
-  retired with it. The retire is not a new `state` or `status` value, because a retired node can be in
+  `node.lifecycle` row in [[infra-node-fact-change]]. A decommissioned host's agent-reported
+  children are retired with it (2026-10-22, CEO decision), never a peer's, and never one when the ingest
+  path itself would refuse to reconcile children under that key. The retire is not a new `state` or `status` value, because a retired node can be in
   any of them. The fleet read keeps a retired host as a row but counts it only under
   `summary.retired`, and the [[software-watch]] population excludes it.
 - **Offline alerts can be snoozed** (#1701, epic #1146 Q15). While `alertsSnoozedUntil` is in the
   future, the sweeper still flips the node OFFLINE but sends no `infra.agent_offline` notification for
-  it. An outage that began inside the window is not re-announced when the window ends. A snooze must end
+  it. What decides it is when the flip happens: a node flipped inside the window is never announced,
+  not even when the window ends, and one first flipped after the window is announced as usual. A snooze must end
   in the future and at most 90 days ahead (`INFRA_NODE_SNOOZE_MAX_DAYS`): a node that should never alert
   again is retired. There is no per-group routing and no digest (CEO decision, Q15).
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
