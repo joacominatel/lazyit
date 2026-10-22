@@ -40,5 +40,5 @@ simplify the build matrix; some operator hardware needs them.
 
 ## Tests and checksums
 
-`bun test`. `bun run checksums` regenerates the release checksums — the release flow depends on
+`bun test --isolate` (= `bun run test`, the same flag CI uses). `bun run checksums` regenerates the release checksums — the release flow depends on
 them, so do not hand-edit the output.

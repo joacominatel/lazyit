@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-21
 ---
 
 # Runbooks — Map of Content
@@ -20,7 +20,7 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 
 - **[[git-workflow]]** — how every change reaches the codebase: `master`/`dev`/issue-branch
   strategy, branch naming, the hybrid issue model, the step-by-step agent loop (issue → branch
-  → PR to `dev` → user merges), labels, the `Closes #n` auto-close caveat, and pending setup.
+  → PR to `dev` → user merges), labels, how `Closes #n` closes issues when `dev` is promoted (#1666), and pending setup.
 - **[[prisma-migrations]]** — evolve the schema: the normal `migrate dev` flow, the non-TTY
   workaround (hand-written SQL + `migrate deploy`), partial indexes, drift checks, and the
   one-commit-per-migration convention.
@@ -53,15 +53,16 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   and revocation. [[0048-service-accounts]].
 - **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + `.env.prod` with its
   `WORKFLOW_SECRET_KEY`, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` / `DIRECTORY_SECRET_KEY`
-  alongside; Meili/Caddy rebuildable; under BYOI, your IdP), the opt-in backup sidecar (cron + `pg_dump`,
-  retention, optional offsite), and the correct restore order (env → app → up → reindex) with targeted
-  volume removal instead of the destructive `down -v`.
+  alongside; the attachments volume; Meili/Caddy rebuildable; under BYOI, your IdP), the backup sidecar
+  (cron + `pg_dump` + an attachments tarball per run, retention, a free-space guard, optional offsite),
+  and the correct restore order (env → app DB → attachments → up → reindex) with targeted volume removal
+  instead of the destructive `down -v`.
 - **[[docker-build-troubleshooting]]** — symptoms & fixes for building/booting the images.
 
 ## Planned runbooks (write when real)
 
-- **Scheduled/offsite backup automation** — shipped: the opt-in `backup` profile sidecar in the
-  canonical `compose.yaml` (cron + `pg_dump` + retention + optional offsite hook),
+- **Scheduled/offsite backup automation** — shipped: the `backup` sidecar in the
+  canonical `compose.yaml` (cron + `pg_dump` + attachments tarball + retention + optional offsite hook),
   documented in [[backups]]. Promote to a standalone runbook only if it grows beyond that.
 - **Secrets rotation** — per-secret steps (DB password needs `ALTER USER`, not just an env edit;
   `AUTH_SECRET` logs everyone out; `WORKFLOW_SECRET_KEY` is unrotatable-in-place). Sketched in

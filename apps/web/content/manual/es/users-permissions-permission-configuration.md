@@ -68,6 +68,26 @@ el cambio se guarda; cualquier otro guardado pasa directamente.
 El Administrador es lo único que nunca puedes editar: la matriz no puede otorgar, revocar ni acotar al
 Administrador.
 
+## Modificar algo implica poder verlo
+
+Un rol que puede modificar, eliminar o gestionar algo también debe poder **verlo**. La matriz mantiene
+ambas cosas juntas por ti:
+
+- **Marcar una edición marca su vista.** Conceder *Agregar y editar activos* concede también *Ver
+  activos*; conceder *Administrar usuarios* concede también *Ver el directorio de usuarios*. Funciona
+  igual en la matriz y en Ajuste fino.
+- **Quitar una vista quita lo que la necesita.** Si quitas *Ver activos* a un rol, se van también sus
+  permisos de editar y eliminar activos. Al guardar aparece la confirmación habitual, que enumera la
+  vista y los permisos que se fueron con ella, así que nada desaparece sin que lo veas.
+- **Algunos permisos son independientes**: *Solicitar acceso a aplicaciones* (cualquiera puede pedirlo y
+  ve sus propias solicitudes sin la lista completa), *Reportar inventario de servidores* del agente de reporte, *Obtener
+  secretos de forma programática*, que solo usan las cuentas de servicio, *Ejecutar importaciones* y los dos permisos de
+  IA.
+
+Si un rol se guardó antes de que existiera esta regla y tiene una edición sin su vista, el siguiente
+guardado añade la vista que falta —nunca quita la edición— y la confirmación te dice qué vistas añade.
+Añadir una vista permite que todos los de ese rol vean esa área.
+
 ## Qué hace guardar
 
 Tus cambios en ambos roles se mantienen juntos hasta que guardas. La barra bajo la matriz los cuenta —

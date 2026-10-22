@@ -66,10 +66,7 @@ function conversation(id: string) {
 }
 
 function systemPrompt(id: string): string {
-  const row = rt.prisma.tables.aiMessage.rows.find(
-    (r) => r.conversationId === id && r.format === 'lazyit-system-prompt-v1',
-  )!;
-  return (row.content as { text: string }).text;
+  return conversation(id).systemPrompt as string;
 }
 
 async function newChat(settings = {}) {

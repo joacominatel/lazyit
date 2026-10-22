@@ -22,7 +22,8 @@ Docs updated, or new ADRs (if any). Write "n/a" if the change needs none.
 Anything worth flagging — trade-offs, follow-ups, an `auto-generated` sub-issue you opened.
 
 <!--
-Note: this PR targets `dev`, so `Closes #N` here is NOT honored by GitHub on the dev-merge —
-it rides along in the squash commit and closes the issue when `dev` is promoted to `master`.
+Note: this PR targets `dev`, so GitHub ignores `Closes #N` here on the dev-merge. The
+promotion-autoclose workflow reads it from this body and closes the issue when `dev` is
+promoted to `master` — one keyword per issue; use `Refs #N` when the PR does not finish it.
 A closed issue means the work is in production. See the runbook's "Issue auto-close" section.
 -->

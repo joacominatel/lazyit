@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSIONS,
@@ -367,5 +368,162 @@ describe('PermissionsConfigService (ADR-0046 P5)', () => {
       'actor-1',
     );
     expect(notifications.emit).not.toHaveBeenCalled();
+  });
+  // ── WRITE IMPLIES READ (#1518) — refuse a new write-without-read, tolerate and heal a stored one ────
+
+  /** The 400 body of a refused PUT, or a failure when the call did not throw one. */
+  async function refusal(
+    call: Promise<unknown>,
+  ): Promise<Record<string, unknown>> {
+    try {
+      await call;
+    } catch (err) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      return (err as BadRequestException).getResponse() as Record<
+        string,
+        unknown
+      >;
+    }
+    throw new Error('expected a 400');
+  }
+
+  it('refuses (400 PERMISSION_READ_REQUIRED) a body that grants a write without its read, and writes nothing', async () => {
+    const before = [...store.rows];
+    const body = await refusal(
+      service.updateMatrix(
+        {
+          MEMBER: DEFAULT_ROLE_PERMISSIONS.MEMBER,
+          VIEWER: [...DEFAULT_ROLE_PERMISSIONS.VIEWER, 'user:manage'],
+        },
+        'actor-1',
+      ),
+    );
+    expect(body.code).toBe('PERMISSION_READ_REQUIRED');
+    expect(body.violations).toEqual([
+      { role: 'VIEWER', permission: 'user:manage', requires: 'user:read' },
+    ]);
+    expect(store.rows).toEqual(before);
+    expect(store.audit).toHaveLength(0);
+  });
+
+  it('refuses a body that revokes a read a held write still needs, listing every pair across both roles', async () => {
+    const body = await refusal(
+      service.updateMatrix(
+        {
+          MEMBER: DEFAULT_ROLE_PERMISSIONS.MEMBER.filter(
+            (p) => p !== 'asset:read',
+          ),
+          VIEWER: [
+            ...DEFAULT_ROLE_PERMISSIONS.VIEWER,
+            'location:delete' as Permission,
+          ].filter((p) => p !== 'location:read'),
+        },
+        'actor-1',
+      ),
+    );
+    expect(body.violations).toEqual([
+      { role: 'MEMBER', permission: 'asset:write', requires: 'asset:read' },
+      {
+        role: 'VIEWER',
+        permission: 'location:delete',
+        requires: 'location:read',
+      },
+    ]);
+    expect(store.audit).toHaveLength(0);
+  });
+
+  it('accepts the exempt self-service verb without its estate-wide read (VIEWER requests access)', async () => {
+    await service.updateMatrix(
+      {
+        MEMBER: DEFAULT_ROLE_PERMISSIONS.MEMBER,
+        VIEWER: ['accessRequest:create'] as Permission[],
+      },
+      'actor-1',
+    );
+    const matrix = await service.getMatrix();
+    expect(matrix.VIEWER).toEqual(['accessRequest:create']);
+  });
+
+  describe('a stored matrix from before the rule (legacy write-without-read)', () => {
+    beforeEach(() => {
+      // MEMBER can write and delete assets but lost the view of them before the rule existed.
+      store.rows = store.rows.filter(
+        (r) => !(r.role === 'MEMBER' && r.permission === 'asset:read'),
+      );
+      store.rows.push({ role: 'MEMBER', permission: 'asset:delete' });
+    });
+
+    it('is read back as stored (tolerant read: no read is invented, nothing is refused)', async () => {
+      const matrix = await service.getMatrix();
+      expect(matrix.MEMBER).toContain('asset:write');
+      expect(matrix.MEMBER).toContain('asset:delete');
+      expect(matrix.MEMBER).not.toContain('asset:read');
+      expect(await resolver.hasAll('MEMBER', ['asset:write'])).toBe(true);
+      expect(await resolver.hasAll('MEMBER', ['asset:read'])).toBe(false);
+    });
+
+    it('self-heals on the next save by ADDING the read, never removing the write, and audits it', async () => {
+      const stored = (await service.getMatrix()).MEMBER;
+      // An unrelated change in the same save (VIEWER loses dashboards) still goes through.
+      const returned = await service.updateMatrix(
+        {
+          MEMBER: stored,
+          VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER.filter(
+            (p) => p !== 'dashboard:read',
+          ),
+        },
+        'actor-7',
+      );
+      expect(returned.MEMBER).toEqual(
+        expect.arrayContaining(['asset:read', 'asset:write', 'asset:delete']),
+      );
+      expect(returned.VIEWER).not.toContain('dashboard:read');
+      expect(store.audit).toContainEqual({
+        actorId: 'actor-7',
+        role: 'MEMBER',
+        permission: 'asset:read',
+        action: 'GRANT',
+      });
+      expect(
+        store.audit.filter((a) => a.role === 'MEMBER' && a.action === 'REVOKE'),
+      ).toEqual([]);
+      expect(
+        await resolver.hasAll('MEMBER', ['asset:read', 'asset:write']),
+      ).toBe(true);
+    });
+
+    it('adds no read when the save drops the legacy write itself', async () => {
+      const stored = (await service.getMatrix()).MEMBER;
+      const returned = await service.updateMatrix(
+        {
+          MEMBER: stored.filter(
+            (p) => p !== 'asset:write' && p !== 'asset:delete',
+          ),
+          VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER,
+        },
+        'actor-1',
+      );
+      expect(returned.MEMBER).not.toContain('asset:read');
+      expect(returned.MEMBER).not.toContain('asset:write');
+    });
+
+    it('still refuses a NEW write-without-read in the same save', async () => {
+      const stored = (await service.getMatrix()).MEMBER;
+      const body = await refusal(
+        service.updateMatrix(
+          {
+            MEMBER: [...stored, 'user:delete' as Permission].filter(
+              (p) => p !== 'user:read',
+            ),
+            VIEWER: DEFAULT_ROLE_PERMISSIONS.VIEWER,
+          },
+          'actor-1',
+        ),
+      );
+      expect(body.violations).toEqual([
+        { role: 'MEMBER', permission: 'user:write', requires: 'user:read' },
+        { role: 'MEMBER', permission: 'user:delete', requires: 'user:read' },
+      ]);
+    });
   });
 });

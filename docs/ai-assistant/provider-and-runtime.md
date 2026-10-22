@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-10-05
+updated: 2026-10-21
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -875,6 +875,7 @@ model AiConversation {                     // transcript container; retention ha
   promptVersion   Int
   toolsetHash     String
   toolNames       String[]
+  systemPrompt    String?   // the frozen system prompt (#1675); null = pre-#1675 row, read from its lazyit-system-prompt-v1 row
   closedReason    String?   // CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED
   lastActivityAt  DateTime  @default(now())
   createdAt       DateTime  @default(now())
@@ -915,6 +916,7 @@ model AiRun {                              // mutable lifecycle row (ManualTask 
   finishReason     String?
   error            Json?     // redacted { class, message }
   idempotencyKey   String?   // partial unique per principal (raw SQL)
+  sessionEpoch     Int?      // chat session epoch at submission, humans only (#1675); null = SA, or pre-#1675 run read from its lazyit-run-v1 row
   cancelRequestedAt DateTime?
   startedAt        DateTime?
   finishedAt       DateTime?
@@ -1079,7 +1081,8 @@ Account channel (`AUTONOMOUS`): a human submitting on `HEADLESS`, or a Service A
 the configured provider and model, `AI_PROMPT_VERSION`, the toolset `AiToolService.list` gives the principal
 **now** (with the headless ceiling) — `toolNames` plus `toolsetHash`, a SHA-256 over each tool's name,
 description, class and input schema — and builds the system prompt **once** from that listing's classes.
-The prompt text is stored as the conversation's first `ai_messages` row (see *Stored rows*). Before each
+The prompt text is stored in `AiConversation.systemPrompt` (#1675; a conversation created before it keeps
+it in a `lazyit-system-prompt-v1` row instead, see *Stored rows*). Before each
 submission and each step the pin is re-checked: a different provider — or, for a conversation on the
 instance default model (`modelChosen = false`), a different default model — closes the conversation
 `CONFIG_CHANGED` (a model the user chose, #1373, is not affected by the admin's default), a different prompt version or toolset hash `VERSION_CHANGED`, a last step whose input
@@ -1087,13 +1090,32 @@ tokens reached `contextTokenLimit` `CONTEXT_LIMIT`; a closed conversation answer
 `CONVERSATION_READ_ONLY`. A permission lost since creation does not close it: the call is refused at
 execution time.
 
-**Stored rows.** `ai_messages` holds provider messages (`format = aisdk-v7`, replayed byte for byte) and
-three kinds of runtime record, role `system`, never sent to the model:
+**Runtime state columns (#1675).** Two pieces of run state are columns, written by the orchestrator:
 
-- `lazyit-system-prompt-v1` `{ text }` — the frozen system prompt, seq 0, sent as `instructions`;
-- `lazyit-run-v1` `{ runId, sessionEpoch }` — written with each user message: the chat session epoch the
-  run's tool calls are delegated under, so a logout, password change or deactivation refuses the next
-  step (the run row has no column for it, and the job carries only `{ runId }`);
+- `AiConversation.systemPrompt` — the frozen system prompt, written once at creation and sent as
+  `instructions` on every step. It goes with the conversation (retention, owner delete) and never leaves
+  the API (the conversation list does not even load it).
+- `AiRun.sessionEpoch` — written with the run: the chat session epoch the run's tool calls are delegated
+  under, so a logout, password change or deactivation refuses the next step and the sweeper cancels a
+  waiting run (the job carries only `{ runId }`). Null for a Service Account's run. It survives retention
+  with the run row; it is an integer, not content.
+
+**Read precedence: the column, else the legacy row.** Before #1675 both lived in `ai_messages` rows
+(below). Those rows are **never backfilled and never deleted** — the ledger is append-only and the rows
+go with their conversation as before — so the readers (`AiRunLifecycle.frozenSystemPrompt` /
+`runSessionEpoch`, used by the loop's run scope and the sweeper's principal check) take the column when it
+is set and fall back to the row when it is null. A conversation started before the upgrade therefore
+keeps its legacy prompt row for life while each new turn writes its epoch to the column. Neither found:
+no prompt closes the conversation `VERSION_CHANGED`; a human run with no epoch fails `FORBIDDEN` (fail
+closed).
+
+**Stored rows.** `ai_messages` holds provider messages (`format = aisdk-v7`, replayed byte for byte) and
+runtime records, role `system`, never sent to the model:
+
+- `lazyit-system-prompt-v1` `{ text }` — **legacy, read only** (#1675): the frozen system prompt, seq 0, of
+  a conversation created before `AiConversation.systemPrompt`; no longer written;
+- `lazyit-run-v1` `{ runId, sessionEpoch }` — **legacy, read only** (#1675): the session epoch of a run
+  created before `AiRun.sessionEpoch`, written with its user message; no longer written;
 - `lazyit-step-v1` `{ stepIndex, calls, outcomes, untrustedSources }` — written with a step's assistant
   message (its calls) and again when the step pauses (the read results already known, and the pending
   invocation ids); the latest record of a step wins. A step that read a source marking the whole
@@ -1107,7 +1129,8 @@ The conversation projection (W3-1) **must allow-list by format** — read `aisdk
 #1389, `lazyit-web-search-v1`, only as the `sources` part under the message before it, through the shared
 `http(s)`-only source schema; `AI_TRANSCRIPT_FORMATS`), never
 filter out `lazyit-*` — and carry a test that a runtime record never reaches the wire (done: §9.1 *As built
-(W3-1)*, `conversations/transcript-projection.spec.ts`).
+(W3-1)*, `conversations/transcript-projection.spec.ts`; the legacy rows of a pre-#1675 conversation are
+covered by `conversations/ai-conversations.http.spec.ts`).
 Records are append-only and go with the conversation (retention, owner delete).
 
 **A run.** `submit`: principal and AI checks → idempotency replay (headless `Idempotency-Key`; a unique

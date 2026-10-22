@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-22
 ---
 
 # Deployment
@@ -133,7 +133,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Exposure:** only Caddy publishes ports; Postgres, Meilisearch, Valkey, the API and web stay on the
   internal network. The dev DB, Meilisearch and Valkey bind loopback only.
   → [[0028-secrets-and-config]], SEC-005.
-- **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is the
+- **Backups:** the `backup` sidecar (cron) dumps the app DB and archives the attachments volume as a
+  matched pair in `./backups` (dumps kept 14 days, attachments tarballs 7) — [[backups]]. **`WORKFLOW_SECRET_KEY` is the
   unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD`): losing it
   makes every stored connector credential undecryptable, so back it up off-host with the *matching*
   DB dump. `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` are low-DR (losing one costs a
@@ -210,7 +211,7 @@ path. See [[authorization]], [[0046-roles-permissions-v2]], [[0048-service-accou
 ## Open questions
 
 - **CD pipeline** — registry (GHCR) + deploy flow + image tagging, once a target exists.
-- **Backup automation** — scheduled + offsite, when there's a real deployment ([[backups]]).
+- **Backup automation** — shipped: the scheduled sidecar with an optional offsite hook ([[backups]]).
 - **Dedicated worker container** — the async worker is co-located in the `api` container for now;
   splitting it out is a documented follow-up when job volume / CPU-heavy flows warrant it
   ([[0053-async-workers-bullmq-valkey]]).

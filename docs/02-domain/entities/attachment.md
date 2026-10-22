@@ -3,7 +3,7 @@ title: Attachment
 tags: [domain, entity, attachments, storage]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-14
+updated: 2026-10-22
 ---
 
 # Attachment
@@ -25,12 +25,14 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 `attachments/<sha[0:2]>/<sha256>` — content-addressed, so **two identical files share one blob**
 (dedup) — never in Postgres, never on a public/static path.
 
-> [!warning] Attachments are NOT backed up yet (deferred v1.1 by decision — ADR-0082)
-> `pg_dump` restores the rows but not the bytes; see the DR table + callout in [[backups]].
-> A row whose blob vanished degrades to a clean 404, never a crash (the soft-ref design). This now
-> includes **purchase documents** (invoices, orders, delivery notes): the attachments backup that
-> ADR-0099 §12 made a Purchases prerequisite has not shipped — #1467 is open, deferred by the CEO — and the
-> purchase's documents panel says the files are not in the backup.
+> [!info] Backups: the rows are in the DB dump, the bytes in the attachments tarball (#1467)
+> `pg_dump` restores the rows but not the bytes. Since 2026-10-21 the backup sidecar also archives this
+> volume on every run — `attachments-<ts>.tar.gz` beside `app-<ts>.dump`, same timestamp, its own 7-day
+> retention, switchable off with `BACKUP_ATTACHMENTS=false` ([[backups]] item 7). Restore the pair: DB
+> first, then the tarball, then the api — the GC removes row-less blobs past its 24 h grace. A row whose
+> blob is missing still degrades to a clean 404, never a crash (the soft-ref design). This covers the
+> **purchase documents** (invoices, orders, delivery notes) that ADR-0099 §12 made the backup a
+> prerequisite for.
 
 ## Relationships
 
@@ -83,8 +85,8 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 > GC treats them like asset documents: pinned by their own live row, reclaimed after an explicit delete.
 > The optional free-text type label (quote, invoice, delivery note) is built (#1476): see *Document type
 > label* below. Because they are financial evidence, ADR-0099 §12 made the **attachments backup a
-> prerequisite** shipping before or alongside Phase 1; it has **not** shipped (#1467, open, deferred by the
-> CEO), so the documents panel warns that the files are not in the backup (see the warning above).
+> prerequisite** shipping before or alongside Phase 1. It shipped after the epic, on 2026-10-21 (#1467):
+> purchase documents are in the backup (see the callout above).
 >
 > A purchase document of a type the configured provider reads (PDF or image) can also be **read by the AI**
 > into a draft of the purchase — `POST /purchase-orders/:id/attachments/:attachmentId/extract` (#1477,

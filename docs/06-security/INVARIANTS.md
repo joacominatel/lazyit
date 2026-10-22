@@ -302,6 +302,14 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   `infra:read`, which VIEWER holds, so a caller without `user:read` now gets owner names with
   `email: null`, and their `q` no longer matches owner emails (page and export). Covered by
   `apps/api/src/infra/infra.export.spec.ts` and `apps/api/src/infra/infra.service.spec.ts`.
+- **2026-10-21 (#1636) — accepted, not extended to assets.** The asset list, detail and assignment
+  reads (`asset:read`, VIEWER-default) keep each active owner's email for every caller. The CEO
+  accepted it as part of the inventory record: the holder of an item is the fact the inventory exists
+  to answer, and seeing it does not enumerate the directory that `user:read` protects. The #1627 gate
+  stays on the infra reads, which only borrow the linked asset's owners. This is a decided posture,
+  not a residual: a sweep must not re-file it. Reasoning in [[asset]]; scope in [[role-permission]].
+  Scope: name and email only; the other owner fields and the by-person filters are the #1685 residual
+  (decided, not built).
 
 ## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
 

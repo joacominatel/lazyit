@@ -424,7 +424,7 @@ The old root `docker-compose.yml` and `infra/docker-compose.prod.yml` are **gone
 - `.github/workflows/ci.yml`
 - Triggers: push to `master`/`dev`, PRs targeting `master`/`dev`
 - Jobs:
-  - **verify**: typecheck (shared, api, web) → lint [non-blocking] → test API (Node/Jest) + shared (bun test) → build all
+  - **verify**: typecheck (shared, api, web) → lint [non-blocking] → test API (Node/Jest) + Postgres-backed API suite (`test:db`) + shared/web/agent (`bun test --isolate`) → build all
   - **docker**: build all three images (no push) — needs `verify`
 - Lint is `continue-on-error: true` — **non-blocking** (pre-existing ~168 warnings; known debt)
 - Node 26 set up alongside Bun for Jest (jest@30 can't run under Bun's runtime — local-node-for-jest)

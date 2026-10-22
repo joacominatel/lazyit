@@ -40,8 +40,8 @@ that ordering:
 
 ```sh
 bun run --filter @lazyit/shared build
-(cd packages/shared && bun test)
+(cd packages/shared && bun test --isolate)   # = `bun run test`; CI uses the same flag
 bunx tsc --noEmit -p packages/shared/tsconfig.build.json
 ```
 
-`bun test` here, not Jest. Schema logic is core logic: test it thoroughly.
+`bun test --isolate` here, not Jest — rely on isolation or restore what you `mock.module`. Schema logic is core logic: test it thoroughly.

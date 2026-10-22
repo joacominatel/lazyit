@@ -20,6 +20,7 @@ import {
   guestExternalIdPrefix,
   guestNodeKind,
   guestNodeStatus,
+  hostExternalIdOfContainerChild,
   hostIdentityEvidence,
   identityDiscriminator,
   inferNodeKind,
@@ -674,6 +675,46 @@ export function childSafeDisambiguatedId(
     return key;
   }
   return disambiguateExternalId(externalId, discriminator.replaceAll('/', '_'));
+}
+
+/**
+ * Can this host key scope container child keys unambiguously (#1158)? True when a child key built
+ * from it parses back to exactly this key — the FIRST-separator rule of
+ * {@link hostExternalIdOfContainerChild}. A key ending in `/container` fails: its children's keys
+ * would resolve to the shorter key, and that key's retire-sweep prefix would select them.
+ */
+export function isUniqueContainerScope(hostKey: string): boolean {
+  return (
+    hostExternalIdOfContainerChild(containerExternalId(hostKey, 'probe')) ===
+    hostKey
+  );
+}
+
+/**
+ * Do the MACs a report carries share NOTHING with the ones its clone node last held (#1158)? Both
+ * sides must have MACs: a side with none is "nothing to compare" — the same posture
+ * {@link isClonedMachineId} takes — never a difference.
+ */
+function sharesDerivedKeyWithAnotherMachine(
+  stored: { macs: readonly string[] },
+  incoming: { macs: readonly string[] },
+): boolean {
+  if (!stored.macs.length || !incoming.macs.length) return false;
+  const held = new Set(stored.macs);
+  return !incoming.macs.some((mac) => held.has(mac));
+}
+
+/**
+ * The sticky "second machine seen on this derived key" mark a clone node's marker already carries
+ * (#1158), or `undefined`. Tolerant read: anything but a non-empty string is "not marked".
+ */
+function storedSharedKeySeenAt(
+  rest: Record<string, unknown> | undefined,
+): string | undefined {
+  const conflict = rest?.identityConflict;
+  if (typeof conflict !== 'object' || conflict === null) return undefined;
+  const seenAt = (conflict as Record<string, unknown>).sharedKeySeenAt;
+  return typeof seenAt === 'string' && seenAt.length > 0 ? seenAt : undefined;
 }
 
 /**
@@ -1964,39 +2005,65 @@ export class InfraService {
       peerLabel: peer.label,
       discriminator,
     };
-    /** Refresh the clone's own node, carrying the collision marker with it (rule 4 above). */
+    /**
+     * Refresh the clone's own node, carrying the collision marker with it (rule 4 above), then
+     * reconcile its containers under that node's own key (#1158).
+     */
     const refreshWithMarker = async (node: {
       id: string;
       assetId: string | null;
       ipAddressSource: string;
       policyRevision?: number | null;
     }): Promise<AgentReportAck> => {
+      const detectedAt =
+        (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString();
+      // Read here rather than inside the refresh, because the container guard below needs what the
+      // node held BEFORE this report overwrites it. Same row, same read, handed on.
+      const stored = await this.storedNodeSpecs(node.id);
+      // STICKY (#1158). Once a report's MACs share nothing with the ones the node last held, a second
+      // machine may be reporting under this derived key, and that is remembered on the marker for as
+      // long as the marker lives. Comparing only against the previous report would forget it the
+      // moment the other machine reported twice in a row — and reconcile, retiring the first
+      // machine's children. See {@link reconcileCollidingHostContainers} for how it clears.
+      const sharedKeySeenAt =
+        storedSharedKeySeenAt(stored.rest) ??
+        (sharesDerivedKeyWithAnotherMachine(stored.identity, incoming)
+          ? now.toISOString()
+          : undefined);
       const conflict: AgentReportIdentityConflict = {
         ...conflictFacts,
-        detectedAt:
-          (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
+        detectedAt,
+        ...(sharedKeySeenAt !== undefined ? { sharedKeySeenAt } : {}),
       };
-      return this.finishAck(
-        await this.refreshKnownNode({
-          node,
-          blob: { ...blob, identityConflict: conflict },
-          software,
+      const samePolicyGeneration = this.samePolicyGeneration(
+        report,
+        node.policyRevision,
+      );
+      const ack = await this.refreshKnownNode({
+        node,
+        blob: { ...blob, identityConflict: conflict },
+        software,
+        now,
+        agentVersion: report.agentVersion,
+        primaryIpAddress,
+        policyFields: this.policyWriteFields(
+          report,
+          node.policyRevision,
+          policy,
           now,
-          agentVersion: report.agentVersion,
-          primaryIpAddress,
-          policyFields: this.policyWriteFields(
-            report,
-            node.policyRevision,
-            policy,
-            now,
-          ),
-          samePolicyGeneration: this.samePolicyGeneration(
-            report,
-            node.policyRevision,
-          ),
-        }),
+        ),
+        samePolicyGeneration,
+        stored,
+      });
+      return this.reconcileCollidingHostContainers(
+        ack,
+        externalId,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
         policy,
-        report.agentVersion,
+        sharedKeySeenAt !== undefined,
       );
     };
 
@@ -2129,7 +2196,7 @@ export class InfraService {
     });
 
     void this.syncNodeToSearch(created.id);
-    return this.finishAck(
+    return this.reconcileCollidingHostContainers(
       {
         nodeId: created.id,
         state: created.state,
@@ -2141,9 +2208,102 @@ export class InfraService {
           ? { softwareResend: true }
           : {}),
       },
+      externalId,
+      report,
+      now,
+      // A node created a moment ago has no stored revision — the same `null` its policy columns
+      // were just written against.
+      this.samePolicyGeneration(report, null),
+      principal,
       policy,
-      report.agentVersion,
+      // A node that did not exist a moment ago held no other machine's identity.
+      false,
     );
+  }
+
+  /**
+   * The colliding host's CONTAINERS (#1158) — reconciled under the clone NODE's own key, then the ack
+   * is finished.
+   *
+   * Until #1158 this branch reconciled no containers at all: the container key was derived from the
+   * REPORTED `externalId`, which both clones share, so each clone's report would have claimed its
+   * peer's children and the retire sweep would have flipped the peer's running containers OFFLINE
+   * every tick. Deriving the key from the node instead (`<externalId>#<discriminator>/container/<name>`)
+   * makes the clone's children its own, and the peer's prefix (`<externalId>/container/`) and the
+   * clone's can never select each other's rows. No existing child is re-keyed: an ordinary host's
+   * node key IS its reported key, and before #1158 nothing was ever written under a clone's prefix.
+   *
+   * Only containers. GUESTS and the ADR-0095 §6 identity join still do not run under a collision — a
+   * recorded ADR-0095 limitation this change does not touch.
+   *
+   * Two cases keep the pre-#1158 behaviour (no reconcile, nothing retired) because the key would not
+   * be unique to this machine:
+   *
+   *  - **The derived key does not round-trip.** The discriminator is agent free text; a serial ending
+   *    in `/container` makes `<key>/container/<name>` parse back to a different host key (the first
+   *    separator wins) and nests one clone's prefix inside another's. AUD-102 already keeps the full
+   *    separator out of the node key; this is the one partial shape it cannot see.
+   *  - **A second machine has been seen on the same derived key.** Two clones that share the first
+   *    serial resolve to ONE clone node, exactly as two clones shared one node before #1141 — their MACs
+   *    alternate on it. The first report whose MACs share nothing with the ones the node held stamps
+   *    `identityConflict.sharedKeySeenAt`, and from then on this node reconciles no containers. The
+   *    mark is STICKY on purpose: a per-report comparison forgets it as soon as one machine reports
+   *    twice in a row (jittered timers do this routinely), and that second report would reconcile and
+   *    retire the other machine's children. It clears only with the marker itself — the clone's
+   *    machine-id is fixed (the node is no longer reached), the operator merges the node (a merge drops
+   *    the marker) or discards it (the next report starts a fresh node). A genuine NIC swap on a lone
+   *    clone therefore also stops its container tracking until then: wrongly untracked is recoverable,
+   *    a cross-retire thrash writes OFFLINE flips and fact-change rows every tick.
+   *
+   * Children land PENDING and are NOT offered to the auto-confirm rules, the same posture the clone's
+   * own node gets ({@link autoConfirmProposal}): a host under suspicion is for a human to look at.
+   *
+   * NEVER FAILS THE REPORT, for the reason {@link reconcileChildren} gives.
+   */
+  private async reconcileCollidingHostContainers(
+    ack: AgentReportAck,
+    nodeKey: string,
+    report: AgentReport,
+    now: Date,
+    samePolicyGeneration: boolean,
+    principal: Principal | undefined,
+    policy: AgentPolicy | undefined,
+    sharedDerivedKey: boolean,
+  ): Promise<AgentReportAck> {
+    const containers = report.host.containers;
+    if (containers === undefined) {
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    if (!isUniqueContainerScope(nodeKey)) {
+      this.logger.warn(
+        `Containers for colliding host ${report.host.hostname} were not reconciled: its derived key ${nodeKey} cannot scope child keys unambiguously. Its containers stay untracked until its identity conflict is fixed.`,
+      );
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    if (sharedDerivedKey) {
+      this.logger.warn(
+        `Containers for colliding host ${report.host.hostname} were not reconciled: a second machine has been seen reporting under ${nodeKey} (network cards that shared nothing with the ones held), so its containers stay untracked until the identity conflict is resolved.`,
+      );
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    try {
+      await this.applyContainerTopology(
+        ack.nodeId,
+        nodeKey,
+        containers,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
+        policy,
+        false,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return this.finishAck(ack, policy, report.agentVersion);
   }
 
   /**
@@ -2152,7 +2312,9 @@ export class InfraService {
    * finish the ack. One seam, called from every ordinary ingest branch (known-key refresh, unknown-key
    * create, P2002 race), so a branch added later cannot ship a report that reconciles one child
    * channel and silently drops the other. Deliberately NOT called from {@link ingestCollidingHost}:
-   * a host under an identity collision reconciles no children — a recorded ADR-0095 limitation.
+   * a host under an identity collision reconciles its CONTAINERS through
+   * {@link reconcileCollidingHostContainers} (#1158) and no GUESTS and no identity join — the latter
+   * two remain a recorded ADR-0095 limitation.
    *
    * ABSENT AND EMPTY ARE DIFFERENT ANSWERS, per channel and independently. An absent `containers` or
    * `guests` key means that collector never probed — an older agent, a non-Linux collector, an
@@ -2186,6 +2348,12 @@ export class InfraService {
       try {
         await this.applyContainerTopology(
           ack.nodeId,
+          // The NODE's key (#1158). On every branch that reaches this seam the node was found or
+          // created by exact equality on `report.externalId`, so the two are the same string and
+          // every container key stays byte-identical to what #1139 has always written. The
+          // collision branch, whose node key differs, passes its own key — see
+          // {@link reconcileCollidingHostContainers}.
+          report.externalId,
           containers,
           report,
           now,
@@ -2248,12 +2416,19 @@ export class InfraService {
    */
   private async applyContainerTopology(
     hostNodeId: string,
+    // The reporting host's NODE `externalId` — the scope every child key is derived from (#1158).
+    // Never re-derived from the report here: for a colliding clone the report carries the machine-id
+    // its peer reports too, and only the node's disambiguated key is unique to this machine.
+    hostKey: string,
     containers: readonly AgentContainer[],
     report: AgentReport,
     now: Date,
     samePolicyGeneration: boolean,
     principal?: Principal,
     policy?: AgentPolicy,
+    // False under an identity collision (#1158): the clone's children are enrolled PENDING and left
+    // for a human, the same posture the clone's own node gets — see {@link autoConfirmProposal}.
+    offerAutoConfirm = true,
   ): Promise<void> {
     // A child's liveness follows its HOST's cadence, so it is judged against the host's served
     // staleness threshold (#1140). Without this, moving a host to a daily cadence would leave its
@@ -2288,9 +2463,7 @@ export class InfraService {
         where: {
           reportingSource: report.reportingSource,
           externalId: {
-            startsWith: escapeLikePrefix(
-              containerExternalIdPrefix(report.externalId),
-            ),
+            startsWith: escapeLikePrefix(containerExternalIdPrefix(hostKey)),
           },
         },
         select: { id: true, externalId: true, specs: true, assetId: true },
@@ -2307,12 +2480,12 @@ export class InfraService {
     // by a throttle. The budget is per service account and shared fleet-wide, and children spend it
     // too, so exhausting it mid-list is a normal rollout event.
     const reported = new Set(
-      containers.map((c) => containerExternalId(report.externalId, c.name)),
+      containers.map((c) => containerExternalId(hostKey, c.name)),
     );
     const childIds: string[] = [];
     let budgetSpent = false;
     for (const container of containers) {
-      const externalId = containerExternalId(report.externalId, container.name);
+      const externalId = containerExternalId(hostKey, container.name);
       // The child's whole inventory blob — what this report WOULD store. Whether it is stored is
       // decided below: since #1153 the write is conditional on the facts actually having moved, on
       // the host path and here alike. When it is written it replaces the column wholesale, which is
@@ -2411,6 +2584,7 @@ export class InfraService {
       }
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
+      if (!offerAutoConfirm) continue;
       // The child half of #1145. A container child is offered to the matcher under its CONTAINER
       // NAME, with no IP of its own — the host owns the address, and pretending the child reported
       // one would let a subnet rule confirm containers on the strength of their host's wire.
@@ -5281,6 +5455,13 @@ export type AgentReportIdentityConflict = {
    * says how long it has been true rather than only "still true as of the last check-in".
    */
   detectedAt: string;
+  /**
+   * When a SECOND machine was first seen reporting under this node's derived key (#1158) — a report
+   * whose MACs shared nothing with the ones the node held. Carried across every re-stamp like
+   * `detectedAt`; while present the node reconciles no containers. Absent on every marker written
+   * before #1158 and on every clone only one machine has reported under.
+   */
+  sharedKeySeenAt?: string;
 };
 
 /**
