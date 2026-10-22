@@ -516,7 +516,9 @@
     },
     "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link.",
     "notLinkedChip": "Not linked to a purchase",
-    "removeNotLinkedChip": "Also show assets on a purchase"
+    "removeNotLinkedChip": "Also show assets on a purchase",
+    "nearOrderChip": "Dated near {date} (±{days} days)",
+    "removeNearOrderChip": "Show assets from any date"
   },
   "provenance": {
     "title": "Purchase",
@@ -560,7 +562,10 @@
     "linkExisting": "Link existing assets",
     "cancelRemaining": "Cancel remaining units",
     "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending",
-    "applyLicense": "Apply license"
+    "applyLicense": "Apply license",
+    "overdueOnly": "Overdue only",
+    "emptyOverdue": "Nothing is overdue",
+    "emptyOverdueDescription": "A purchase is overdue when its expected delivery date has passed and units are still pending. Purchases with no expected date are never overdue."
   },
   "receiveStock": {
     "title": "Receive into stock",

@@ -249,10 +249,19 @@ export function cancelRemainingUnits(
 
 export const PENDING_LINE_EXPORT_PATH = `${BASE}/pending-lines/export`;
 
-/** The pending-units list's filters, never the page window; the CSV export sends exactly these. */
-export function pendingLineFilterParams({ supplierId }: { supplierId?: string } = {}): URLSearchParams {
+/**
+ * The pending-units list's filters, never the page window; the CSV export sends exactly these. `expectedBefore`
+ * (the viewer's today, `YYYY-MM-DD`) keeps only overdue purchases' lines — *Overdue only* (#1503).
+ */
+export interface PendingLineFilters {
+  supplierId?: string;
+  expectedBefore?: string;
+}
+
+export function pendingLineFilterParams({ supplierId, expectedBefore }: PendingLineFilters = {}): URLSearchParams {
   const qs = new URLSearchParams();
   if (supplierId) qs.set("supplierId", supplierId);
+  if (expectedBefore) qs.set("expectedBefore", expectedBefore);
   return qs;
 }
 
@@ -261,10 +270,10 @@ export function pendingLineFilterParams({ supplierId }: { supplierId?: string } 
  * draft nor cancelled, oldest purchase first, each with its purchase header.
  */
 export function getPendingLines(
-  { supplierId, limit, offset }: { supplierId?: string; limit?: number; offset?: number } = {},
+  { supplierId, expectedBefore, limit, offset }: PendingLineFilters & { limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<PendingPurchaseLinePage> {
-  const qs = pendingLineFilterParams({ supplierId });
+  const qs = pendingLineFilterParams({ supplierId, expectedBefore });
   if (limit !== undefined) qs.set("limit", String(limit));
   if (offset !== undefined) qs.set("offset", String(offset));
   const search = qs.toString();

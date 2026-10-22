@@ -145,3 +145,11 @@ export function pendingDeliveries(summary: PendingPurchaseSummary | undefined): 
 export const PENDING_UNITS_PATH = "/purchases/pending";
 /** Its *Overdue only* URL param: `?overdue=1` (#1503). */
 export const OVERDUE_PARAM = "overdue";
+
+/**
+ * `expectedBefore` for the pending reads (#1503): the viewer's today when *Overdue only* is on, else nothing
+ * (every pending line). The same day {@link isOverdue} flags on screen, so the list and the flag agree.
+ */
+export function overdueExpectedBefore(overdueOnly: boolean, today: string): string | undefined {
+  return overdueOnly ? today : undefined;
+}

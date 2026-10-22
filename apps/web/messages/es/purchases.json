@@ -516,7 +516,9 @@
     },
     "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula.",
     "notLinkedChip": "Sin compra vinculada",
-    "removeNotLinkedChip": "Mostrar también activos con compra"
+    "removeNotLinkedChip": "Mostrar también activos con compra",
+    "nearOrderChip": "Con fecha cercana al {date} (±{days} días)",
+    "removeNearOrderChip": "Mostrar activos de cualquier fecha"
   },
   "provenance": {
     "title": "Compra",
@@ -560,7 +562,10 @@
     "linkExisting": "Vincular activos existentes",
     "cancelRemaining": "Cancelar unidades restantes",
     "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}",
-    "applyLicense": "Aplicar licencia"
+    "applyLicense": "Aplicar licencia",
+    "overdueOnly": "Solo atrasadas",
+    "emptyOverdue": "No hay nada atrasado",
+    "emptyOverdueDescription": "Una compra está atrasada cuando pasó su fecha de entrega prevista y todavía tiene unidades pendientes. Las compras sin fecha prevista nunca están atrasadas."
   },
   "receiveStock": {
     "title": "Recibir en stock",

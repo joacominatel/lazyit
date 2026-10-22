@@ -7,6 +7,7 @@ import {
   isOverdue,
   lineReceiveAction,
   localToday,
+  overdueExpectedBefore,
   pendingDeliveries,
   pendingLinesForModel,
   pendingTotals,
@@ -165,5 +166,19 @@ describe("pendingDeliveries — the dashboard's Needs attention row (#1498)", ()
       overdue: 1,
       href: "/purchases/pending?overdue=1",
     });
+  });
+});
+
+describe("Overdue only (#1503)", () => {
+  test("on, the server is asked for purchases expected before the viewer's today — the day isOverdue flags", () => {
+    const today = localToday(new Date(2026, 9, 22, 23, 30));
+    expect(overdueExpectedBefore(true, today)).toBe("2026-10-22");
+    // The same boundary on screen: due yesterday is overdue, due today is not.
+    expect(isOverdue("2026-10-21T00:00:00.000Z", today)).toBe(true);
+    expect(isOverdue("2026-10-22T00:00:00.000Z", today)).toBe(false);
+  });
+
+  test("off, nothing is sent and every pending line is listed", () => {
+    expect(overdueExpectedBefore(false, "2026-10-22")).toBeUndefined();
   });
 });

@@ -35,6 +35,7 @@ import {
   getPurchaseOrderEvents,
   getPurchaseOrders,
   linkAssetsToLine,
+  type PendingLineFilters,
   type PurchaseOrderListParams,
   receiveFromLine,
   receiveStockFromLine,
@@ -64,7 +65,7 @@ export const purchaseOrderKeys = {
   list: (params: PurchaseOrderListParams) => [...purchaseOrderKeys.all, "list", params] as const,
   detail: (id: string) => [...purchaseOrderKeys.all, "detail", id] as const,
   events: (id: string) => [...purchaseOrderKeys.all, "detail", id, "events"] as const,
-  pending: (params: { supplierId?: string; limit?: number; offset?: number }) =>
+  pending: (params: PendingLineFilters & { limit?: number; offset?: number }) =>
     [...purchaseOrderKeys.all, "pending", params] as const,
   /** The dashboard's pending-deliveries counts for the viewer's day (#1498); refreshed by any purchase write. */
   pendingSummary: (expectedBefore: string) =>
@@ -195,7 +196,7 @@ export function useRemovePurchaseOrderLine() {
 
 /** Lines still waiting for units, oldest purchase first. Idle unless `enabled` (callers gate on permission). */
 export function usePendingLines(
-  params: { supplierId?: string; limit?: number; offset?: number } = {},
+  params: PendingLineFilters & { limit?: number; offset?: number } = {},
   { enabled = true }: { enabled?: boolean } = {},
 ) {
   return useQuery({

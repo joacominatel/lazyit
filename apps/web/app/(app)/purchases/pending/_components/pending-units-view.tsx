@@ -27,8 +27,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Switch } from "@/components/ui/switch";
 import {
   PENDING_LINE_EXPORT_PATH,
   pendingLineFilterParams,
@@ -43,6 +45,8 @@ import {
   isOverdue,
   lineReceiveAction,
   localToday,
+  OVERDUE_PARAM,
+  overdueExpectedBefore,
   pendingTotals,
 } from "@/lib/purchases/pending";
 import { deliveryLines } from "@/lib/purchases/receive-delivery";
@@ -52,7 +56,11 @@ import { usePurchaseTitle } from "../../_components/purchase-display";
 import { PurchasesTabs } from "../../_components/purchases-tabs";
 import { SupplierCombobox } from "../../_components/supplier-combobox";
 
-const PENDING_LIST_OPTIONS = { filters: { supplier: "ALL" } };
+// `?overdue=1` is *Overdue only* (#1503) — the dashboard's Pending deliveries row links to it.
+const PENDING_LIST_OPTIONS = {
+  filters: { supplier: "ALL", [OVERDUE_PARAM]: "0" },
+  filterValidators: { [OVERDUE_PARAM]: ["0", "1"] },
+};
 
 /**
  * *Pending units* (ADR-0099, UX proposal §3.f): the lines still waiting for units, grouped by purchase,
@@ -60,7 +68,9 @@ const PENDING_LIST_OPTIONS = { filters: { supplier: "ALL" } };
  * purchases, *Other* lines and fully cancelled remainders are not here (the API leaves them out). Each line
  * offers *Receive* and, in its menu, *Link existing* and *Cancel remaining* (a consumable line receives into
  * stock and has no *Link existing*, #1476; a license line offers *Apply license* instead, #1477); a purchase
- * whose expected date has passed is flagged *Overdue* (with text, never colour alone).
+ * whose expected date has passed is flagged *Overdue* (with text, never colour alone), and *Overdue only*
+ * (`?overdue=1`, #1503) keeps just those — the server filters with the viewer's today as `expectedBefore`, the
+ * same day the flag compares against, so the list and the flag agree.
  */
 export function PendingUnitsView() {
   const t = useTranslations("purchases.pending");
@@ -77,8 +87,12 @@ export function PendingUnitsView() {
   const deliveryAccess = useDeliveryAccess();
   const { offset, limit, filters, setFilter, setOffset, clearFilters } = useListParams(PENDING_LIST_OPTIONS);
   const supplierId = filters.supplier !== "ALL" ? filters.supplier : undefined;
+  const overdueOnly = filters[OVERDUE_PARAM] === "1";
+  const today = localToday();
+  const expectedBefore = overdueExpectedBefore(overdueOnly, today);
   const { data: page, isLoading, isFetching, isError, error, refetch } = usePendingLines({
     supplierId,
+    expectedBefore,
     limit,
     offset,
   });
@@ -94,22 +108,26 @@ export function PendingUnitsView() {
 
   const groups = groupPendingLines(page?.items ?? []);
   const totals = pendingTotals(groups);
-  const today = localToday();
 
   async function receive(line: PendingPurchaseLine) {
     const target = await loader.load(line);
     if (target) setReceiving(target);
   }
 
-  const chips = supplierId
-    ? [
-        {
-          key: "supplier",
-          label: tList("chips.supplier", { name: supplier?.name ?? "—" }),
-          onClear: () => setFilter("supplier", "ALL"),
-        },
-      ]
-    : [];
+  const chips = [
+    ...(supplierId
+      ? [
+          {
+            key: "supplier",
+            label: tList("chips.supplier", { name: supplier?.name ?? "—" }),
+            onClear: () => setFilter("supplier", "ALL"),
+          },
+        ]
+      : []),
+    ...(overdueOnly
+      ? [{ key: OVERDUE_PARAM, label: t("overdueOnly"), onClear: () => setFilter(OVERDUE_PARAM, "0") }]
+      : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -121,7 +139,7 @@ export function PendingUnitsView() {
         actions={
           <ExportButton
             path={PENDING_LINE_EXPORT_PATH}
-            params={pendingLineFilterParams({ supplierId })}
+            params={pendingLineFilterParams({ supplierId, expectedBefore })}
             total={page?.total}
             filename="pending-units"
             permission="purchaseOrder:read"
@@ -137,6 +155,14 @@ export function PendingUnitsView() {
           placeholder={tList("allSuppliers")}
           className="lg:w-60"
         />
+        <Label htmlFor="pending-overdue-only" className="flex items-center gap-2 text-sm font-normal">
+          <Switch
+            id="pending-overdue-only"
+            checked={overdueOnly}
+            onCheckedChange={(next) => setFilter(OVERDUE_PARAM, next ? "1" : "0")}
+          />
+          {t("overdueOnly")}
+        </Label>
       </div>
       <ActiveFilters chips={chips} onClearAll={clearFilters} />
 
@@ -151,8 +177,8 @@ export function PendingUnitsView() {
         <EmptyState
           icon={InboxArrowDownIcon}
           pillar="inventory"
-          title={supplierId ? t("emptyFiltered") : t("emptyTitle")}
-          description={t("emptyDescription")}
+          title={overdueOnly ? t("emptyOverdue") : supplierId ? t("emptyFiltered") : t("emptyTitle")}
+          description={overdueOnly ? t("emptyOverdueDescription") : t("emptyDescription")}
         />
       ) : (
         <>
