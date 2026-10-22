@@ -54,10 +54,12 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | *Receive delivery* across lines | [[0099-purchases-scope-model-and-optionality#Decisions while building (Receive delivery, #1497)\|Receive delivery]] | #1690 (#1497) |
 | Dashboard *Pending deliveries*, *Overdue only*, the *near the order date* chip, the line price follow-up and *Apply purchase value* | ADR-0099 §2 and §13 *Built (API)* / *Built (web)* notes | #1692 · #1704 (#1498, #1503, #1502) |
 | Supplier yearly totals per currency label | ADR-0099 §13 · [[supplier]] | #1689 · #1704 (#1500) |
+| XLSX export of the purchases list and the asset inventory (a CSV / Excel menu on both lists) | [[0103-data-export-streaming-path#11. XLSX, opted in per route (2026-10-22, #1501)\|ADR-0103 §11]] | #1711 · web (#1501) |
 
 **Planned in ADR-0099 §13 or the UX proposal §7 but not built** (tracked as #1495, with sub-issues
 #1496–#1503): *Suggest purchases*, mapping a custom field to suppliers, the warranty replacement action, and the
-XLSX export (#1501). Since built (table above): merging suppliers (#1496), global search (#1499), *Receive
+XLSX export (#1501). Since built (table above): the XLSX export of purchases and assets (#1501, 2026-10-22),
+merging suppliers (#1496), global search (#1499), *Receive
 delivery* across lines (#1497), the dashboard *Pending deliveries* row (#1498), the supplier's yearly totals per
 currency label (#1500), the per-asset proposal after a line's price is edited plus *Apply purchase value* on the
 asset (#1502), and the pending list's *Overdue only* toggle and the link picker's *near the order date* chip
