@@ -313,7 +313,15 @@
     "createdFromAssets": "Creada a partir de {count, plural, one {# activo seleccionado} other {# activos seleccionados}} ({lines, plural, one {# línea} other {# líneas}})",
     "createdFromAssetsLeftOut": "{count, plural, one {# activo quedó afuera} other {# activos quedaron afuera}}",
     "supplierMerged": "Proveedor {from} fusionado en {to}",
-    "supplierMergedGeneric": "Proveedor fusionado en otro"
+    "supplierMergedGeneric": "Proveedor fusionado en otro",
+    "linkedValuesApplied": "Actualizó {count, plural, one {# activo vinculado} other {# activos vinculados}} de «{line}» desde la compra: {fields}",
+    "applyFields": {
+      "purchaseCost": "costo",
+      "purchaseDate": "fecha de compra",
+      "warrantyEnd": "fin de garantía",
+      "company": "empresa",
+      "modelId": "modelo"
+    }
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -398,6 +406,16 @@
       "confirm": "Fusionar",
       "mergedToast": "{source} fusionado en {target}",
       "error": "No se pudieron fusionar los proveedores"
+    },
+    "yearly": {
+      "title": "Gasto por año",
+      "year": "Año",
+      "total": "Total",
+      "purchases": "Compras",
+      "tooLarge": "Demasiado grande para mostrar",
+      "partial": "Parcial: {count, plural, one {# línea no tiene} other {# líneas no tienen}} precio",
+      "empty": "Todavía no se gastó nada con este proveedor. Los borradores y las compras canceladas no se cuentan.",
+      "help": "Según la fecha de pedido (o cuándo se registró la compra), contando las compras pedidas y recibidas —no los borradores ni las canceladas— y solo las unidades que no se cancelaron. Cada etiqueta de moneda se suma por separado; nada se convierte."
     }
   },
   "fromPurchase": {
@@ -505,7 +523,9 @@
     },
     "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula.",
     "notLinkedChip": "Sin compra vinculada",
-    "removeNotLinkedChip": "Mostrar también activos con compra"
+    "removeNotLinkedChip": "Mostrar también activos con compra",
+    "nearOrderChip": "Con fecha cercana al {date} (±{days} días)",
+    "removeNearOrderChip": "Mostrar activos de cualquier fecha"
   },
   "provenance": {
     "title": "Compra",
@@ -533,7 +553,13 @@
     "unlinkTitle": "¿Desvincular de la compra?",
     "unlinkDescription": "¿Desvincular {asset} de {purchase}? Sus valores de compra se mantienen.",
     "unlinkedToast": "Desvinculado de la compra",
-    "unlinkError": "No se pudo desvincular el activo"
+    "unlinkError": "No se pudo desvincular el activo",
+    "applyValue": "Aplicar valor de la compra",
+    "applyTitle": "¿Aplicar el valor de la compra?",
+    "applyDescription": "¿Fijar el costo de compra de {asset} en {value}, el precio en {purchase}? Su costo actual, {current}, se reemplaza, y la etiqueta de moneda cambia con él.",
+    "appliedToast": "Costo de compra actualizado desde la compra",
+    "alreadyApplied": "El costo ya coincide con la compra",
+    "applyError": "No se pudo aplicar el valor de la compra"
   },
   "pending": {
     "subtitle": "Líneas que todavía esperan unidades, el pedido más antiguo primero.",
@@ -549,7 +575,10 @@
     "linkExisting": "Vincular activos existentes",
     "cancelRemaining": "Cancelar unidades restantes",
     "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}",
-    "applyLicense": "Aplicar licencia"
+    "applyLicense": "Aplicar licencia",
+    "overdueOnly": "Solo atrasadas",
+    "emptyOverdue": "No hay nada atrasado",
+    "emptyOverdueDescription": "Una compra está atrasada cuando pasó su fecha de entrega prevista y todavía tiene unidades pendientes. Las compras sin fecha prevista nunca están atrasadas."
   },
   "receiveStock": {
     "title": "Recibir en stock",
@@ -820,5 +849,23 @@
     },
     "saveFix": "Corrige los valores marcados para guardar",
     "savedPart": "Guardado"
+  },
+  "linkedUpdate": {
+    "title": "¿Actualizar el costo de los activos vinculados?",
+    "description": "Cambió el precio unitario de «{line}». Elige los activos vinculados cuyo costo de compra debe seguirlo: nada cambia hasta que confirmes.",
+    "previewError": "No se pudieron comparar los activos vinculados con la compra.",
+    "none": "Ya no hay activos vigentes vinculados a esta línea.",
+    "noCost": "sin costo",
+    "change": "{from} → {to}",
+    "overridden": "Modificado a mano",
+    "alreadySame": "Ya es igual",
+    "assetLabel": "Actualizar el costo de {asset}",
+    "help": "Se marcan los activos que todavía tenían el precio de compra anterior o que no tenían costo. Los activos cuyo costo se cambió a mano se señalan como modificados a mano y quedan sin marcar. La moneda cambia junto con el costo.",
+    "keep": "Mantener sus costos",
+    "submit": "Actualizar {count, plural, =0 {activos} one {# activo} other {# activos}}",
+    "updatedToast": "{count, plural, =0 {Ningún activo necesitaba cambios} one {# activo actualizado} other {# activos actualizados}}",
+    "partialToast": "{updated, plural, one {# activo actualizado} other {# activos actualizados}} · {failed, plural, one {# sin actualizar} other {# sin actualizar}}",
+    "partialError": "Se {updated, plural, one {actualizó # activo} other {actualizaron # activos}} y luego la actualización se detuvo; {notSent, plural, one {# activo no cambió} other {# activos no cambiaron}}. Elige Actualizar de nuevo para terminar: tus elecciones se mantienen y los activos ya actualizados quedan como están.",
+    "error": "No se pudieron actualizar los activos vinculados"
   }
 }

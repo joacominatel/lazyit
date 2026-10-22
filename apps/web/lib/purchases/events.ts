@@ -57,6 +57,8 @@ export type PurchaseEventView =
       warningCount: number | null;
     }
   | { kind: "createdFromAssets"; linked: number | null; lineCount: number | null; failed: number }
+  // A line's values re-applied to the assets already linked to it (#1502): the assets changed, the fields asked for.
+  | { kind: "linkedValuesApplied"; lineId: string | null; count: number | null; fields: string[] }
   // Merging suppliers (#1496): the names as they were when merged.
   | { kind: "supplierMerged"; from: string | null; to: string | null }
   | { kind: "deleted" }
@@ -182,6 +184,13 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
         linked: count(p.linkedAssetIds),
         lineCount: num(p.lineCount),
         failed: count(p.failed) ?? num(p.failed) ?? 0,
+      };
+    case "LINKED_VALUES_APPLIED":
+      return {
+        kind: "linkedValuesApplied",
+        lineId: str(p.lineId),
+        count: count(p.assetIds),
+        fields: Array.isArray(p.fields) ? p.fields.flatMap((field) => (str(field) ? [field as string] : [])) : [],
       };
     case "SUPPLIER_MERGED": {
       const name = (side: unknown) =>

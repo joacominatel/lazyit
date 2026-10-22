@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # User
@@ -98,6 +98,10 @@ the reverse.
   the recovery CLI, deactivation, offboarding, the sync's soft offboard — **except sign-out**:
   `POST /auth/logout` ends web sessions only and leaves the user's MCP connections alive
   ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24).
+  **Sign out everywhere and disconnect AI apps** (#1699) is the user's own lever for both:
+  `POST /auth/sessions/revoke-all` increments `sessionEpoch` **and** `mcpCredentialEpoch` (unconditionally
+  — a concurrent plain logout must not make it skip the MCP bump) and deletes every session row, in one
+  transaction and in every auth mode, audited `SIGNED_OUT_EVERYWHERE` in the OAuth audit trail.
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege

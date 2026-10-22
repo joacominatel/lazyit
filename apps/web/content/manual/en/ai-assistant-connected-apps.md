@@ -32,7 +32,10 @@ approved again to reconnect; a revoked token can't be restored.
 
 Revoke anything you don't recognize, no longer use, or whose token may have been exposed. When lazyit
 notifies you that **a new AI agent connected** to your account and it wasn't you, revoke it here at once,
-change your password, and tell your administrator.
+change your password, and tell your administrator. To cut off every app and token at once, use
+[Sign out everywhere and disconnect AI apps](/help/getting-started-your-profile#sign-out-everywhere-and-disconnect-ai-apps).
+That notice is a **security notice**: when your instance sends email, it is always emailed to you and
+can't be turned off in [Notification emails](/help/notifications-activity-email-preferences).
 
 ## Personal tokens
 
@@ -63,6 +66,7 @@ they expire so you can revoke them.
 | --- | --- |
 | You **revoke** one | That one stops for good. |
 | You **sign out** of lazyit | **Nothing** — connections belong to your account, not your browser session. |
+| You choose **Sign out everywhere and disconnect AI apps** | **Every** app and token stops and disappears from the list, and you are signed out everywhere. Reconnect afterwards. See [Sign out everywhere and disconnect AI apps](/help/getting-started-your-profile#sign-out-everywhere-and-disconnect-ai-apps). |
 | Your **password changes** or is reset | **Every** app and token stops and disappears from the list. Reconnect afterwards. |
 | Your account is **deactivated or offboarded** | **Every** app and token stops. |
 | Your role **loses a permission** | Your apps lose it too — a connection never has more access than you. If it was the permission to connect AI apps, every app and token stops, but stays listed so you can revoke it. |

@@ -315,6 +315,84 @@
       "close": "Close"
     }
   },
+  "fleetSection": {
+    "aria": "Agents view section",
+    "agents": "Agents",
+    "software": "Software watchlist"
+  },
+  "software": {
+    "title": "Software watchlist",
+    "intro": "The packages your team keeps an eye on, each counted across every host that runs the reporting agent: which versions are installed and on how many hosts, which hosts don't have it, and which hosts lazyit can't speak for. It is a distribution only — lazyit does not judge whether a version is old, end-of-life or vulnerable.",
+    "sensitive": "This is a sensitive view: a map of which versions run where is exactly what an attacker would want. Everyone who can see Topology can see it. To keep a group of hosts out of it, turn software collection off for them in the agent settings — they then show as unknown here. <link>Read more in the Manual.</link>",
+    "refresh": "Refresh",
+    "loadError": "Couldn't load the software watchlist.",
+    "empty": {
+      "title": "No packages on the watchlist yet",
+      "description": "Add the exact name of a package you care about — openssl, openssh-server, curl — and lazyit counts it across every agent-reported host.",
+      "descriptionReadOnly": "Nobody has added a package yet. Someone who can manage the topology can add the packages your team wants to follow."
+    },
+    "add": {
+      "label": "Add a package",
+      "placeholder": "openssl",
+      "submit": "Add",
+      "help": "The exact package name as the agent reports it — no wildcards, and an architecture suffix such as :amd64 is a different name. {count} of {limit} used.",
+      "normalized": "Will be saved as <code>{name}</code>.",
+      "duplicate": "{name} is already on the watchlist.",
+      "invalid": "That name is too long for a package name.",
+      "limit": "The watchlist is full ({limit} packages). Remove one to add another.",
+      "added": "{name} added to the watchlist.",
+      "error": "Couldn't add the package.",
+      "forbidden": "Only a person signed in with permission to manage the topology can change the watchlist."
+    },
+    "remove": {
+      "label": "Remove {name} from the watchlist",
+      "removed": "{name} removed from the watchlist.",
+      "error": "Couldn't remove the package."
+    },
+    "presence": {
+      "INSTALLED": "have it",
+      "MISSING": "missing",
+      "UNKNOWN": "unknown"
+    },
+    "watch": {
+      "addedBy": "Added by {name} · {date}",
+      "added": "Added {date}",
+      "hostsTotal": "{count, plural, one {Across # agent-reported host} other {Across # agent-reported hosts}}",
+      "noHosts": "No host runs the reporting agent yet, so there is nothing to count.",
+      "unknownNote": "{count, plural, one {# host is unknown, not missing:} other {# hosts are unknown, not missing:}} lazyit has no package list for them (software collection is off, or they have never sent one), or the agent settings exclude this name. Open the list to see the reason for each host.",
+      "versionsTitle": "Versions",
+      "versionsNote": "Listed by how many hosts carry each version, not in version order. A host with two versions installed counts in both.",
+      "noVersion": "No version reported",
+      "hosts": "{count, plural, one {# host} other {# hosts}}",
+      "showAll": "Show all {count} versions",
+      "showFewer": "Show fewer"
+    },
+    "hosts": {
+      "bucket": {
+        "INSTALLED": "hosts that have it",
+        "MISSING": "hosts missing it",
+        "UNKNOWN": "hosts lazyit can't speak for"
+      },
+      "bucketVersion": "version {version}",
+      "bucketNoVersion": "listed without a version",
+      "description": "{count, plural, =0 {No hosts} one {# host} other {# hosts}}, in name order. Open one to see it on the map.",
+      "loadError": "Couldn't load these hosts.",
+      "empty": "No host is in this group any more — the hosts may have reported since this page loaded.",
+      "missingDetail": "Not on its last package list",
+      "noVersion": "no version",
+      "reason": {
+        "NOT_COLLECTED": "Unknown — no package list stored: software collection is off for this host, or it has never sent one",
+        "EXCLUDED_BY_POLICY": "Unknown — the agent settings exclude this name, so the agent does not report it"
+      },
+      "collected": "Package list collected {time}",
+      "lastReport": "Last check-in {time}",
+      "neverReported": "Never reported",
+      "flags": {
+        "pending": "Pending review",
+        "offline": "Not reporting"
+      }
+    }
+  },
   "tidy": {
     "action": "Tidy"
   },

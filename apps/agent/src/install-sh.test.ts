@@ -127,6 +127,38 @@ describe("uninstall — nobody deploys what they cannot cleanly remove", () => {
     expect(script).toContain("--keep-config");
     expect(script).toMatch(/LAZYIT_TOKEN=/);
   });
+  // #1701: the host's node is RETIRED rather than left to go OFFLINE and be announced.
+  describe("it tells lazyit the host is going away (#1701)", () => {
+    const uninstall = script.slice(
+      script.indexOf('if [ "$UNINSTALL" = "1" ]; then'),
+      script.indexOf('[ "$KEEP_CONFIG" = "0" ] || die'),
+    );
+    const decommission = uninstall.indexOf('"$BIN_PATH" decommission --config "$CONFIG_FILE"');
+
+    test("by running the agent's decommission command", () => {
+      expect(decommission).toBeGreaterThan(-1);
+    });
+
+    test("only AFTER the timer is disarmed — a later tick would un-retire the node", () => {
+      expect(uninstall.indexOf("systemctl disable --now lazyit-agent.timer")).toBeLessThan(decommission);
+    });
+
+    test("BEFORE the binary, the state or the token are removed", () => {
+      expect(decommission).toBeLessThan(uninstall.indexOf('rm -f "$BIN_PATH"'));
+      expect(decommission).toBeLessThan(uninstall.indexOf('rm -rf "$STATE_DIR"'));
+      expect(decommission).toBeLessThan(uninstall.indexOf('rm -f "$CONFIG_FILE"'));
+      expect(decommission).toBeLessThan(uninstall.indexOf("KEPT="));
+    });
+
+    test("best-effort and bounded: a failure never stops the uninstall", () => {
+      expect(uninstall).toContain('timeout 120 "$BIN_PATH" decommission');
+      // Every invocation is guarded, so `set -e` cannot abort the uninstall on a refused report.
+      for (const line of uninstall.split("\n").filter((l) => l.includes(" decommission --config"))) {
+        expect(line).toContain("|| DECOMMISSION_FAILED=1");
+      }
+      expect(uninstall).toMatch(/retire its node by hand/);
+    });
+  });
 });
 
 /**

@@ -10,7 +10,8 @@ export interface ExportColumn<T> {
   value: (row: T) => ExportCellValue;
 }
 
-function moneyCell(minor: number | bigint): string {
+/** Integer minor units as an exact major-unit decimal string (`150050` → `1500.50`). */
+export function moneyCell(minor: number | bigint): string {
   const n = BigInt(minor);
   const abs = n < 0n ? -n : n;
   const cents = abs % 100n;

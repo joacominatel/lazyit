@@ -46,6 +46,9 @@ const FIELD_LABELS = new Set([
   "position",
 ]);
 
+/** Apply field → its label key under `purchases.activity.applyFields` (#1502). Unknown names print as logged. */
+const APPLY_FIELD_LABELS = new Set(["purchaseCost", "purchaseDate", "warrantyEnd", "company", "modelId"]);
+
 /** Stored status → its label key under `purchases.status`. */
 const STATUS_KEY: Record<string, string> = {
   DRAFT: "draft",
@@ -234,6 +237,17 @@ export function PurchaseActivity({
         ]
           .filter(Boolean)
           .join(" · ");
+      case "linkedValuesApplied":
+        return t("linkedValuesApplied", {
+          count: view.count ?? 0,
+          line: lineName(view.lineId, null),
+          fields:
+            view.fields.length > 0
+              ? view.fields
+                  .map((field) => (APPLY_FIELD_LABELS.has(field) ? t(`applyFields.${field}`) : field))
+                  .join(", ")
+              : t("blank"),
+        });
       case "supplierMerged":
         return view.from && view.to ? t("supplierMerged", { from: view.from, to: view.to }) : t("supplierMergedGeneric");
       case "deleted":

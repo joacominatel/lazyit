@@ -317,6 +317,18 @@ partial unique index on the name; no existing table touched, nothing to backfill
 has an empty watchlist, and because the distribution is computed on read, the first watch an operator
 adds is complete immediately over every host's already-stored list.
 
+**Web surface (2026-10-22, #1684).** The watchlist is the second section of **Topology › Agents**
+(`?view=agents&fleet=software`), not a fourth Topology view and not a navigation entry: it answers a
+fleet-wide question over the same agent-reported hosts as the fleet view. Each watch shows the presence
+split (installed / missing / unknown — UNKNOWN drawn as its own hatched segment, never merged into
+MISSING) and the version buckets **in the API's host-count order, with a line saying it is not a version
+order**; every count opens a paged drill-in whose rows link to the node and carry the UNKNOWN reason.
+Add and remove render for `infra:manage` (the web session is always a person, so the human-only guard is
+not separately visible; its 403 is still worded). The view states that the inventory is sensitive and
+that turning software collection off moves hosts to unknown. The pure rules (section param, drill-in
+query — the null bucket is sent as `version=`, never as an absent key — and the add-form verdict) live
+in `apps/web/lib/agent/software-watch.ts`; the Manual section is on the reporting-agent page.
+
 ### §2 — The report contract (`@lazyit/shared`)
 
 One zod schema, `AgentReportSchema`, is the single source of truth for the wire — imported by **both**

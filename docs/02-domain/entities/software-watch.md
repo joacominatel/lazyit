@@ -8,8 +8,10 @@ updated: 2026-10-22
 
 # SoftwareWatch
 
-> 🟢 implemented (API, #1684) · Area: Infra topology · Implementation order: after [[infra-node]] (it
-> reads the package lists agents store there) · Web surface: follows separately on #1684
+> 🟢 implemented (API + web, #1684) · Area: Infra topology · Implementation order: after [[infra-node]]
+> (it reads the package lists agents store there) · Web surface: the **Software watchlist** section of
+> Topology › Agents (`/assets/diagram?view=agents&fleet=software`, see [[0074-server-reporting-agent]]
+> §1 amendment, "Web surface") · Manual: the reporting-agent page, "Software watchlist"
 
 ## Purpose
 
@@ -60,6 +62,10 @@ return per effort on the reporting-agent backlog: a `GROUP BY` over data already
     everything: a list that names it is evidence, whatever the policy says now.
   - **MISSING** — the host **stores a list** and the list does not name the package. Only ever said about
     a host whose agent actually enumerated its packages.
+    - **Known gap — a truncated list reads MISSING.** A host whose package list was cut at the package
+      limit (`LAZYIT_SOFTWARE_MAX` on the host, or the policy's software cap) stores a list that can
+      omit an installed package, and the read classifies that host MISSING rather than UNKNOWN. The
+      Manual states it; a follow-up issue tracks classifying it.
   - **UNKNOWN** — we cannot say, and it is **never folded into MISSING**:
     - `NOT_COLLECTED` — the node stores **no list at all**. That is what software collection being off
       leaves behind, whatever turned it off: the agent policy at any scope (instance, service account or

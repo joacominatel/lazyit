@@ -7,6 +7,8 @@ import {
   isOverdue,
   lineReceiveAction,
   localToday,
+  overdueExpectedBefore,
+  pendingDeliveries,
   pendingLinesForModel,
   pendingTotals,
 } from "./pending";
@@ -141,5 +143,42 @@ describe("lineReceiveAction — what Receive means per line kind (#1477)", () =>
   test("an Other line, or a kind a newer build writes, offers nothing to receive", () => {
     expect(lineReceiveAction("OTHER")).toBeNull();
     expect(lineReceiveAction("SUBSCRIPTION")).toBeNull();
+  });
+});
+
+describe("pendingDeliveries — the dashboard's Needs attention row (#1498)", () => {
+  test("nothing waiting, or no answer yet, shows no row", () => {
+    expect(pendingDeliveries(undefined)).toBeNull();
+    expect(pendingDeliveries({ purchases: 0, units: 0, overduePurchases: 0 })).toBeNull();
+  });
+
+  test("purchases waiting, none overdue: the counts, and a link to Pending units", () => {
+    expect(pendingDeliveries({ purchases: 3, units: 7, overduePurchases: 0 })).toEqual({
+      purchases: 3,
+      units: 7,
+      overdue: 0,
+      href: "/purchases/pending",
+    });
+  });
+
+  test("some overdue: the link opens Pending units on Overdue only", () => {
+    expect(pendingDeliveries({ purchases: 3, units: 7, overduePurchases: 1 })).toMatchObject({
+      overdue: 1,
+      href: "/purchases/pending?overdue=1",
+    });
+  });
+});
+
+describe("Overdue only (#1503)", () => {
+  test("on, the server is asked for purchases expected before the viewer's today — the day isOverdue flags", () => {
+    const today = localToday(new Date(2026, 9, 22, 23, 30));
+    expect(overdueExpectedBefore(true, today)).toBe("2026-10-22");
+    // The same boundary on screen: due yesterday is overdue, due today is not.
+    expect(isOverdue("2026-10-21T00:00:00.000Z", today)).toBe(true);
+    expect(isOverdue("2026-10-22T00:00:00.000Z", today)).toBe(false);
+  });
+
+  test("off, nothing is sent and every pending line is listed", () => {
+    expect(overdueExpectedBefore(false, "2026-10-22")).toBeUndefined();
   });
 });

@@ -41,6 +41,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { ImportDryRunService } from '../import/dry-run.service';
 import { parseImport } from '../import/parser';
+import { detectImportFormat } from '../import/import-upload';
+import { XLSX_CONTENT_TYPE } from '../common/export';
+import { XLSX_STYLE } from '../common/export/xlsx-sheet';
+import { readXlsx, xlsxRecords } from '../../test/xlsx-reader';
 
 const PO = 'clpo00000000000000000001';
 
@@ -438,6 +442,116 @@ describe('GET /assets/export (ADR-0103)', () => {
       company: 'Dirección',
       purchaseCost: 150050,
       status: 'OPERATIONAL',
+    });
+  });
+
+  describe('format=xlsx (ADR-0103 §11)', () => {
+    const exportXlsx = async (query: string) => {
+      const res = await get(`/assets/export?format=xlsx&${query}`).expect(200);
+      expect(res.headers['content-type']).toBe(XLSX_CONTENT_TYPE);
+      const disposition = res.headers['content-disposition'];
+      expect(disposition).toMatch(
+        /^attachment; filename="lazyit-assets-\d{4}-\d{2}-\d{2}\.xlsx"$/,
+      );
+      return readXlsx(res.body as Buffer);
+    };
+    const headerOf = (read: Awaited<ReturnType<typeof readXlsx>>) =>
+      [...read.rows.get(1)!.values()].map((c) => c.value).join(',');
+
+    it('the CSV columns per caller, typed cells, no provenance line, formulas as text', async () => {
+      table = [
+        assetRow(1, { notes: '\n=cmd|/c calc', company: '＝1+1' }),
+        assetRow(2, {
+          purchaseOrderLine: {
+            purchaseOrder: {
+              reference: 'OC-4512',
+              invoiceNumbers: 'A-1',
+              supplier: { name: 'Compumundo' },
+            },
+          },
+        }),
+      ];
+
+      const viewer = await exportXlsx('role=VIEWER');
+      expect(headerOf(viewer)).toBe(
+        assetInventoryCsvHeader({ includePurchase: false }),
+      );
+      const [newest, oldest] = xlsxRecords(viewer);
+      expect(newest.name).toMatchObject({
+        type: 'inlineStr',
+        value: 'Laptop 2',
+      });
+      expect(newest.purchaseCost).toEqual({
+        ref: 'P2',
+        style: XLSX_STYLE.money,
+        type: 'n',
+        value: '1500.50',
+      });
+      expect(newest.purchaseCurrency.value).toBe('USD');
+      // 2026-01-15 is a date-only value; createdAt keeps its time.
+      expect(newest.purchaseDate).toMatchObject({
+        style: XLSX_STYLE.date,
+        type: 'n',
+        value: '46037',
+      });
+      expect(newest.createdAt.style).toBe(XLSX_STYLE.dateTime);
+      expect(newest.supplier).toBeUndefined();
+      expect(oldest.notes).toMatchObject({
+        type: 'inlineStr',
+        value: '\n=cmd|/c calc',
+      });
+      expect(oldest.company.value).toBe('＝1+1');
+      expect(viewer.parts['xl/worksheets/sheet1.xml']).not.toContain('lazyit ');
+
+      const member = await exportXlsx('role=MEMBER');
+      expect(headerOf(member)).toBe(
+        assetInventoryCsvHeader({ includePurchase: true }),
+      );
+      expect(xlsxRecords(member)[0].supplier.value).toBe('Compumundo');
+    });
+
+    it('records the format inside the filters of the one audit row', async () => {
+      await exportXlsx('role=VIEWER&status=OPERATIONAL');
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledWith({
+        data: {
+          resource: 'ASSETS',
+          rowCount: 2,
+          filters: { status: 'OPERATIONAL', deleted: 'active', format: 'xlsx' },
+          serviceAccountId: null,
+          actorId: expect.any(String) as unknown,
+        },
+      });
+    });
+
+    it('keeps the cap and the soft-delete gate', async () => {
+      count.mockResolvedValueOnce(DATA_EXPORT_ROW_CAP + 1);
+      await get('/assets/export?format=xlsx&role=VIEWER').expect(422);
+      await get('/assets/export?format=xlsx&role=MEMBER&deleted=only').expect(
+        403,
+      );
+      expect(findMany).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('400 on any other format, before any read or audit row; csv is the default', async () => {
+      for (const bad of ['pdf', 'XLSX', 'xls', '']) {
+        await get(`/assets/export?role=VIEWER&format=${bad}`).expect(400);
+      }
+      await get('/assets/export?role=VIEWER&format=csv&format=xlsx').expect(
+        400,
+      );
+      expect(findMany).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+
+      const csv = await exportCsv('role=VIEWER&format=csv');
+      expect(csv.startsWith('\uFEFF# lazyit ')).toBe(true);
+    });
+
+    it('is not importable: the importer still refuses .xlsx (ADR-0069)', () => {
+      expect(() => detectImportFormat('lazyit-assets-2026-10-22.xlsx')).toThrow(
+        /CSV/,
+      );
     });
   });
 });

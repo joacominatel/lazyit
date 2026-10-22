@@ -3,7 +3,7 @@ title: Supplier
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Supplier
@@ -21,8 +21,8 @@ updated: 2026-10-21
 > decisions while building Phase 1 web). The AI assistant reads and proposes suppliers through
 > `supplier_search`, `supplier_get`, `supplier_create` and `supplier_update` (#1478). Merging a duplicate
 > (#1496): `POST /suppliers/:id/merge` and `GET /suppliers/:id/merge-preview`, **Merge into…** on the supplier
-> page. Yearly totals (#1500, API): `GET /suppliers/:id` carries `yearlyTotals`; the supplier page shows them in a
-> follow-up web change.
+> page. Yearly totals (#1500): `GET /suppliers/:id` carries `yearlyTotals`; the supplier page shows them as *Spend per
+> year* (web, 2026-10-22).
 
 ## Purpose
 

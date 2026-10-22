@@ -45,6 +45,23 @@ function isOperatorObject(value: unknown): value is Row {
   );
 }
 
+/** Resolve Prisma's atomic number operations (`{ increment: n }`) against the row's current values. */
+function applyData(row: Row, data: Row): Row {
+  const out: Row = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      isOperatorObject(value) &&
+      typeof (value as { increment?: unknown }).increment === 'number'
+    ) {
+      out[key] =
+        (row[key] as number) + (value as { increment: number }).increment;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export class FakeOAuthPrisma {
   readonly tables: Record<string, Row[]> = {
     oAuthClient: [],
@@ -54,6 +71,7 @@ export class FakeOAuthPrisma {
     oAuthAuditLog: [],
     aiSettings: [],
     user: [],
+    userSession: [],
   };
 
   readonly oAuthClient = this.model('oAuthClient', {
@@ -93,6 +111,7 @@ export class FakeOAuthPrisma {
   });
   readonly aiSettings = this.model('aiSettings', {});
   readonly user = this.model('user', { deletedAt: null }, true);
+  readonly userSession = this.model('userSession', {});
 
   async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
     const snapshot = Object.entries(this.tables).map(
@@ -294,7 +313,7 @@ export class FakeOAuthPrisma {
             this.matches(table, candidate, where),
           );
           if (!row) throw new Error(`FakeOAuthPrisma: ${table} not found`);
-          Object.assign(row, data, { updatedAt: new Date() });
+          Object.assign(row, applyData(row, data), { updatedAt: new Date() });
           return project({ ...row }, args);
         },
       ),
@@ -304,7 +323,7 @@ export class FakeOAuthPrisma {
             this.matches(table, candidate, where),
           );
           matched.forEach((row) =>
-            Object.assign(row, data, { updatedAt: new Date() }),
+            Object.assign(row, applyData(row, data), { updatedAt: new Date() }),
           );
           return { count: matched.length };
         },

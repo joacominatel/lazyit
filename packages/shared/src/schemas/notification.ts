@@ -109,8 +109,10 @@ import { pageSchema } from "./pagination";
  *   - `mcp.client_connected` — a TARGETED security notice (ADR-0097; docs/ai-assistant/security.md §6.3,
  *     gate G3 "Abuse"): a new external AI agent connection (an OAuth grant or a personal MCP token) was
  *     used on the recipient's account for the first time. Delivered targeted (`recipientUserId` = the
- *     account's owner) and emailed (opt-out-able), because local mode has no MFA and a phished consent
- *     would otherwise go unnoticed. No `entityType` (it deep-links by TYPE to the user's AI connections).
+ *     account's owner) and emailed, because local mode has no MFA and a phished consent would otherwise
+ *     go unnoticed. It is a SECURITY NOTICE (#1699, CEO decision on #1344 Q5): the email IGNORES the
+ *     per-user opt-out (a stored opt-out entry for it is ignored on read), so it reaches the inbox
+ *     whenever outbound email is on. No `entityType` (it deep-links by TYPE to the user's AI connections).
  *     De-duped per connection (`mcp.client_connected:<grantId>`). Metadata is REDACTED (client name or
  *     token label, the connection kind and its scopes — never a token).
  */
@@ -334,12 +336,17 @@ export type NotificationGroupPage = z.infer<typeof NotificationGroupPageSchema>;
  *     render one toggle per emailable type without hardcoding the allowlist (the server is the source of
  *     truth for which types are emailable — the allowlist lives api-side).
  *   - `optedOutTypes`  — the subset this user has currently opted OUT of. A stored value that is no longer
- *     emailable is inert on the send path; the read echoes exactly what is stored.
- * Both arrays contain only known `NotificationType` literals (unknown → 400 via the enum).
+ *     emailable is inert on the send path and still echoed here — except a security notice, which is
+ *     never reported as opted out (see `mandatoryTypes`).
+ *   - `mandatoryTypes` — the emailable types that are SECURITY NOTICES (#1699): always emailed while
+ *     outbound email is on, never opt-out-able. The UI shows them as fixed on. A stored opt-out entry for
+ *     one predates the rule and is ignored on read; the next save drops it. Today: `mcp.client_connected`.
+ * The arrays contain only known `NotificationType` literals (unknown → 400 via the enum).
  */
 export const NotificationEmailPreferencesSchema = z.object({
   emailableTypes: z.array(NotificationTypeSchema),
   optedOutTypes: z.array(NotificationTypeSchema),
+  mandatoryTypes: z.array(NotificationTypeSchema),
 });
 export type NotificationEmailPreferences = z.infer<
   typeof NotificationEmailPreferencesSchema
@@ -350,7 +357,8 @@ export type NotificationEmailPreferences = z.infer<
  * full replacement list (idempotent PUT, not a delta). Each entry must be a known `NotificationType`
  * (unknown literal → 400 here); the API additionally rejects any entry that is not EMAILABLE → 400 (the
  * emailable allowlist lives api-side, so that narrower check cannot be expressed in this shared schema).
- * The API de-duplicates before storing. Keys off the JWT user — the body never carries a user id.
+ * A security notice (`mandatoryTypes`) in the list is dropped rather than refused, so a client that sends
+ * back a legacy opt-out entry is not broken by it (#1699). The API de-duplicates before storing. Keys off the JWT user — the body never carries a user id.
  */
 export const UpdateNotificationEmailPreferencesSchema = z.object({
   optedOutTypes: z.array(NotificationTypeSchema),

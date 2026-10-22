@@ -30,7 +30,9 @@ account. Everyone can open it; it shows only what applies to you:
   a **Change password** shortcut on local-account instances, and a sign-out button. On local accounts it
   reads **Sign out on all devices**, because signing out already ends every session you have (see
   [Signing in and out](#signing-in-and-out)), and below it **Your sessions** lists every device you are
-  signed in on so you can end just one (see [Your sessions](#your-sessions)).
+  signed in on so you can end just one (see [Your sessions](#your-sessions)). Every account also has
+  **Sign out everywhere and disconnect AI apps**, which signs you out *and* cuts off your AI apps and
+  personal tokens (see [Sign out everywhere and disconnect AI apps](#sign-out-everywhere-and-disconnect-ai-apps)).
 - **Preferences** — your **language** and **theme** (light, dark or follow your device). See
   [Your language and theme on every device](#your-language-and-theme-on-every-device).
 
@@ -107,6 +109,32 @@ If your instance uses **local accounts** (a lazyit email/username and password):
 > **On single sign-on (SSO)**, there is no **Keep me signed in** box — how long you stay signed in is
 > governed by your identity provider, and signing out ends your session in this browser.
 
+Signing out — on every device or just this one — **does not disconnect your AI apps or personal
+tokens**. They belong to your account, not to a browser session. To cut those off too, use the action
+below.
+
+### Sign out everywhere and disconnect AI apps
+
+**Account → Password & sessions → Sign out everywhere and disconnect AI apps** is the one button for
+"someone else may be using my account". lazyit asks you to confirm first, because it can't be undone.
+Then, all at once:
+
+- **Every session ends** — this browser, your other computers and your phone, including sessions kept
+  with **Keep me signed in** — and you land on the sign-in screen.
+- **Every connected AI app and personal token stops working** and disappears from
+  [Connected apps](/help/ai-assistant-connected-apps). To use one again, connect it again (approve the
+  app, or create a new token).
+- Anything the AI assistant was doing for you in the chat stops.
+
+Your password is **not** changed. If you think someone knows it, change it too (local accounts) — see
+[Changing your password](#changing-your-password).
+
+It works on single sign-on too: you are signed out of lazyit in this browser and every AI app and
+personal token is disconnected. Your sign-in provider manages your sessions on other devices, so sign out
+there as well if you need to.
+
+The plain **Sign out** is unchanged: it ends your sessions and leaves your AI apps connected.
+
 ### Your sessions
 
 On local-account instances, **Account → Password & sessions** lists **Your sessions**: every device
@@ -125,7 +153,9 @@ use **Sign out on all devices**.
 > **Ending a session is not enough for a lost or stolen device.** It only signs that device out of
 > lazyit in the browser. If a device was lost or stolen, **change your password** instead: that signs out
 > every device and also disconnects your AI apps and personal tokens (see
-> [Connected apps](/help/ai-assistant-connected-apps)).
+> [Connected apps](/help/ai-assistant-connected-apps)). On single sign-on, use
+> [Sign out everywhere and disconnect AI apps](#sign-out-everywhere-and-disconnect-ai-apps) and change your
+> password at your sign-in provider.
 
 If you signed in on this device **before your instance was updated** to list sessions, you see one entry
 reading *This device — signed in before the update*. It cannot be ended on its own: **Sign out on all

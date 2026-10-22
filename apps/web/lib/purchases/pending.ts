@@ -3,7 +3,7 @@
  * returns the lines oldest purchase first; these helpers only group, total and flag them.
  */
 
-import type { PendingPurchaseLine } from "@lazyit/shared";
+import type { PendingPurchaseLine, PendingPurchaseSummary } from "@lazyit/shared";
 
 /** One purchase's block in the Pending units view: its header and its pending lines, in API order. */
 export interface PendingGroup {
@@ -114,4 +114,42 @@ export async function collectPages<T>(
 export function localToday(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** The dashboard's *Pending deliveries* row (#1498), or `null` when nothing is waiting. */
+export interface PendingDeliveries {
+  purchases: number;
+  units: number;
+  overdue: number;
+  /** The *Pending units* tab — filtered to *Overdue only* when some purchase is overdue. */
+  href: string;
+}
+
+/**
+ * The *Needs attention* row from `GET /purchase-orders/pending-summary` (#1498): shown only while some
+ * purchase waits for units; it opens *Pending units*, already on *Overdue only* (`?overdue=1`) when any of
+ * them is overdue, because that is the part that needs a nudge.
+ */
+export function pendingDeliveries(summary: PendingPurchaseSummary | undefined): PendingDeliveries | null {
+  if (!summary || summary.purchases <= 0) return null;
+  const overdue = Math.max(summary.overduePurchases, 0);
+  return {
+    purchases: summary.purchases,
+    units: summary.units,
+    overdue,
+    href: overdue > 0 ? `${PENDING_UNITS_PATH}?${OVERDUE_PARAM}=1` : PENDING_UNITS_PATH,
+  };
+}
+
+/** The *Pending units* tab. */
+export const PENDING_UNITS_PATH = "/purchases/pending";
+/** Its *Overdue only* URL param: `?overdue=1` (#1503). */
+export const OVERDUE_PARAM = "overdue";
+
+/**
+ * `expectedBefore` for the pending reads (#1503): the viewer's today when *Overdue only* is on, else nothing
+ * (every pending line). The same day {@link isOverdue} flags on screen, so the list and the flag agree.
+ */
+export function overdueExpectedBefore(overdueOnly: boolean, today: string): string | undefined {
+  return overdueOnly ? today : undefined;
 }
