@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # AccessRequest
@@ -62,6 +62,12 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   **deciding** reuses `accessGrant:grant` (no new verb); both approve/deny are **human-only**. Listing all
   requests needs `accessRequest:read` (ADMIN+MEMBER), but a requester always sees their **own** via
   `GET /access-requests/mine`. → [[0046-roles-permissions-v2]].
+- **The requester sees whether their account was set up (#1700).** On `GET /access-requests/mine` each
+  request carries `provisioning`: for an APPROVED request, the coarse status of the grant it created
+  (`NONE`, `IN_PROGRESS`, `DONE`, `WAITING_ON_IT`, mapped from that grant's latest provisioning run);
+  `null` for a PENDING or DENIED request. Computed for the whole page in one batched read, never on the
+  estate-wide `GET /access-requests`, and with no workflow detail. The mapping is in
+  [[access-grant#Provisioning status]].
 - **Self-approval is allowed (CEO 2026-09-25, #1344).** A decider holding `accessGrant:grant` may approve
   or deny their **own** request: the route does not block it and the web UI adds no warning. The AI
   assistant's approval card only states the fact ("You are deciding your own request."), without a

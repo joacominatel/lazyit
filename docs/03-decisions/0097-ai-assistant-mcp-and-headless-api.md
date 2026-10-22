@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-21
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -704,8 +704,10 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 
 - Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17). *Decided
   2026-10-21: disabled workflows only, decision 3 as amended (#1688).*
-- Requester-facing provisioning status; whether an admin may approve their own access request; deferred
-  tool loading now that the catalog passes ~60 tools.
+- ~~Requester-facing provisioning status~~ **Done in #1700** (CEO Q2): a coarse `provisioning` value
+  on the caller's own `/mine` grant and request reads, derived from the latest provisioning run
+  ([[access-grant#Provisioning status]]); run history stays `workflow:read`. Whether an admin may
+  approve their own access request; deferred tool loading now that the catalog passes ~60 tools.
 - A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
   sessions* option does).
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
