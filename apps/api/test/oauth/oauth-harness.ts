@@ -78,7 +78,7 @@ export function buildHarness(): Harness {
       throw new Error('network disabled in tests');
     },
   };
-  const stepUp = new PasswordStepUpVerifier(credentials as any);
+  const stepUp = new PasswordStepUpVerifier(credentials as any, db);
   const authorization = new AuthorizationService(
     db,
     policy,

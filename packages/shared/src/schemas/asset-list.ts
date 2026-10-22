@@ -44,8 +44,12 @@ const AssetListLocationSchema = z.object({
  * Trimmed owner ([[user]]) for an active assignment — identity only, no IdP fields. `deletedAt` is
  * carried so the list can dim a departed (soft-deleted) owner's avatar, matching the detail read
  * (re-added per the ADR-0030 amendment, 2026-06-01 — it was dropped in Round 1).
+ *
+ * Also the response of the self-service `POST /asset-assignments/:id/acknowledge` (#1518): the same
+ * shape the `GET /assets/mine` self-read inlines, so that route never returns the admin-side columns
+ * (`notes`, who assigned or released the device).
  */
-const AssetListAssignmentSchema = z.object({
+export const AssetListAssignmentSchema = z.object({
   id: z.cuid(),
   userId: z.uuid(),
   user: z.object({
@@ -72,5 +76,6 @@ export const AssetListItemSchema = AssetListCoreSchema.extend({
 /** The paginated `GET /assets` envelope: `{ items: AssetListItem[], total, limit, offset }`. */
 export const AssetListPageSchema = pageSchema(AssetListItemSchema);
 
+export type AssetListAssignment = z.infer<typeof AssetListAssignmentSchema>;
 export type AssetListItem = z.infer<typeof AssetListItemSchema>;
 export type AssetListPage = z.infer<typeof AssetListPageSchema>;

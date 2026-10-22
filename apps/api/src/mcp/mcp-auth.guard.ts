@@ -16,7 +16,7 @@ import {
   type AiToolClass,
 } from '@lazyit/shared';
 import type { Request, Response } from 'express';
-import type { User } from '../../generated/prisma/client';
+import type { UserRow } from '../prisma/prisma-omit';
 import {
   AI_REFUSED_SA_PERMISSION,
   AiRunPrincipals,
@@ -36,7 +36,7 @@ import { McpRateLimiter } from './mcp-rate-limit';
 export type McpRequest = Request & {
   auth?: ReturnType<typeof toAuthInfo>;
   mcpCaller?: McpCaller;
-  user?: User;
+  user?: UserRow;
 };
 
 /** The scopes a client should ask for, advertised in the 401 challenge (RFC 6750 §3). */
@@ -157,7 +157,7 @@ export class McpAuthGuard implements CanActivate {
       );
     }
 
-    let verified: { caller: McpCaller; expiresAt?: Date; user?: User };
+    let verified: { caller: McpCaller; expiresAt?: Date; user?: UserRow };
     try {
       verified = await this.verify(bearer, config);
     } catch (err) {
@@ -193,7 +193,7 @@ export class McpAuthGuard implements CanActivate {
   private async verify(
     bearer: string,
     config: OAuthServerConfig | null,
-  ): Promise<{ caller: McpCaller; expiresAt?: Date; user?: User }> {
+  ): Promise<{ caller: McpCaller; expiresAt?: Date; user?: UserRow }> {
     if (bearer.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) {
       if (!config) {
         throw new McpAuthRefusal(

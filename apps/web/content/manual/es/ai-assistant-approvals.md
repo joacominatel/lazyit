@@ -27,7 +27,11 @@ De arriba abajo:
    inicio de sesión y configuración de toda la instancia — y un sello de estado (**Pendiente**,
    **Hecho**, **Rechazado**…).
 2. **Qué va a pasar**, en una frase — por ejemplo *"Dar a Ana Ruiz acceso Admin a VPN. Esto dispara el
-   aprovisionamiento automático mediante el workflow configurado para VPN."*
+   aprovisionamiento automático mediante el workflow configurado para VPN."* Las palabras que escribió el
+   propio asistente — el nombre de algo que está creando, un nivel de acceso que eligió — aparecen entre
+   comillas dentro de un recuadro sombreado, para que las distingas de los nombres que lazyit leyó de sus
+   registros. En la frase se muestran en una sola línea y recortadas si son largas; el valor completo está
+   en las filas **Antes → después**.
 3. **Se aplica a** — el elemento que cambia, con un enlace.
 4. **Antes → después** — cada campo que cambia. Valores como contraseñas aparecen como **Oculto**.
 5. **También afecta** — otros elementos que toca el cambio, como "También afecta a 3 asignaciones".

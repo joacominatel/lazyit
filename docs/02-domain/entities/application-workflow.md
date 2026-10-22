@@ -3,7 +3,7 @@ title: ApplicationWorkflow
 tags: [domain, entity, workflow-engine, access]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-21
 ---
 
 # ApplicationWorkflow
@@ -56,6 +56,12 @@ indexed lookup of overhead, and nothing fires (`WorkflowTriggerService.planForTr
   Version authoring takes the same row lock. Omitted = the unconditioned write (existing clients
   unchanged). The web list toggle and the AI `workflow_set_enabled` tool send it; the builder does not
   (it authors its own version on save).
+- **Enabled-state precondition** (#1688). `PATCH` also takes an optional `expectedEnabled` — the
+  `enabled` value the caller checked. When present, it is checked under the same row lock and a
+  mismatch is a **`409`**; it never writes `enabled` (that is the `enabled` field). The AI
+  `workflow_update` tool sends it, so over MCP — where a workflow may be changed only while it is
+  disabled (ADR-0097 decision 3 as amended 2026-10-21) — a workflow enabled meanwhile is refused.
+  Omitted = no check.
 - **The binding has no creator column.** Author attribution lives on each [[workflow-version]]
   (human-XOR-SA) — the [[article]] / [[article-version]] split.
 - **v1 triggers only.** A workflow may be **created** against `ACCESS_GRANTED` / `ACCESS_REVOKED`
@@ -114,7 +120,7 @@ ADMIN-only in the seed ([[0046-roles-permissions-v2]]):
   `@RequirePermission('workflow:read')`.
 - `POST /workflows` — create a binding (disabled by default). `@RequirePermission('workflow:manage')`.
 - `PATCH /workflows/:id` — edit the mutable fields (trigger/app immutable); optional `expectedVersion`
-  → `409` on mismatch. `workflow:manage`.
+  and `expectedEnabled` preconditions → `409` on mismatch. `workflow:manage`.
 - `DELETE /workflows/:id` — soft delete. `workflow:manage`.
 - `POST /workflows/:id/versions` — author a new immutable [[workflow-version]] (validates the step
   graph + connection refs). `workflow:manage`.

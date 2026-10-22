@@ -1,5 +1,5 @@
 import type { AiActionPreview, AiPreviewValueKind } from "@lazyit/shared";
-import { localizedText, type SentenceRenderer } from "./sentences";
+import { localizedText, type RenderedSentence, type SentenceRenderer } from "./sentences";
 import { stripUntrusted } from "./untrusted-text";
 
 /**
@@ -36,8 +36,11 @@ export interface PreviewRow {
 }
 
 export interface PreviewModel {
-  /** The plain-language sentence of the `action` row, shown first. */
-  action: { text: string; untrusted: boolean } | null;
+  /**
+   * The plain-language sentence of the `action` row, shown first. `segments` (#1687) marks the values the
+   * model supplied, which the card shows distinct from database names; absent on the English fallback.
+   */
+  action: RenderedSentence | null;
   rows: PreviewRow[];
   /** Flags the card states as a notice rather than a field row (see {@link PREVIEW_NOTICE_FIELDS}). */
   notices: PreviewNotice[];

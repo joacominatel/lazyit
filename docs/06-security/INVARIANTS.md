@@ -1098,15 +1098,32 @@ route cannot be bound). Tests: `ai/core/boot-validation.spec.ts`, `ai/core/tool-
 
 ## INV-AI-15 — No unattended outbound integration
 
-**Rule.** A workflow, a workflow version or a workflow connection is created, changed, tested or enabled
-by the AI only through a chat approval by a human. No Service Account and no MCP client does it. MCP and
-headless refuse every write on a critical application (`AI_CHANNEL_REFUSED_WARNINGS`).
+**Rule.** No outbound integration becomes or stays live through the AI without a chat approval by a
+human. A workflow connection is created, changed or tested, a workflow is enabled, disabled or archived,
+and a version is authored on an **enabled** workflow only through the chat. No Service Account does any of
+it, on any channel (MCP included). A person's MCP client holding `lazyit.admin` may create a workflow (always disabled), and change it or author
+its versions, only while it is **disabled** — checked at execute, under the workflow row lock. MCP and
+headless refuse every write on a critical application and every write carrying `OUTBOUND_INTEGRATION`
+(`AI_CHANNEL_REFUSED_WARNINGS`). *Amended 2026-10-21 (#1688; CEO decision Q1 on #1344; ADR-0097 decision
+3 as amended): before, no MCP client authored at all.*
 
-**Where enforced.** `ai/tools/workflow-authoring.tools.ts` — all nine authoring tools declare
-`channels: ['CHAT']` (`:781` … `:2073`) and re-check chat + human in `preview` and `run`
-(`assertChatHuman`, `:229`); `ai/core/ai-tool.service.ts:216` (`invoke` on another channel) and
-`:271-283` (`propose`); `ai/core/pending-action.ts:116-160` (`assertChannelAllows`). Tests:
-`ai/tools/workflow-authoring.tools.spec.ts`, `ai/core/pending-action.spec.ts`, `ai/tools/access.tools.spec.ts`.
+**Where enforced.** `ai/tools/workflow-authoring.tools.ts` — `workflow_create`, `workflow_update` and
+`workflow_author_version` declare `channels: ['CHAT', 'MCP']` (`CHAT_AND_MCP`), the six others
+`channels: ['CHAT']`; every authoring tool is `humanOnly: true`, so core (`ai/core/ai-tool.service.ts`
+`list`, `invoke`, `writeDenial`; `ai/core/boot-validation.ts` derives `principalKinds.service = false`)
+never lists it to or runs it for a Service Account, refusing before any invocation row or ledger event;
+every tool re-checks a human on its channels in `run` (`assertHumanOn` via
+`assertMayRun`) and the chat in `preview` (`assertChatHuman`); `assertDisabledOverMcp` refuses a header
+change on an enabled workflow over MCP; `workflow_author_version` calls `assertChannelAllows` with
+`OUTBOUND_INTEGRATION` when the workflow is enabled; both send `expectedEnabled`, which
+`workflow-engine/definitions/workflows.service.ts` (`lockWorkflowAndAssertLatest`) checks under
+`SELECT … FOR UPDATE` and answers 409 on mismatch. `ai/core/ai-tool.service.ts` (`invoke` on another
+channel, `propose` chat-only); `ai/core/pending-action.ts` (`AI_CHANNEL_REFUSED_WARNINGS`,
+`assertChannelAllows`). Tests: `ai/tools/workflow-authoring.tools.spec.ts` (the MCP describe: listing,
+allowed on disabled, refused on enabled, chat-only tools refused, a Service Account over MCP refused
+with nothing recorded, the race at execute, the chat path),
+`workflow-engine/definitions/workflows.service.spec.ts` (`expectedEnabled` under the lock),
+`ai/core/pending-action.spec.ts`, `ai/tools/access.tools.spec.ts`.
 
 ## INV-AI-16 — Workflow secrets are reference-only
 
@@ -1122,9 +1139,12 @@ Test: `ai/tools/workflow-authoring.tools.spec.ts`.
 **Rule.** Over headless, a Service Account gets the workflow reads, run retry and replay, and the
 resolution of **unassigned** manual tasks. It never authors a workflow or a version, never creates,
 changes, tests or archives a connection, and never enables or disables a workflow — a CEO decision
-(#1344), permanent, whatever MCP authoring later becomes.
+(#1344), permanent, whatever MCP authoring later becomes — unchanged by the 2026-10-21 MCP amendment
+(#1688): no authoring tool lists `HEADLESS`, and none is available to a Service Account over MCP
+either.
 
-**Where enforced.** The `CHAT`-only channels above; `ai/tools/workflows.tools.ts:1403-1407` (the route's
+**Where enforced.** The channels above (`CHAT`, or `CHAT` + `MCP`; never `HEADLESS`) and `humanOnly` on
+every authoring tool (a Service Account is refused on every channel, before anything is recorded); `ai/tools/workflows.tools.ts:1403-1407` (the route's
 assignee guard: an SA has no user id, so only an unassigned task passes). Tests:
 `ai/tools/workflows.tools.spec.ts`, `ai/tools/workflow-authoring.tools.spec.ts`.
 

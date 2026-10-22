@@ -112,3 +112,4 @@ tells you what it costs you.
 | 0102 | Remove the bundled Zitadel IdP; generic OIDC (BYOI) stays opt-in | accepted |
 | 0103 | Data export — one server-side streaming path per list | accepted |
 | 0104 | Custom roles — a roles table with protected system roles (build deferred) | accepted |
+| 0105 | Client-level Prisma omit for secret and gated columns | accepted |

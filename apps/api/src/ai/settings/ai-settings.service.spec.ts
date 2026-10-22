@@ -21,6 +21,7 @@ import {
   EnvelopeKeyMissingError,
 } from '../../common/crypto/envelope-cipher';
 import type { PrismaService } from '../../prisma/prisma.service';
+import { withGlobalOmit } from '../../../test/prisma/global-omit';
 import { withProviderOverride } from './ai-provider-override';
 import {
   AI_CONFIG_AUDIT_ACTIONS,
@@ -221,7 +222,8 @@ function setup(
     env,
   );
   const service = new AiSettingsService(
-    prisma as unknown as PrismaService,
+    // Answers like the real client: the key envelope is globally omitted unless a read opts in (ADR-0105).
+    withGlobalOmit(prisma) as unknown as PrismaService,
     cipher,
     tester as never,
   );
