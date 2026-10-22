@@ -7,6 +7,8 @@ import { InfraReportRateLimitGuard } from './infra-report-rate-limit.guard';
 import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { AgentPolicyService } from './agent-policy.service';
 import { AgentFleetService } from './agent-fleet.service';
+import { SoftwareWatchService } from './software-watch.service';
+import { SoftwareWatchController } from './software-watch.controller';
 import { AssetsModule } from '../assets/assets.module';
 import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
@@ -37,7 +39,9 @@ import { ExportModule } from '../common/export';
     NotificationsModule,
     ExportModule,
   ],
-  controllers: [InfraController],
+  // SoftwareWatchController: the software watchlist (#1684) under `/infra/software-watches` — its own
+  // controller so InfraController (and InfraService) stay untouched by a read-model feature.
+  controllers: [InfraController, SoftwareWatchController],
   // InfraAgentStalenessSweeper: the periodic OFFLINE flip for stale agent nodes (ADR-0074 §4) — same
   // self-scheduled `setInterval` pattern as the other sweepers (no @nestjs/schedule dep).
   // InfraReportRateLimitGuard: the per-service-account throttle on POST /infra/report (#1134).
@@ -63,6 +67,10 @@ import { ExportModule } from '../common/export';
     InfraNodeEnrollmentLimiter,
     AgentPolicyService,
     AgentFleetService,
+    // SoftwareWatchService: the #1684 watchlist — CRUD on the watch list, and the per-watch distribution
+    // computed on read from the package lists agents already store. Stateless; reads AgentPolicyService
+    // for the instance-default exclusion globs.
+    SoftwareWatchService,
   ],
   exports: [InfraService, AgentFleetService],
 })

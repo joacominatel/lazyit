@@ -614,6 +614,7 @@
         "description": "Esta actualización tiene efectos que conviene confirmar. Revísalos y luego guarda.",
         "grantsHeading": "Acceso de nivel administrador otorgado",
         "removalsHeading": "Acceso eliminado",
+        "impliedReadsHeading": "Vista añadida para acompañar una edición",
         "keepEditing": "Seguir editando",
         "saveChanges": "Guardar cambios"
       },
@@ -625,6 +626,8 @@
       },
       "consequence": {
         "removedRead": "{who} ya no podrán {action}.",
+        "removedDependent": "{who} tampoco podrán {action}: necesita la vista que se quita.",
+        "impliedRead": "{who} también podrán {action}: ya pueden modificarlo, y modificar algo requiere poder verlo.",
         "accessGrantGrant": "{who} podrán otorgar y revocar el acceso a aplicaciones para cualquiera — incluso a aplicaciones sensibles. Normalmente esta es una acción exclusiva de administradores.",
         "userManage": "{who} podrán administrar usuarios con un rol igual o inferior al suyo: crear cuentas, cambiar roles hasta el suyo y dar de baja a personas. Solo un administrador gestiona administradores. Normalmente esta es una acción exclusiva de administradores.",
         "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos, la conexión del directorio y la configuración de correo (SMTP) sigue siendo exclusivo de administradores, y las cuentas de servicio que gestionen solo pueden tener permisos que su propio rol tiene, salvo reportar inventario. Normalmente esta es una acción exclusiva de administradores.",

@@ -63,6 +63,25 @@ through.
 
 Admin itself is the one thing you can never edit: the matrix cannot grant, revoke or scope Admin.
 
+## Changing something means seeing it
+
+A role that can change, delete or manage something must also be able to **see** it. The matrix keeps
+the two together for you:
+
+- **Ticking an edit ticks its view.** Granting *Add & edit assets* also grants *View assets*; granting
+  *Administer users* also grants *View the user directory*. This works the same in the matrix and in
+  Fine-tune.
+- **Clearing a view clears what needs it.** If you remove *View assets* from a role, its asset edit and
+  delete permissions go too. The save then shows the usual confirmation, which lists both the view and
+  the permissions that went with it, so nothing disappears without you seeing it.
+- **A few permissions stand on their own**: *Request access to applications* (anyone can ask, and sees
+  their own requests without the estate-wide list), the reporting agent's *Report server inventory*, the
+  service-account-only *Fetch secrets programmatically*, *Run imports* and the two AI permissions.
+
+If a role was saved before this rule existed and holds an edit without its view, the next save adds the
+missing view — it never takes the edit away — and the confirmation tells you which views it adds.
+Adding a view lets everyone in that role see that area.
+
 ## What saving does
 
 Your edits to both roles are held together until you save. The bar under the matrix counts them —

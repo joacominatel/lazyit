@@ -3,6 +3,7 @@
 import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
+  EyeIcon,
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
@@ -22,7 +23,7 @@ import type { SaveDiff } from "../_lib/permissions-form";
 interface ConsequentialConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The save diff to explain (removed reads + above-tier grants). */
+  /** The save diff to explain (removed reads and what needed them, implied reads, above-tier grants). */
   diff: SaveDiff;
   /** Confirms the save; resolves on success, rejects on error. The dialog owns the spinner; the
    * caller owns the toast + closing on success. */
@@ -51,7 +52,9 @@ export function ConsequentialConfirmDialog({
 }: ConsequentialConfirmDialogProps) {
   const t = useTranslations("settings");
   const hasGrants = diff.aboveTierGrants.length > 0;
-  const hasRemovals = diff.removedReads.length > 0;
+  const hasRemovals =
+    diff.removedReads.length > 0 || diff.removedDependents.length > 0;
+  const hasImpliedReads = diff.impliedReads.length > 0;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -94,11 +97,28 @@ export function ConsequentialConfirmDialog({
                 {t("roles.permissions.confirm.removalsHeading")}
               </h3>
               <ul className="space-y-1.5 rounded-md border bg-muted/40 p-3">
-                {diff.removedReads.map((c) => (
+                {[...diff.removedReads, ...diff.removedDependents].map((c) => (
                   <li
-                    key={c.permission}
+                    key={c.message}
                     className="text-sm text-foreground/90"
                   >
+                    {c.message}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Write implies read (#1518): reads this save adds because a kept permission needs them. */}
+          {hasImpliedReads && (
+            <section className="space-y-2">
+              <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <EyeIcon className="size-4" />
+                {t("roles.permissions.confirm.impliedReadsHeading")}
+              </h3>
+              <ul className="space-y-1.5 rounded-md border bg-muted/40 p-3">
+                {diff.impliedReads.map((c) => (
+                  <li key={c.message} className="text-sm text-foreground/90">
                     {c.message}
                   </li>
                 ))}

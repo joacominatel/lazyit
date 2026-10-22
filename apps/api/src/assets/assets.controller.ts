@@ -31,6 +31,7 @@ import {
   AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
+  AssetAcquiredWindowQuerySchema,
   AssetWarrantyFilterSchema,
   AssetWithRelationsSchema,
   BatchAssetStatusSchema,
@@ -203,6 +204,18 @@ export class AssetsController {
       'Exact (case-sensitive) serial numbers, comma-separated, at most 200 (#1387). A value cannot contain a comma. Over 200 → 400.',
   })
   @ApiQuery({
+    name: 'acquiredFrom',
+    required: false,
+    description:
+      'Acquisition-date window start (#1503), ISO datetime, inclusive: the purchase date, or the creation date when the asset has none. Invalid, or after acquiredTo → 400.',
+  })
+  @ApiQuery({
+    name: 'acquiredTo',
+    required: false,
+    description:
+      'Acquisition-date window end (#1503), ISO datetime, inclusive (see acquiredFrom).',
+  })
+  @ApiQuery({
     name: 'purchaseOrderLineId',
     required: false,
     description:
@@ -253,6 +266,8 @@ export class AssetsController {
     @Query('purchaseLinked') purchaseLinked?: string,
     @CurrentPrincipal() principal?: Principal,
     @Query('statusLabelId') statusLabelId?: string,
+    @Query('acquiredFrom') acquiredFrom?: string,
+    @Query('acquiredTo') acquiredTo?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -279,6 +294,8 @@ export class AssetsController {
         warranty,
         assetTags,
         serials,
+        acquiredFrom,
+        acquiredTo,
       }),
     };
     filters.purchase = await this.parsePurchaseFilters(
@@ -338,7 +355,19 @@ export class AssetsController {
     /** Exact values, comma-separated (#1387). */
     assetTags?: string;
     serials?: string;
+    /** The acquisition window (#1503), ISO datetimes. */
+    acquiredFrom?: string;
+    acquiredTo?: string;
   }) {
+    const window = AssetAcquiredWindowQuerySchema.safeParse({
+      acquiredFrom: raw.acquiredFrom || undefined,
+      acquiredTo: raw.acquiredTo || undefined,
+    });
+    if (!window.success) {
+      throw new BadRequestException(
+        'Invalid acquiredFrom / acquiredTo: ISO datetimes, acquiredFrom not after acquiredTo',
+      );
+    }
     let parsedStatus: AssetStatus | undefined;
     if (raw.status !== undefined) {
       const result = AssetStatusSchema.safeParse(raw.status);
@@ -384,6 +413,8 @@ export class AssetsController {
       warranty: parsedWarranty,
       assetTags: parseExactValuesQuery(raw.assetTags, 'assetTags'),
       serials: parseExactValuesQuery(raw.serials, 'serials'),
+      acquiredFrom: window.data.acquiredFrom,
+      acquiredTo: window.data.acquiredTo,
     };
   }
 
@@ -427,6 +458,8 @@ export class AssetsController {
   })
   @ApiQuery({ name: 'assetTags', required: false })
   @ApiQuery({ name: 'serials', required: false })
+  @ApiQuery({ name: 'acquiredFrom', required: false })
+  @ApiQuery({ name: 'acquiredTo', required: false })
   @ApiQuery({
     name: 'purchaseOrderLineId',
     required: false,
@@ -473,6 +506,8 @@ export class AssetsController {
     @Query('purchaseOrderLineId') purchaseOrderLineId?: string,
     @Query('purchaseOrderId') purchaseOrderId?: string,
     @Query('purchaseLinked') purchaseLinked?: string,
+    @Query('acquiredFrom') acquiredFrom?: string,
+    @Query('acquiredTo') acquiredTo?: string,
   ): Promise<StreamableFile> {
     const filters: AssetFilters = this.parseAssetFilters({
       categoryId,
@@ -487,6 +522,8 @@ export class AssetsController {
       warranty,
       assetTags,
       serials,
+      acquiredFrom,
+      acquiredTo,
     });
     // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).

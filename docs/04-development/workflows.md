@@ -3,7 +3,7 @@ title: Development Workflows
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-22
 ---
 
 # Development Workflows
@@ -50,8 +50,20 @@ Policy in [[0012-testing-strategy]]: unit tests always; core/complex logic thoro
 
 - **API (`apps/api`):** Jest (`bun run test` → `jest`). Why Jest and not `bun test`:
   [[code-conventions]], [[0009-bun-first-vs-app-stack]].
-- **Shared / scripts:** `bun test`.
-- **Frontend / e2e:** deferred — no runner chosen yet.
+- **Shared, web, agent:** `bun test --isolate` — what each workspace's `bun run test` runs, and
+  what CI runs. Run the bare `bun test` only for a quick single-file check.
+- **Postgres-backed API suite** (`apps/api/test/*.db.spec.ts`): `bun run test:db` with `DB_TEST_URL`
+  pointing at a **throwaway**, migrated database (`prisma migrate deploy` first) — it wipes the
+  notification tables. CI runs it against `compose.yaml`'s `db` ([[0027-ci-pipeline]]).
+- **Frontend component / e2e:** deferred — no runner chosen yet.
+
+**Rely on isolation, or restore what you stub.** `mock.module(...)` lasts for the rest of the
+process and cannot be undone, so without isolation a stub leaks into every test file that runs after
+it and a result depends on file order (which differs between macOS and Linux). `--isolate` gives each
+file a fresh global and module registry, so a file may stub a module without restoring it. Isolation
+is per **file**: tests inside one file still share module state, so keep a file's own tests
+independent of each other or deliberately sequential. Existing `afterAll` restores stay — they are
+harmless and keep a file correct if it is ever run without the flag (#1318).
 
 ## Git
 

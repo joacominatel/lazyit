@@ -3,7 +3,7 @@ title: "ADR-0056: In-app notification bell — append-only Notification + per-ad
 tags: [adr, notifications, frontend, rbac, workflow-engine, data-model]
 status: accepted
 created: 2026-06-09
-updated: 2026-10-17
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -565,8 +565,9 @@ counting what has no read join.
 
 The grouping SQL runs against a real Postgres in `apps/api/test/notifications-groups.db.spec.ts`
 (`bun run test:db`, which needs `DB_TEST_URL` pointing at a throwaway, migrated database and fails
-without it). It is not yet a CI job. The unit suite covers the routes, validation and authorization; the
-shared tests cover the contract.
+without it). CI runs it in the `verify` job against `compose.yaml`'s pinned Postgres after
+`prisma migrate deploy` (#1656, [[0027-ci-pipeline]]). The unit suite covers the routes, validation and
+authorization; the shared tests cover the contract.
 
 ### Amendment consequences
 
