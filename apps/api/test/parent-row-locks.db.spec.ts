@@ -13,6 +13,7 @@ import { ConsumablesService } from '../src/consumables/consumables.service';
 import { AssetModelsService } from '../src/asset-models/asset-models.service';
 import { AssetCategoriesService } from '../src/asset-categories/asset-categories.service';
 import { PurchaseOrdersService } from '../src/purchase-orders/purchase-orders.service';
+import { PurchaseReceivingService } from '../src/purchase-orders/purchase-receiving.service';
 import type { SearchService } from '../src/search/search.service';
 import type { AssetTagSchemeService } from '../src/asset-tag-scheme/asset-tag-scheme.service';
 import type { PermissionResolverService } from '../src/auth/permission-resolver.service';
@@ -54,6 +55,7 @@ describe('parent row locks against Postgres (#1604)', () => {
   let models: AssetModelsService;
   let assetCategories: AssetCategoriesService;
   let purchases: PurchaseOrdersService;
+  let receiving: PurchaseReceivingService;
   let seq = 0;
   const name = (what: string) => `${TAG}-${what}-${++seq}-${Date.now()}`;
 
@@ -166,6 +168,14 @@ describe('parent row locks against Postgres (#1604)', () => {
     models = new AssetModelsService(prisma, actor, history, permissions);
     assetCategories = new AssetCategoriesService(prisma, permissions);
     purchases = new PurchaseOrdersService(prisma, actor);
+    receiving = new PurchaseReceivingService(
+      prisma,
+      actor,
+      history,
+      assets,
+      purchases,
+      consumables,
+    );
   });
 
   afterAll(async () => {
@@ -443,6 +453,197 @@ describe('parent row locks against Postgres (#1604)', () => {
         where: { id: m.id },
       });
       expect(row.categoryId).toBeNull();
+    });
+  });
+
+  // --- lock order: a write and a delete that touch the same rows never cross (40P01) -----------------------
+
+  describe('lock order: the delete never deadlocks with a write over the same rows (#1604 review, #1696)', () => {
+    /** Count the backends waiting on a lock in this database. */
+    const waiters = async (n: number): Promise<void> => {
+      for (let i = 0; i < 200; i++) {
+        const [{ c }] = await prisma.$queryRaw<{ c: number }[]>`
+          SELECT count(*)::int AS c FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (c >= n) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error(`fewer than ${n} backends waiting on a lock`);
+    };
+
+    /**
+     * Hold `table`.`id` FOR UPDATE so the two calls queue behind it in a fixed order — `first` waits first,
+     * then `second` — then release it, and return how each ended.
+     */
+    const queued = async <A, B>(
+      table: 'assets' | 'purchase_orders',
+      id: string,
+      first: () => Promise<A>,
+      second: () => Promise<B>,
+    ) => {
+      const locked = deferred();
+      const release = deferred();
+      const holder = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRawUnsafe(
+            `SELECT "id" FROM "${table}" WHERE "id" = $1 FOR UPDATE`,
+            id,
+          );
+          locked.resolve();
+          await release.promise;
+        },
+        { timeout: 20_000 },
+      );
+      await locked.promise;
+      const a = outcome(first());
+      await waiters(1);
+      const b = outcome(second());
+      await waiters(2);
+      release.resolve();
+      await holder;
+      return Promise.all([a, b]);
+    };
+
+    const expectBothOk = (results: ({ ok: unknown } | { err: unknown })[]) => {
+      for (const result of results) {
+        expect('err' in result ? result.err : 'ok').toBe('ok');
+      }
+    };
+
+    it('an asset moved from the location into its child while the location is deleted: both commit', async () => {
+      const parent = await liveLocation();
+      const child = (
+        await prisma.location.create({
+          data: { name: name('child'), type: 'OFFICE', parentId: parent },
+        })
+      ).id;
+      const a = await assets.create({
+        name: name('a'),
+        status: 'IN_STORAGE',
+        locationId: parent,
+      });
+
+      const results = await queued(
+        'assets',
+        a.id,
+        () => locations.remove(parent, { strategy: 'detach' }),
+        () => assets.update(a.id, { locationId: child }),
+      );
+
+      expectBothOk(results);
+      const row = await prisma.asset.findFirstOrThrow({ where: { id: a.id } });
+      expect(row.locationId).toBe(child);
+    });
+
+    it("a purchase's delivery moved from the location into its child while the location is deleted: both commit", async () => {
+      const parent = await liveLocation();
+      const child = (
+        await prisma.location.create({
+          data: { name: name('child'), type: 'OFFICE', parentId: parent },
+        })
+      ).id;
+      const po = await purchases.create({
+        reference: name('po'),
+        deliveryLocationId: parent,
+      });
+
+      const results = await queued(
+        'purchase_orders',
+        po.id,
+        () => locations.remove(parent, { strategy: 'detach' }),
+        () => purchases.update(po.id, { deliveryLocationId: child }),
+      );
+
+      expectBothOk(results);
+      const row = await prisma.purchaseOrder.findFirstOrThrow({
+        where: { id: po.id },
+      });
+      expect(row.deliveryLocationId).toBe(child);
+    });
+
+    it("a link of the location's asset to its open purchase while the location is deleted: both commit (#1696)", async () => {
+      const loc = await liveLocation();
+      const a = await assets.create({
+        name: name('a'),
+        status: 'IN_STORAGE',
+        locationId: loc,
+      });
+      const po = await purchases.create({
+        reference: name('po'),
+        deliveryLocationId: loc,
+        lines: [{ description: 'Laptop' }],
+      });
+      const lineId = po.lines[0].id;
+
+      // The link takes the purchase first (KEY SHARE), then the asset; the delete must take them in that order.
+      const results = await queued(
+        'purchase_orders',
+        po.id,
+        () => receiving.linkAssets(po.id, lineId, { assetIds: [a.id] }),
+        () => locations.remove(loc, { strategy: 'detach' }),
+      );
+
+      expectBothOk(results);
+      const row = await prisma.asset.findFirstOrThrow({ where: { id: a.id } });
+      expect(row.purchaseOrderLineId).toBe(lineId);
+      expect(row.locationId).toBeNull();
+    });
+
+    it("a link of the model's asset to a line mapped to the model while the model is deleted: both commit", async () => {
+      const model = await models.create({ name: name('m'), manufacturer: TAG });
+      const a = await assets.create({
+        name: name('a'),
+        status: 'IN_STORAGE',
+        modelId: model.id,
+      });
+      const po = await purchases.create({
+        reference: name('po'),
+        lines: [{ description: 'Laptop', assetModelId: model.id }],
+      });
+      const lineId = po.lines[0].id;
+
+      // The link takes the purchase, the asset, then the line (its FK); the model delete must not hold the line
+      // while it waits for the asset.
+      const results = await queued(
+        'assets',
+        a.id,
+        () => receiving.linkAssets(po.id, lineId, { assetIds: [a.id] }),
+        () => models.remove(model.id, { strategy: 'detach' }),
+      );
+
+      expectBothOk(results);
+      const row = await prisma.asset.findFirstOrThrow({ where: { id: a.id } });
+      expect(row.purchaseOrderLineId).toBe(lineId);
+      expect(row.modelId).toBeNull();
+    });
+
+    it('a location delete and a model delete over the same purchase and asset: both commit', async () => {
+      const loc = await liveLocation();
+      const model = await models.create({ name: name('m'), manufacturer: TAG });
+      const a = await assets.create({
+        name: name('a'),
+        status: 'IN_STORAGE',
+        locationId: loc,
+        modelId: model.id,
+      });
+      const po = await purchases.create({
+        reference: name('po'),
+        deliveryLocationId: loc,
+        lines: [{ description: 'Laptop', assetModelId: model.id }],
+      });
+
+      // The location delete queues on the purchase first; the model delete must not take the asset before it.
+      const results = await queued(
+        'purchase_orders',
+        po.id,
+        () => locations.remove(loc, { strategy: 'detach' }),
+        () => models.remove(model.id, { strategy: 'detach' }),
+      );
+
+      expectBothOk(results);
+      const row = await prisma.asset.findFirstOrThrow({ where: { id: a.id } });
+      expect(row.locationId).toBeNull();
+      expect(row.modelId).toBeNull();
     });
   });
 
