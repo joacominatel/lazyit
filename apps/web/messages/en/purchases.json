@@ -412,7 +412,6 @@
       "year": "Year",
       "total": "Total",
       "purchases": "Purchases",
-      "noCurrency": "No currency",
       "tooLarge": "Too large to display",
       "partial": "Partial: {count, plural, one {# line has} other {# lines have}} no price",
       "empty": "Nothing spent with this supplier yet. Drafts and cancelled purchases are not counted.",
@@ -866,7 +865,7 @@
     "submit": "Update {count, plural, =0 {assets} one {# asset} other {# assets}}",
     "updatedToast": "{count, plural, =0 {No asset needed a change} one {# asset updated} other {# assets updated}}",
     "partialToast": "{updated, plural, one {# asset updated} other {# assets updated}} · {failed, plural, one {# not updated} other {# not updated}}",
-    "partialError": "{updated, plural, one {# asset was updated} other {# assets were updated}}, then the update stopped; {notSent, plural, one {# asset was} other {# assets were}} not changed. Edit the line price again to retry.",
+    "partialError": "{updated, plural, one {# asset was updated} other {# assets were updated}}, then the update stopped; {notSent, plural, one {# asset was} other {# assets were}} not changed. Choose Update again to finish — your choices are kept, and the assets already updated are left as they are.",
     "error": "Couldn't update the linked assets"
   }
 }

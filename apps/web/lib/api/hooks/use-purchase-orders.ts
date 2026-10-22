@@ -53,6 +53,7 @@ import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
 import { consumableKeys } from "./use-consumables";
 import { invalidateDashboard } from "./use-dashboard";
+import { supplierKeys } from "./use-suppliers";
 import { invalidateSuggestions } from "../query-keys";
 import { applyInChunks } from "@/lib/purchases/linked-update";
 
@@ -122,11 +123,15 @@ export function usePurchaseOrderEvents(id: string | undefined) {
   });
 }
 
-/** Every purchase write refreshes the purchase reads and the smart-entry suggestions. */
+/**
+ * Every purchase write refreshes the purchase reads, the supplier reads (a supplier's yearly totals are
+ * derived from its purchases, #1500) and the smart-entry suggestions.
+ */
 function useInvalidatePurchases() {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+    void queryClient.invalidateQueries({ queryKey: supplierKeys.all });
     void invalidateSuggestions(queryClient);
   };
 }

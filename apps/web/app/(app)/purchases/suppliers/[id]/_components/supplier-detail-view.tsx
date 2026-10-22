@@ -73,6 +73,7 @@ function Contact({ name, email, phone }: { name: string | null; email: string | 
  */
 function YearlyTotals({ totals }: { totals: readonly SupplierYearlyTotal[] | undefined }) {
   const t = useTranslations("purchases.suppliers.yearly");
+  const tTotals = useTranslations("purchases.totals");
   const locale = useLocale();
   const groups = yearlyTotalGroups(totals, locale);
   if (groups === null) return null;
@@ -105,7 +106,7 @@ function YearlyTotals({ totals }: { totals: readonly SupplierYearlyTotal[] | und
                           <span className="font-mono tabular-nums">{entry.text}</span>
                         )}
                         {entry.noCurrency ? (
-                          <span className="text-muted-foreground"> · {t("noCurrency")}</span>
+                          <span className="text-muted-foreground"> · {tTotals("noCurrency")}</span>
                         ) : null}
                         {entry.unpricedLines > 0 ? (
                           <span className="block text-xs text-muted-foreground">

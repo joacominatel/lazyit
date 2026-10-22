@@ -412,7 +412,6 @@
       "year": "Año",
       "total": "Total",
       "purchases": "Compras",
-      "noCurrency": "Sin moneda",
       "tooLarge": "Demasiado grande para mostrar",
       "partial": "Parcial: {count, plural, one {# línea no tiene} other {# líneas no tienen}} precio",
       "empty": "Todavía no se gastó nada con este proveedor. Los borradores y las compras canceladas no se cuentan.",
@@ -866,7 +865,7 @@
     "submit": "Actualizar {count, plural, =0 {activos} one {# activo} other {# activos}}",
     "updatedToast": "{count, plural, =0 {Ningún activo necesitaba cambios} one {# activo actualizado} other {# activos actualizados}}",
     "partialToast": "{updated, plural, one {# activo actualizado} other {# activos actualizados}} · {failed, plural, one {# sin actualizar} other {# sin actualizar}}",
-    "partialError": "Se {updated, plural, one {actualizó # activo} other {actualizaron # activos}} y luego la actualización se detuvo; {notSent, plural, one {# activo no cambió} other {# activos no cambiaron}}. Vuelve a editar el precio de la línea para reintentar.",
+    "partialError": "Se {updated, plural, one {actualizó # activo} other {actualizaron # activos}} y luego la actualización se detuvo; {notSent, plural, one {# activo no cambió} other {# activos no cambiaron}}. Elige Actualizar de nuevo para terminar: tus elecciones se mantienen y los activos ya actualizados quedan como están.",
     "error": "No se pudieron actualizar los activos vinculados"
   }
 }
