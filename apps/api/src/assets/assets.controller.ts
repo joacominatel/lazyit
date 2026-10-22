@@ -53,7 +53,12 @@ import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
-import { ExportService } from '../common/export';
+import {
+  EXPORT_FORMAT_QUERY,
+  ExportService,
+  parseExportFormat,
+  XLSX_CONTENT_TYPE,
+} from '../common/export';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
@@ -433,10 +438,11 @@ export class AssetsController {
   // STATIC route declared BEFORE the `:id` param route so `/assets/export` never resolves as an id.
   @Get('export')
   @RequirePermission('asset:read')
-  @ApiProduces('text/csv')
+  @ApiProduces('text/csv', XLSX_CONTENT_TYPE)
+  @ApiQuery(EXPORT_FORMAT_QUERY)
   @ApiOperation({
     summary:
-      'CSV export of the WHOLE filtered asset inventory (issue #872, ADR-0103), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort, purchase filters included with their purchaseOrder:read check) and streams every matching asset newest-first: UTF-8 BOM, the `# lazyit` provenance line the importer reads, CRLF rows, formula-guarded text cells. `deleted=only` (archived) is ADMIN-only (403). Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`). `specs` is not included. Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only for a caller holding purchaseOrder:read (ADR-0099 §8).',
+      'CSV export (or XLSX with format=xlsx: same columns, typed cells, no provenance line, not importable) of the WHOLE filtered asset inventory (issue #872, ADR-0103), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort, purchase filters included with their purchaseOrder:read check) and streams every matching asset newest-first: UTF-8 BOM, the `# lazyit` provenance line the importer reads, CRLF rows, formula-guarded text cells. `deleted=only` (archived) is ADMIN-only (403). Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`). `specs` is not included. Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only for a caller holding purchaseOrder:read (ADR-0099 §8).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'modelId', required: false })
@@ -484,7 +490,7 @@ export class AssetsController {
       'Soft-delete slice. active (default) = live assets; only = archived — ADMIN only (403 otherwise).',
   })
   @ApiOkResponse({
-    description: 'The filtered asset inventory as CSV (text/csv).',
+    description: 'The filtered asset inventory as CSV (text/csv) or XLSX.',
   })
   async export(
     @CurrentPrincipal() principal: Principal,
@@ -508,7 +514,9 @@ export class AssetsController {
     @Query('purchaseLinked') purchaseLinked?: string,
     @Query('acquiredFrom') acquiredFrom?: string,
     @Query('acquiredTo') acquiredTo?: string,
+    @Query('format') format?: string | string[],
   ): Promise<StreamableFile> {
+    const fileFormat = parseExportFormat(format);
     const filters: AssetFilters = this.parseAssetFilters({
       categoryId,
       modelId,
@@ -535,7 +543,8 @@ export class AssetsController {
     );
 
     const { purchase, ...rest } = filters;
-    return this.exports.exportCsv({
+    return this.exports.exportFile({
+      format: fileFormat,
       resource: 'ASSETS',
       principal,
       response,

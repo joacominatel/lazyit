@@ -141,11 +141,13 @@ describe('SoftwareWatchService (#1684)', () => {
 
   // ── population ────────────────────────────────────────────────────────────
 
-  it('answers over live agent-reported HOSTS only — manual nodes and container/guest children are out', async () => {
+  it('answers over live, unretired agent-reported HOSTS only — manual nodes, container/guest children and retired hosts are out', async () => {
     fleet([], []);
     await service.get(WATCH_ID);
     expect(SOFTWARE_WATCH_POPULATION_WHERE).toEqual({
       source: 'AGENT',
+      // Retired hosts are gone, not hosts missing the package (#1701).
+      retiredAt: null,
       OR: [
         { externalId: null },
         {

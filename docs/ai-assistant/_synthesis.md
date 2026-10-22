@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-21
+updated: 2026-10-22
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -306,8 +306,9 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   → `ai:connect` now → resource matches. Authority = the user's current permissions ∩ the scope class.
 - **Revocation:** user or admin revoke, refresh reuse, the revocation endpoint, and any
   `mcpCredentialEpoch` bump (password change or reset, admin reset or *revoke sessions*, deactivation,
-  offboarding). A normal web logout bumps only `sessionEpoch` and does **not** revoke MCP credentials
-  (ADR-0097 decision 8, amended 2026-09-24 — CEO: "Separarlos").
+  offboarding, the user's own "Sign out everywhere and disconnect AI apps", #1699). A normal web logout
+  bumps only `sessionEpoch` and does **not** revoke MCP credentials (ADR-0097 decision 8, amended
+  2026-09-24 — CEO: "Separarlos").
 - **Client allowlist** ([[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13): every OAuth
   client is checked against an admin-configurable allowlist, matched on its CIMD `client_id` URL or a
   redirect-URI pattern, **never on `client_name`**. The curated defaults (the usual clients) live in code

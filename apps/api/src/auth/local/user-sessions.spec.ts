@@ -53,8 +53,10 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
     directoryOnly: boolean;
     passwordHash: string | null;
     sessionEpoch: number;
+    mcpCredentialEpoch: number;
     deletedAt: Date | null;
   };
+  let auditCreate: jest.Mock;
   let table: Map<string, SessionRow>;
   let historyRecord: jest.Mock;
   let prisma: Record<string, unknown>;
@@ -87,8 +89,10 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
       directoryOnly: false,
       passwordHash: await credentials.hash(PASSWORD),
       sessionEpoch: 0,
+      mcpCredentialEpoch: 0,
       deletedAt: null,
     };
+    auditCreate = jest.fn().mockResolvedValue({});
     const userSessions = inMemoryUserSessions();
     table = userSessions.rows;
     historyRecord = jest.fn().mockResolvedValue({});
@@ -113,7 +117,24 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
         findFirst: jest.fn(({ where }: { where: Where }) =>
           Promise.resolve(matches(where) ? { ...row } : null),
         ),
-        update: jest.fn(),
+        // Sign out everywhere (#1699): an unconditional increment of both counters.
+        update: jest.fn(
+          ({
+            where,
+            data,
+          }: {
+            where: Where;
+            data: {
+              sessionEpoch?: { increment: number };
+              mcpCredentialEpoch?: { increment: number };
+            };
+          }) => {
+            if (!matches(where)) return Promise.reject(new Error('not found'));
+            row.sessionEpoch += data.sessionEpoch?.increment ?? 0;
+            row.mcpCredentialEpoch += data.mcpCredentialEpoch?.increment ?? 0;
+            return Promise.resolve({ id: row.id });
+          },
+        ),
         updateMany: jest.fn(
           ({
             where,
@@ -129,6 +150,7 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
         ),
       },
       userSession: userSessions.delegate,
+      oAuthAuditLog: { create: auditCreate },
       // The sweeper's stale-epoch purge is a fixed raw statement; model its effect on the table.
       $executeRaw: jest.fn(() => {
         let count = 0;
@@ -430,5 +452,88 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
     await expect(
       sessions.list(req.user as never, req.localSession.sessionId),
     ).resolves.toEqual({ sessions: [], currentIsLegacy: false });
+  });
+
+  describe('sign out everywhere and disconnect AI apps (#1699)', () => {
+    /** The `data` of the one OAuth audit row written. */
+    function auditData(): Record<string, unknown> {
+      expect(auditCreate).toHaveBeenCalledTimes(1);
+      const [args] = auditCreate.mock.calls[0] as [
+        { data: Record<string, unknown> },
+      ];
+      return args.data;
+    }
+
+    it('bumps BOTH epochs, ends every session row and every token, and audits it', async () => {
+      const legacy = await credentials.mintSession({
+        id: USER_ID,
+        sessionEpoch: 0,
+      });
+      const laptop = await signIn(FIREFOX, '203.0.113.7');
+      const phone = await signIn(SAFARI_IPHONE, '198.51.100.4', true);
+      const req = await authenticate(laptop.token);
+
+      await sessions.signOutEverywhere(req.user, '203.0.113.7');
+
+      expect(row.sessionEpoch).toBe(1);
+      expect(row.mcpCredentialEpoch).toBe(1);
+      expect(table.size).toBe(0);
+      for (const token of [legacy.token, laptop.token, phone.token]) {
+        await expect(authenticate(token)).rejects.toThrow(
+          UnauthorizedException,
+        );
+      }
+      expect(auditData()).toMatchObject({
+        action: 'SIGNED_OUT_EVERYWHERE',
+        userId: USER_ID,
+        actorId: USER_ID,
+        ip: '203.0.113.7',
+        detail: { authMode: 'local' },
+      });
+    });
+
+    it('plain sign-out is unchanged: web sessions end, mcpCredentialEpoch does not move', async () => {
+      const laptop = await signIn(FIREFOX, '203.0.113.7');
+      const req = await authenticate(laptop.token);
+      await login.logout(req.user as never);
+      expect(row.sessionEpoch).toBe(1);
+      expect(row.mcpCredentialEpoch).toBe(0);
+      expect(auditCreate).not.toHaveBeenCalled();
+    });
+
+    it('works in OIDC mode, where plain sign-out is a no-op', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      await login.logout({ ...row } as never);
+      expect(row.sessionEpoch).toBe(0);
+      expect(row.mcpCredentialEpoch).toBe(0);
+
+      await sessions.signOutEverywhere({ id: USER_ID }, null);
+
+      expect(row.sessionEpoch).toBe(1);
+      expect(row.mcpCredentialEpoch).toBe(1);
+      expect(auditData()).toMatchObject({
+        action: 'SIGNED_OUT_EVERYWHERE',
+        detail: { authMode: 'oidc' },
+      });
+    });
+
+    it('still disconnects the AI apps when a plain sign-out elsewhere moved sessionEpoch first', async () => {
+      const laptop = await signIn(FIREFOX, '203.0.113.7');
+      const req = await authenticate(laptop.token);
+      // Another device signs out (sessionEpoch only) between the guard's read and this action.
+      row.sessionEpoch += 1;
+      await sessions.signOutEverywhere(req.user, null);
+      expect(row.mcpCredentialEpoch).toBe(1);
+      expect(row.sessionEpoch).toBe(2);
+    });
+
+    it('surfaces an audit failure, so the transaction aborts instead of revoking silently', async () => {
+      const laptop = await signIn(FIREFOX, '203.0.113.7');
+      const req = await authenticate(laptop.token);
+      auditCreate.mockRejectedValueOnce(new Error('db down'));
+      await expect(
+        sessions.signOutEverywhere(req.user as never, null),
+      ).rejects.toThrow('db down');
+    });
   });
 });

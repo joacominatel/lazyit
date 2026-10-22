@@ -33,7 +33,10 @@ tiene que aprobarse de nuevo para reconectarse; un token revocado no se puede re
 
 Revocá todo lo que no reconozcas, que ya no uses o cuyo token pudo quedar expuesto. Si lazyit te manda
 el aviso **Nuevo agente de IA conectado** y no fuiste vos, revocalo acá enseguida, cambiá tu
-contraseña y avisale a tu administrador.
+contraseña y avisale a tu administrador. Para cortar todas las apps y tokens a la vez, usá
+[Cerrar sesión en todos lados y desconectar las apps de IA](/help/getting-started-your-profile#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia). Ese aviso es un **aviso de
+seguridad**: cuando tu instancia envía correos, siempre te llega por correo y no se puede desactivar en
+[Correos de notificación](/help/notifications-activity-email-preferences).
 
 ## Tokens personales
 
@@ -64,6 +67,7 @@ funcionar ahí, pero siguen en la lista hasta que vencen para que los puedas rev
 | --- | --- |
 | **Revocás** una | Esa deja de funcionar para siempre. |
 | **Cerrás sesión** en lazyit | **Nada** — las conexiones son de tu cuenta, no de tu sesión en el navegador. |
+| Elegís **Cerrar sesión en todos lados y desconectar las apps de IA** | **Todas** las apps y tokens dejan de funcionar y desaparecen de la lista, y se cierra tu sesión en todos lados. Reconectalas después. Ver [Cerrar sesión en todos lados y desconectar las apps de IA](/help/getting-started-your-profile#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia). |
 | Tu **contraseña cambia** o se restablece | **Todas** las apps y tokens dejan de funcionar y desaparecen de la lista. Reconectalas después. |
 | Tu cuenta se **desactiva o se da de baja** | **Todas** las apps y tokens dejan de funcionar. |
 | Tu rol **pierde un permiso** | Tus apps también — una conexión nunca tiene más acceso que vos. Si era el permiso para conectar apps de IA, todas las apps y tokens dejan de funcionar, pero siguen en la lista para que puedas revocarlos. |

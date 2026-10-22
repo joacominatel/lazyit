@@ -19,6 +19,7 @@ import {
   useNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@/lib/api/hooks/use-notification-preferences";
+import { isEmailOn, nextOptedOutTypes } from "../_lib/opt-out";
 
 /**
  * `/account/notifications` — the self-service "Notification emails" page (issue #879). Any authenticated
@@ -28,6 +29,10 @@ import {
  * `optedOutTypes`; turning it OFF adds the type to the opted-out set. Each toggle auto-saves via a full,
  * idempotent PUT of the whole opted-out set (the app's established settings-toggle pattern — cf. the
  * Settings → Instance update-check switch), optimistic with a rollback + toast on failure.
+ *
+ * A SECURITY NOTICE (`mandatoryTypes`, #1699 — today the new-AI-agent-connection notice) is always
+ * emailed: its row shows a switch fixed on and disabled with a short explanation, and it is never part
+ * of the PUT (the API would drop it anyway).
  */
 export function NotificationPreferencesView() {
   const t = useTranslations("account");
@@ -35,14 +40,16 @@ export function NotificationPreferencesView() {
     useNotificationPreferences();
   const update = useUpdateNotificationPreferences();
 
+  const mandatory = new Set<NotificationType>(data?.mandatoryTypes ?? []);
+
   function onToggle(type: NotificationType, emailOn: boolean) {
-    const current = data?.optedOutTypes ?? [];
-    // Switch ON = receive email = NOT opted out. OFF = opt out (add to the set).
-    const next = emailOn
-      ? current.filter((t) => t !== type)
-      : current.includes(type)
-        ? current
-        : [...current, type];
+    if (mandatory.has(type)) return;
+    const next = nextOptedOutTypes(
+      data?.optedOutTypes ?? [],
+      type,
+      emailOn,
+      mandatory,
+    );
     update.mutate(next, {
       onError: (error) => notifyError(error, t("toast.saveError")),
     });
@@ -87,7 +94,8 @@ export function NotificationPreferencesView() {
           ) : (
             <ul className="divide-y">
               {data.emailableTypes.map((type) => {
-                const emailOn = !data.optedOutTypes.includes(type);
+                const fixed = mandatory.has(type);
+                const emailOn = isEmailOn(data.optedOutTypes, type, mandatory);
                 return (
                   <li
                     key={type}
@@ -98,14 +106,25 @@ export function NotificationPreferencesView() {
                       <p className="text-xs text-muted-foreground">
                         {typeDescription(t, type)}
                       </p>
+                      {fixed ? (
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {t("notifications.mandatory")}
+                        </p>
+                      ) : null}
                     </div>
                     <Switch
                       checked={emailOn}
                       onCheckedChange={(next) => onToggle(type, next)}
-                      disabled={update.isPending}
-                      aria-label={t("notifications.toggleAria", {
-                        type: typeLabel(t, type),
-                      })}
+                      disabled={fixed || update.isPending}
+                      aria-label={
+                        fixed
+                          ? t("notifications.mandatoryAria", {
+                              type: typeLabel(t, type),
+                            })
+                          : t("notifications.toggleAria", {
+                              type: typeLabel(t, type),
+                            })
+                      }
                     />
                   </li>
                 );

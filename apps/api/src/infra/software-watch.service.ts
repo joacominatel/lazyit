@@ -41,11 +41,13 @@ import { infraNodeRoleWhere } from './infra-node-role';
  * PENDING and OFFLINE hosts are deliberately IN: the last stored list of an offline host is still the
  * best evidence there is, and each host row carries its liveness so the reader can weigh it.
  *
- * Retired nodes (#1146 Q11) are not excluded here because that lifecycle has not shipped: when the
- * `retiredAt` column lands, `retiredAt: null` joins this predicate and nothing else changes.
+ * RETIRED hosts are OUT (#1701, epic #1146 Q11): a decommissioned server is not part of the estate,
+ * so it is neither a host running a version nor a host "missing" the package. OFFLINE is not retired —
+ * an offline host stays in, as above.
  */
 export const SOFTWARE_WATCH_POPULATION_WHERE = {
   source: 'AGENT',
+  retiredAt: null,
   ...infraNodeRoleWhere('HOST'),
 } satisfies Prisma.InfraNodeWhereInput;
 

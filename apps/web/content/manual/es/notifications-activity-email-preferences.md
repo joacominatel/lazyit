@@ -30,6 +30,17 @@ correo:
 Cada interruptor **se guarda en el momento en que lo cambias** — no hay un botón Guardar aparte. Si el
 guardado falla, el interruptor vuelve a su posición anterior y un mensaje de error explica qué pasó.
 
+### Los avisos de seguridad siempre están activados
+
+Algunas notificaciones son **avisos de seguridad** y no se pueden desactivar: su interruptor queda
+activado y en gris, con la nota *Aviso de seguridad: siempre se envía por correo y no se puede
+desactivar*. Hoy es **Nuevo agente de IA conectado** — el correo que te avisa que una app de IA o un token
+personal se usó en tu cuenta por primera vez. Si no fuiste tú, ese correo es como te enteras, así que se
+envía siempre que tu instancia envíe correos.
+
+Si habías desactivado **Nuevo agente de IA conectado** antes de que fuera un aviso de seguridad, lazyit
+ahora ignora esa elección y te lo envía igual. No tienes que hacer nada.
+
 ## Qué interruptores ves
 
 La lista se **arma para ti**, no es fija. Un tipo solo aparece cuando tu instancia realmente puede
@@ -61,4 +72,4 @@ lista completa de disparadores, consulta la
 - Los tipos de notificación nuevos que se agreguen en una versión futura empiezan **activados** (con
   correo) para que nunca te pierdas una señal nueva por sorpresa; desactiva aquí el que prefieras.
 - Cada correo de notificación termina con un pie breve que remite a esta página, para que siempre sepas
-  dónde desactivar un tipo.
+  dónde desactivar un tipo. Un aviso de seguridad, en cambio, dice que no se puede desactivar.

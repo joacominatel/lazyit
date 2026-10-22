@@ -74,6 +74,8 @@ import {
   INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
   INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
+  INFRA_NODE_LIFECYCLE_FACT,
+  INFRA_NODE_SNOOZE_MAX_DAYS,
   offsetOf,
   pageOf,
 } from '@lazyit/shared';
@@ -552,6 +554,10 @@ const INFRA_NODE_LIST_SELECT = {
   lastReportedAt: true,
   agentVersion: true,
   chassis: true,
+  // The retire / snooze lifecycle (#1701) — three scalars, so the list row can badge them.
+  retiredAt: true,
+  retiredById: true,
+  alertsSnoozedUntil: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -624,6 +630,8 @@ const INFRA_GRAPH_NODE_SELECT = {
   status: true,
   ipAddress: true,
   chassis: true,
+  retiredAt: true,
+  alertsSnoozedUntil: true,
   x: true,
   y: true,
 } satisfies Prisma.InfraNodeSelect;
@@ -919,6 +927,11 @@ export class InfraService {
     principal?: Principal,
     rawBody?: unknown,
   ): Promise<AgentReportAck> {
+    // The uninstaller's last word (#1701). It retires this host's own node and ingests nothing else,
+    // so it is answered before any of the machinery below runs.
+    if (report.decommissioning === true) {
+      return this.decommissionReportingHost(report);
+    }
     // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts plus the report timestamp
     // for provenance. Stored verbatim — validated already by `AgentReportSchema` at the controller.
     // `agentVersion` is NOT duplicated here (#907): it now lives in its own queryable column below.
@@ -970,6 +983,8 @@ export class InfraService {
         // The #1140 narrowest policy scope + the acknowledgement this report may advance.
         agentPolicy: true,
         policyRevision: true,
+        // A retired node that reports again is un-retired (#1701).
+        retiredAt: true,
       },
     });
 
@@ -1145,6 +1160,7 @@ export class InfraService {
             assetId: true,
             ipAddressSource: true,
             policyRevision: true,
+            retiredAt: true,
           },
         });
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
@@ -1181,6 +1197,113 @@ export class InfraService {
       }
       throw err;
     }
+  }
+
+  /**
+   * The uninstaller's last report (#1701, epic #1146 Q11): retire THIS host's own node, and nothing
+   * else.
+   *
+   * WHICH NODE. The one the report's own `(reportingSource, externalId)` resolves to — the same lookup
+   * an ordinary check-in makes, so a token can retire only what it could already refresh. A host whose
+   * machine-id COLLIDED (#1141) does not own the node under that key: its own node lives under the
+   * derived `<externalId>#<discriminator>` key, so the same corroboration the ingest path runs decides
+   * which one is meant. When the evidence cannot name the clone's own node (no discriminator), nothing
+   * is retired — refusing is the only answer that cannot retire a peer.
+   *
+   * WHAT IT DOES NOT TOUCH. The report's facts are not ingested (the host is leaving; its last in-service
+   * snapshot stands), liveness is not refreshed, no child is retired, and the linked Asset is never
+   * read or written — retiring a server is not disposing of the hardware.
+   *
+   * IDEMPOTENT. A node that is already retired keeps its original `retiredAt`/`retiredById`; the ack
+   * still says `retired`. The retirement is recorded in the fact history only when it actually
+   * happened, as a `node.lifecycle` row, because this is a MACHINE transition on the ingest path —
+   * a human retire is curation and is attributed by `retiredById` instead.
+   *
+   * An unknown host is a 404: there is nothing to retire, and a decommission never creates a node.
+   */
+  private async decommissionReportingHost(
+    report: AgentReport,
+  ): Promise<AgentReportAck> {
+    const node = await this.resolveDecommissionTarget(report);
+    if (node === null) {
+      throw new NotFoundException(
+        'No live node is reporting under this host key, so there is nothing to retire.',
+      );
+    }
+    if (!node.retiredAt) {
+      // Conditional on still being active, so two racing uninstall reports record one transition.
+      const { count } = await this.prisma.infraNode.updateMany({
+        where: { id: node.id, retiredAt: null },
+        data: { retiredAt: new Date(), retiredById: null },
+      });
+      if (count > 0) {
+        await this.recordFactChanges(node.id, [
+          {
+            kind: 'FACT_CHANGED',
+            fact: INFRA_NODE_LIFECYCLE_FACT,
+            previousValue: 'active',
+            currentValue: 'retired',
+          },
+        ]);
+        this.logger.log(
+          `Node ${node.id} retired by its own agent's uninstall (decommissioning report).`,
+        );
+      }
+    }
+    return this.finishAck(
+      { nodeId: node.id, state: node.state, accepted: true, retired: true },
+      undefined,
+      report.agentVersion,
+    );
+  }
+
+  /** The node a decommissioning report means — see {@link decommissionReportingHost}. */
+  private async resolveDecommissionTarget(report: AgentReport): Promise<{
+    id: string;
+    state: InfraNodeState;
+    retiredAt: Date | null;
+  } | null> {
+    const select = { id: true, state: true, retiredAt: true } as const;
+    const existing = await this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+      },
+      select,
+    });
+    if (!existing) return null;
+    const stored = await this.storedNodeSpecs(existing.id);
+    const incoming = hostIdentityEvidence(report.host);
+    if (!isClonedMachineId(stored.identity, incoming)) return existing;
+    // A clone (#1141): the node under the reported key is its PEER's.
+    const discriminator = identityDiscriminator(incoming);
+    if (discriminator === undefined) return null;
+    return this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: report.reportingSource,
+        externalId: childSafeDisambiguatedId(report.externalId, discriminator),
+      },
+      select,
+    });
+  }
+
+  /**
+   * The fact-history row for an AUTOMATIC un-retire (#1701): a retired node reported again. Recorded
+   * so an operator who retired a host can see why it is back, and when.
+   */
+  private unretiredFactChange(
+    nodeId: string,
+    retiredAt: Date,
+  ): InfraFactChangeDraft {
+    this.logger.log(
+      `Node ${nodeId} was retired at ${retiredAt.toISOString()} and reported again — un-retired automatically.`,
+    );
+    return {
+      kind: 'FACT_CHANGED',
+      fact: INFRA_NODE_LIFECYCLE_FACT,
+      previousValue: 'retired',
+      currentValue: 'active',
+    };
   }
 
   /**
@@ -1419,7 +1542,16 @@ export class InfraService {
    * ADR-0074 §2.
    */
   private async refreshKnownNode(args: {
-    node: { id: string; assetId: string | null; ipAddressSource: string };
+    /**
+     * `retiredAt` is REQUIRED (#1701) so a path added later cannot refresh a retired node without
+     * un-retiring it — a node that reports again is, by definition, not gone.
+     */
+    node: {
+      id: string;
+      assetId: string | null;
+      ipAddressSource: string;
+      retiredAt: Date | null;
+    };
     blob: AgentReportSpecsBlob;
     software: SoftwareDirective;
     now: Date;
@@ -1461,6 +1593,9 @@ export class InfraService {
       agentVersion: args.agentVersion,
       ...(args.policyFields ?? {}),
       ...(plan.write !== undefined ? { specs: plan.write } : {}),
+      // AUTO-UN-RETIRE (#1701): a retired node that reports again is not gone. Only written when it
+      // WAS retired, so an ordinary check-in adds nothing to the update.
+      ...(node.retiredAt ? { retiredAt: null, retiredById: null } : {}),
     };
     // Overwrite the IP with the live fact — but only when the agent owns it (never a MANUAL edit) and
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
@@ -1483,7 +1618,12 @@ export class InfraService {
       data,
       select: { id: true, state: true },
     });
-    await this.recordFactChanges(node.id, factChanges);
+    await this.recordFactChanges(
+      node.id,
+      node.retiredAt
+        ? [...factChanges, this.unretiredFactChange(node.id, node.retiredAt)]
+        : factChanges,
+    );
     // Keep the linked Asset's specs snapshot fresh (agent-owned facts only). It is asked on EVERY
     // report even when the node's blob was skipped, and decides its own write the same way: an Asset
     // linked to a node whose facts have not changed since would otherwise never receive them.
@@ -1957,7 +2097,7 @@ export class InfraService {
    * two. See {@link disambiguateExternalId}.
    */
   private async ingestCollidingHost(
-    peer: { id: string; label: string },
+    peer: { id: string; label: string; retiredAt: Date | null },
     stored: HostIdentityEvidence,
     incoming: HostIdentityEvidence,
     report: AgentReport,
@@ -1978,7 +2118,12 @@ export class InfraService {
       // back to the ordinary refresh rather than throwing keeps the machine-facing path total.
       return this.finishAck(
         await this.refreshKnownNode({
-          node: { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
+          node: {
+            id: peer.id,
+            assetId: null,
+            ipAddressSource: 'AGENT',
+            retiredAt: peer.retiredAt,
+          },
           blob,
           software,
           now,
@@ -2014,6 +2159,7 @@ export class InfraService {
       assetId: string | null;
       ipAddressSource: string;
       policyRevision?: number | null;
+      retiredAt: Date | null;
     }): Promise<AgentReportAck> => {
       const detectedAt =
         (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString();
@@ -2075,6 +2221,7 @@ export class InfraService {
         assetId: true,
         ipAddressSource: true,
         policyRevision: true,
+        retiredAt: true,
       },
     });
     if (own) return refreshWithMarker(own);
@@ -2136,6 +2283,7 @@ export class InfraService {
             assetId: true,
             ipAddressSource: true,
             policyRevision: true,
+            retiredAt: true,
           },
         });
         // No loop and no nudge: after P2002 the row exists, and the report that WON it emitted the
@@ -2458,6 +2606,7 @@ export class InfraService {
       externalId: string | null;
       specs: Prisma.JsonValue;
       assetId: string | null;
+      retiredAt: Date | null;
     }[] =
       (await this.prisma.infraNode.findMany({
         where: {
@@ -2466,7 +2615,13 @@ export class InfraService {
             startsWith: escapeLikePrefix(containerExternalIdPrefix(hostKey)),
           },
         },
-        select: { id: true, externalId: true, specs: true, assetId: true },
+        select: {
+          id: true,
+          externalId: true,
+          specs: true,
+          assetId: true,
+          retiredAt: true,
+        },
       })) ?? [];
     const knownByExternalId = new Map(
       known.flatMap((n) => (n.externalId ? [[n.externalId, n] as const] : [])),
@@ -2562,7 +2717,7 @@ export class InfraService {
         ) {
           const raced = await this.prisma.infraNode.findFirst({
             where: { reportingSource: report.reportingSource, externalId },
-            select: { id: true, specs: true, assetId: true },
+            select: { id: true, specs: true, assetId: true, retiredAt: true },
           });
           if (raced) {
             // No auto-confirm offer: the report that WON the race made it for this child already.
@@ -2651,7 +2806,12 @@ export class InfraService {
    * about when these facts were gathered.
    */
   private async refreshContainerChild(
-    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    child: {
+      id: string;
+      specs: Prisma.JsonValue;
+      assetId: string | null;
+      retiredAt: Date | null;
+    },
     specs: ContainerSpecsBlob,
     status: InfraNodeStatus,
     report: AgentReport,
@@ -2685,9 +2845,16 @@ export class InfraService {
         lastReportedAt: now,
         agentVersion: report.agentVersion,
         ...childPolicyFields,
+        // A retired child its host lists again is not gone (#1701) — the host path's rule.
+        ...(child.retiredAt ? { retiredAt: null, retiredById: null } : {}),
       },
     });
-    await this.recordFactChanges(child.id, childChanges);
+    await this.recordFactChanges(
+      child.id,
+      child.retiredAt
+        ? [...childChanges, this.unretiredFactChange(child.id, child.retiredAt)]
+        : childChanges,
+    );
     if (child.assetId) {
       await this.syncAssetSpecs(child.assetId, { ...effective }, [
         'container',
@@ -2798,6 +2965,7 @@ export class InfraService {
           specs: true,
           assetId: true,
           deletedAt: true,
+          retiredAt: true,
         },
         includeSoftDeleted: true,
       } as Prisma.InfraNodeFindManyArgs)) as unknown as {
@@ -2806,6 +2974,7 @@ export class InfraService {
         specs: Prisma.JsonValue;
         assetId: string | null;
         deletedAt: Date | null;
+        retiredAt: Date | null;
       }[]) ?? [];
     const liveByExternalId = new Map<string, (typeof known)[number]>();
     /** ref key → the CANONICAL node an earlier §6 absorb resolved that guest to. */
@@ -2942,7 +3111,7 @@ export class InfraService {
         ) {
           const raced = await this.prisma.infraNode.findFirst({
             where: { reportingSource: report.reportingSource, externalId },
-            select: { id: true, specs: true, assetId: true },
+            select: { id: true, specs: true, assetId: true, retiredAt: true },
           });
           if (raced) {
             await this.refreshGuestChild(
@@ -2997,7 +3166,12 @@ export class InfraService {
    * {@link applyGuestTopology}).
    */
   private async refreshGuestChild(
-    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    child: {
+      id: string;
+      specs: Prisma.JsonValue;
+      assetId: string | null;
+      retiredAt: Date | null;
+    },
     specs: GuestSpecsBlob,
     status: InfraNodeStatus,
     report: AgentReport,
@@ -3025,8 +3199,16 @@ export class InfraService {
         lastReportedAt: now,
         agentVersion: report.agentVersion,
         ...childPolicyFields,
+        // A retired guest its hypervisor lists again is not gone (#1701).
+        ...(child.retiredAt ? { retiredAt: null, retiredById: null } : {}),
       },
     });
+    // Guests record no fact diff (see applyGuestTopology); the un-retire is a lifecycle row, not one.
+    if (child.retiredAt) {
+      await this.recordFactChanges(child.id, [
+        this.unretiredFactChange(child.id, child.retiredAt),
+      ]);
+    }
     if (child.assetId) {
       await this.syncAssetSpecs(child.assetId, { ...effective }, [
         'guest',
@@ -4826,6 +5008,72 @@ export class InfraService {
     // Back on the map → re-index it. Fire-and-forget, never throws, no-op when disabled (ADR-0035).
     void this.syncNodeToSearch(restored.id);
     return restored;
+  }
+
+  // ── Retire + snooze: the HUMAN half (#1701, epic #1146 Q11/Q15) ───────────────────────────────────
+
+  /**
+   * Retire a node (#1701): mark it GONE rather than silent. The staleness sweeper skips it from now on,
+   * so it is never flipped OFFLINE or announced again; its history, edges, position and Asset link are
+   * untouched, and it stays on the map with a badge. Idempotent: an already-retired node keeps its
+   * original stamp. `retiredById` records the human; the controller admits humans only.
+   *
+   * Not recorded in the fact history: that table is the ingest path's, and a human retire is curation,
+   * attributed here instead. If the host reports again it is un-retired automatically — and THAT is
+   * recorded (see {@link refreshKnownNode}).
+   */
+  async retireNode(id: string, principal?: Principal) {
+    const node = await this.getNode(id);
+    if (node.retiredAt) return node;
+    const { userId } = this.actor.resolveActor(principal);
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { retiredAt: new Date(), retiredById: userId ?? null },
+    });
+  }
+
+  /** Un-retire a node (#1701): the sweeper judges it again from its next tick. Idempotent. */
+  async unretireNode(id: string) {
+    const node = await this.getNode(id);
+    if (!node.retiredAt) return node;
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { retiredAt: null, retiredById: null },
+    });
+  }
+
+  /**
+   * Snooze a node's offline alerts until `until` (#1701). The node still goes OFFLINE when it is silent
+   * — only the `infra.agent_offline` notification is withheld while the instant is in the future. A
+   * later call replaces the window. Bounded: `until` must be in the future and at most
+   * {@link INFRA_NODE_SNOOZE_MAX_DAYS} days ahead — a host that should never alert again is retired.
+   */
+  async snoozeNodeAlerts(id: string, until: string) {
+    const untilMs = Date.parse(until);
+    const nowMs = Date.now();
+    if (!Number.isFinite(untilMs) || untilMs <= nowMs) {
+      throw new BadRequestException('A snooze must end in the future.');
+    }
+    if (untilMs > nowMs + INFRA_NODE_SNOOZE_MAX_DAYS * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException(
+        `A snooze can last at most ${INFRA_NODE_SNOOZE_MAX_DAYS} days. To stop alerts for good, retire the node.`,
+      );
+    }
+    await this.getNode(id);
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { alertsSnoozedUntil: new Date(untilMs) },
+    });
+  }
+
+  /** End a node's snooze now (#1701). Idempotent. */
+  async unsnoozeNodeAlerts(id: string) {
+    const node = await this.getNode(id);
+    if (!node.alertsSnoozedUntil) return node;
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { alertsSnoozedUntil: null },
+    });
   }
 
   // ── Identity reconciliation: the HUMAN half (ADR-0074 §3 amendment, #1141) ───────────────────────

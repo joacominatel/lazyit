@@ -171,7 +171,8 @@ export class LoginService {
    * It does NOT touch `mcpCredentialEpoch`: signing out of the web ends web sessions only, and the user's
    * MCP connections and personal tokens stay alive (ADR-0097 decision 8, amended 2026-09-24 — CEO
    * decision). They die with a password change, a deactivation or offboarding, an admin reset or
-   * "revoke sessions", or an explicit revoke in /account/ai.
+   * "revoke sessions", an explicit revoke in /account/ai, or the separate, explicit "Sign out everywhere
+   * and disconnect AI apps" (`UserSessionsService.signOutEverywhere`, #1699).
    *
    * IDEMPOTENT. The bump is conditional on the epoch the guard just validated, so two concurrent sign-outs
    * with the same token advance the epoch once; a repeat with the now-revoked token never reaches here (the

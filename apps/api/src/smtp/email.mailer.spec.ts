@@ -35,4 +35,15 @@ describe('renderNotificationEmail footer (AUD-090)', () => {
     expect(html).toContain('Settings → Email');
     expect(html).not.toContain('/account/notifications');
   });
+
+  it('a security notice says it cannot be turned off and links to no switch (#1699)', () => {
+    const { text, html } = renderNotificationEmail({
+      ...base,
+      kind: 'security-notice',
+    });
+    expect(text).toContain('cannot be turned off');
+    expect(html).toContain('cannot be turned off');
+    expect(text).not.toContain('/account/notifications');
+    expect(html).not.toContain('/account/notifications');
+  });
 });

@@ -53,8 +53,9 @@ return per effort on the reporting-agent backlog: a `GROUP BY` over data already
   `/guest/` child (those carry no package list of their own, #1139 / [[0095-hypervisor-guest-inventory]]),
   not soft-deleted. Manual nodes are out (no agent, no list). **PENDING and OFFLINE hosts are in**: an
   offline host's last list is still the best evidence there is, and each host row says how old it is.
-  Retired hosts (#1146 Q11) will leave the population when that lifecycle ships — it adds `retiredAt:
-  null` to the one predicate (`SOFTWARE_WATCH_POPULATION_WHERE`).
+  **Retired hosts are out** (#1701, #1146 Q11): `retiredAt: null` is part of the one predicate
+  (`SOFTWARE_WATCH_POPULATION_WHERE`). A decommissioned server is neither running a version nor
+  "missing" a package. OFFLINE is not retired, and an offline host stays in.
 - **INSTALLED / MISSING / UNKNOWN** — every host lands in exactly one, so `installed + missing + unknown
   = hostsTotal`:
   - **INSTALLED** — the host's stored list names the package (at one or more versions). This wins over

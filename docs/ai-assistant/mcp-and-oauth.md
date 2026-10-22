@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -665,7 +665,8 @@ model OAuthAuditLog {
   id         Int       @id @default(autoincrement())
   action     String    // CLIENT_REGISTERED | GRANT_CREATED | CONSENT_DENIED | GRANT_REVOKED |
                        // REFRESH_REUSE_DETECTED | PERSONAL_TOKEN_CREATED | PERSONAL_TOKEN_REVOKED |
-                       // CLIENT_METADATA_FETCHED | CLIENT_METADATA_REFUSED | CONSENT_STEP_UP_FAILED
+                       // CLIENT_METADATA_FETCHED | CLIENT_METADATA_REFUSED | CONSENT_STEP_UP_FAILED |
+                       // CODE_REUSE_DETECTED (#1683) | SIGNED_OUT_EVERYWHERE (#1699)
   userId     String?   @db.Uuid   // subject
   actorId    String?   @db.Uuid   // who acted (user/admin); null for protocol events
   grantId    String?
@@ -802,6 +803,13 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
    > revocarlas en /account/ai." Grants now snapshot a separate counter, `User.mcpCredentialEpoch`, bumped
    > (with `sessionEpoch`) by a password change or reset, an admin reset or *revoke sessions*, the recovery
    > CLI, deactivation and offboarding — never by `POST /auth/logout`.
+   >
+   > **Done 2026-10-22 (#1699, CEO decision on #1344 Q4).** The explicit "cerrar sesión en todos lados" now
+   > exists for the user: **Sign out everywhere and disconnect AI apps** (`POST /auth/sessions/revoke-all`,
+   > Account → Password & sessions). It bumps both counters and deletes every session row in one
+   > transaction, in every auth mode (in OIDC mode lazyit cannot end the IdP session; the web drops its own
+   > cookie), and records `SIGNED_OUT_EVERYWHERE` in `oauth_audit_log`. No step-up, following the
+   > precedent of every other revocation (sign-out, ending a device, revoking a connection).
 7. **Q7 — Anonymous plugin marketplace → served only when MCP is enabled on an HTTPS instance**; the
    authenticated zip download is always available (R8).
 8. **Q8 — Read-only at consent → offered.** Read only / Read & write (preselected); `lazyit.admin` is
@@ -1236,8 +1244,11 @@ targeted notification `mcp.client_connected` to the account's owner — bell, an
 configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected:<grantId>` makes it
 once per connection across replicas and restarts; a per-process memo spares the lookups and is set only
 once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
-follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
-always lands). Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
+is a **security notice** that ignores the owner's per-type email opt-out (#1699, CEO decision on #1344 Q5,
+replacing the earlier "no mandatory types" call): `SECURITY_NOTICE_NOTIFICATION_TYPES` in
+`smtp/email.constants.ts`, honoured by the dispatcher, listed as `mandatoryTypes` by the preferences read
+and shown fixed on in the web. A stored opt-out entry for it is ignored on read (no migration) and dropped
+by the next preferences save; its footer says it cannot be turned off. Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
 (AUD-014), never inferred from its age or `lastUsedAt`, so the bell's 90-day prune cannot make a grant
 that was never announced look announced — a personal token minted and first used months later is still
 announced. The column is set only once the notice row exists: two concurrent first uses both emit, the

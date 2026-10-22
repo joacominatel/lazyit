@@ -504,7 +504,7 @@ alarm.
 
 **First instance: `GET /infra/graph/nodes` (#1152)** — the topology canvas's own read, behind the same
 `infra:read` gate as the node list. It returns `{ items, total, limit, truncated }` where each item is
-projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }`: the `owners` /
+projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }` (plus the two nullable `retiredAt` / `alertsSnoozedUntil` timestamps since #1701, for the Retired and Snoozed badges): the `owners` /
 `assetName` relation joins and the `shortcuts` jsonb are **dropped**, because the canvas never
 rendered them. So the complete read is strictly **cheaper** than the paged list read it replaced —
 completeness here costs less than the window did. The cap is `INFRA_GRAPH_NODES_MAX = 2000`.

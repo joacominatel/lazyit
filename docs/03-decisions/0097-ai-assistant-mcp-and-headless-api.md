@@ -435,6 +435,12 @@ The key forks only; each links its analysis.
    >   *revoke sessions* on, the recovery CLI, a deactivation, an offboarding (manual or by directory
    >   sync). lazyit has no user-facing "sign out everywhere" route; the admin *revoke sessions* option is
    >   that explicit act. Revoking a connection in `/account/ai` (or Settings → AI) is unchanged.
+   >   *Amended 2026-10-22 (#1699, CEO decision on #1344 Q4):* the user-facing route now exists —
+   >   "Sign out everywhere and disconnect AI apps", `POST /auth/sessions/revoke-all`, a self-service
+   >   action that bumps both counters and deletes every session row in one transaction, in **every** auth
+   >   mode (OIDC included, where `POST /auth/logout` is a no-op), audited `SIGNED_OUT_EVERYWHERE` in the
+   >   OAuth audit trail. No password step-up: like every other revocation it only removes access, and
+   >   step-up is unavailable outside local mode. The plain logout below is untouched.
    > - **What does not**: `POST /auth/logout`. It still bumps `sessionEpoch`, so every web session of the
    >   user ends, as ADR-0086 §8 says.
    > - **In-flight tool calls.** An MCP request delegates at the live `sessionEpoch` it re-read while
@@ -708,8 +714,10 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
   on the caller's own `/mine` grant and request reads, derived from the latest provisioning run
   ([[access-grant#Provisioning status]]); run history stays `workflow:read`. Whether an admin may
   approve their own access request; deferred tool loading now that the catalog passes ~60 tools.
-- A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
-  sessions* option does).
+- ~~A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
+  sessions* option does).~~ **Done in #1699**: "Sign out everywhere and disconnect AI apps"
+  (decision 8, amendment of 2026-10-22). The `mcp.client_connected` email became a security notice
+  that ignores the per-user opt-out in the same change.
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
   *Done 2026-10-21 (#1687): the `input` sentence param kind, bounded on the server and set apart on the
   card ([[ai-assistant/tools-and-execution|tools]] §9.1).*
