@@ -4,7 +4,10 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { AGENT_POLICY_STALE_MIN_SECONDS } from '@lazyit/shared';
+import {
+  AGENT_POLICY_STALE_MIN_SECONDS,
+  isAlertsSnoozed,
+} from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -61,6 +64,17 @@ export const INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT = 15 * 60 * 1000; // 15 minut
  * during the grace, and a node already OFFLINE stays OFFLINE until it reports. Per process, which is the
  * right scope: one API container per instance (single-host Compose, ADR-0015), and any replica that
  * stayed up while another restarted was still receiving reports, so its own sweep is not fooled.
+ *
+ * RETIRED NODES ARE SKIPPED (#1701, epic #1146 Q11). A retired node is gone, not silent: it is never
+ * selected, so it is never flipped OFFLINE and never announced. Its status stays whatever it was when
+ * it was retired. The skip is in BOTH the candidate read and the conditional flip, so a node retired
+ * between the two is not flipped either.
+ *
+ * SNOOZED NODES ARE FLIPPED BUT NOT ANNOUNCED (#1701, epic #1146 Q15). While `alertsSnoozedUntil` is in
+ * the future the node still goes OFFLINE — the map must stay true — but no `infra.agent_offline` nudge
+ * (bell or email) is emitted for that transition. The nudge is per TRANSITION, so an outage that began
+ * inside the window is not re-announced when the window ends: the node is already OFFLINE and is no
+ * longer a candidate. A node that recovers and goes silent again after the window is announced normally.
  *
  * ponytail: the bulk flip is ONE `updateMany`; it does NOT re-index each flipped node into search (that
  * would be an N-query fan-out). The search `status` is cosmetic drift that the node's next report
@@ -139,6 +153,8 @@ export class InfraAgentStalenessSweeper
         source: 'AGENT',
         status: { not: 'OFFLINE' },
         deletedAt: null,
+        // Retired = gone, not silent (#1701): never flipped, never announced.
+        retiredAt: null,
         lastReportedAt: { lt: candidateCutoff },
       } as const;
       // Snapshot the nodes about to transition INTO OFFLINE — the `status != OFFLINE` filter guarantees
@@ -150,6 +166,7 @@ export class InfraAgentStalenessSweeper
           label: true,
           lastReportedAt: true,
           policyStaleAfterSeconds: true,
+          alertsSnoozedUntil: true,
         },
       });
       // PER-NODE, not one global cutoff (#1140). The threshold used to be a single env var, which made
@@ -198,6 +215,7 @@ export class InfraAgentStalenessSweeper
         where: {
           status: { not: 'OFFLINE' },
           deletedAt: null,
+          retiredAt: null,
           OR: transitioning.map((n) => ({
             id: n.id,
             lastReportedAt: n.lastReportedAt,
@@ -217,8 +235,14 @@ export class InfraAgentStalenessSweeper
       // instant, so a node stuck OFFLINE across many sweeps is not re-selected (status is now OFFLINE)
       // and a genuinely NEW outage (a fresh lastReportedAt) yields a fresh key ⇒ a fresh nudge.
       const flippedIds = new Set(flipped.map((row) => row.id));
+      let snoozed = 0;
       for (const node of transitioning) {
         if (!flippedIds.has(node.id)) continue;
+        // A snoozed node (#1701) still flipped above; only its announcement is suppressed.
+        if (isAlertsSnoozed(node.alertsSnoozedUntil, now)) {
+          snoozed += 1;
+          continue;
+        }
         await this.notifications.emit({
           type: 'infra.agent_offline',
           dedupeKey: `infra.agent_offline:${node.id}:${node.lastReportedAt?.toISOString() ?? 'never'}`,
@@ -234,6 +258,11 @@ export class InfraAgentStalenessSweeper
             lastReportedAt: node.lastReportedAt?.toISOString() ?? null,
           },
         });
+      }
+      if (snoozed > 0) {
+        this.logger.log(
+          `${snoozed} of them had offline alerts snoozed — flipped OFFLINE without a notification.`,
+        );
       }
       return count;
     } catch (err) {
