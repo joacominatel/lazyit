@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-05
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -254,6 +254,19 @@ that shipped ingests inline and synchronously, with no queue in the path; see th
   the classic duplicate-CI guard. The composite partial-unique index lands with this v2 work.
 
 **No agent code ships before v2.** The columns sit nullable/defaulted until then.
+
+**Amendment (2026-10-22, #1701) — a third lifecycle axis: retired.** `state` answers whether a node
+has been reviewed, and `status` whether it is reporting. Neither can say that a node is **gone**: a
+decommissioned server is not a crashed one. So `InfraNode` gains nullable `retiredAt` and `retiredById`
+(plus `alertsSnoozedUntil` for a maintenance window). These are timestamps beside the two enums, not
+new members of them, because a retired node can be in any state and any status. A retired node stays
+on the map with its history, edges and Asset link intact. It just stops being judged for liveness.
+
+This also refines the trust model above. An agent may now retire **its own** node, and only that node,
+by sending `decommissioning: true` on its last report when it is uninstalled. The node is the one its
+own reporting key resolves to, never another node, an edge or an Asset. A retired node that reports
+again is un-retired automatically. A human retires and un-retires a node under `infra:manage`,
+human-only. The full mechanics are the 2026-10-22 §4 amendment in [[0074-server-reporting-agent]].
 
 ### 5. Asset linkage — default-on, per-node flag, no orphans
 

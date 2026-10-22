@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # InfraNode
@@ -155,6 +155,28 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. The guarantee
   that a colliding host's report never retires its peer's children is pinned by test, with
   reconciliation running ([[0074-server-reporting-agent]] §3, the #1158 amendment).
+- **Retired is not OFFLINE** (#1701, epic #1146 Q11; [[0074-server-reporting-agent]] §4 amendment of
+  2026-10-22). `retiredAt` marks a node as **gone**: a decommissioned server or an uninstalled agent,
+  as distinct from one that has merely gone quiet. The staleness sweeper never selects a retired node,
+  so it is never flipped OFFLINE or announced. Its status stays what it was, and it stays on the map,
+  with its history, edges and Asset link intact. **The linked Asset is never touched**: retiring a
+  server is not disposing of the hardware. A node is retired in one of two ways:
+  - **A human** — `POST /infra/nodes/:id/retire`, which sets `retiredById` to that user.
+  - **Its own agent** on `lazyit-agent uninstall` — a last report with `decommissioning: true`, which
+    retires only the node that report's own reporting key resolves to (the clone's derived-key node for
+    a collided machine-id) and ingests nothing else.
+
+  **A retired node that reports again is un-retired automatically**, and so is a container or guest
+  child its host lists again. That transition, and an agent's own decommission, is recorded as a
+  `node.lifecycle` row in [[infra-node-fact-change]]. A decommissioned host's children are **not**
+  retired with it. The retire is not a new `state` or `status` value, because a retired node can be in
+  any of them. The fleet read keeps a retired host as a row but counts it only under
+  `summary.retired`, and the [[software-watch]] population excludes it.
+- **Offline alerts can be snoozed** (#1701, epic #1146 Q15). While `alertsSnoozedUntil` is in the
+  future, the sweeper still flips the node OFFLINE but sends no `infra.agent_offline` notification for
+  it. An outage that began inside the window is not re-announced when the window ends. A snooze must end
+  in the future and at most 90 days ahead (`INFRA_NODE_SNOOZE_MAX_DAYS`): a node that should never alert
+  again is retired. There is no per-group routing and no digest (CEO decision, Q15).
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
   or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
   human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than
@@ -211,6 +233,9 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `policyRevision` | `int?` | the policy generation the agent last **echoed** (#1140) — the acknowledgement half. Equal to the instance revision (`GET /infra/agent-policy`) = *applied*; lower = *pending* until the next check-in. Null for a manual node and for any agent predating the policy channel, which must render as "not reporting a policy", never as "pending". |
 | `policyAppliedAt` | `datetime?` | when the echoed revision last **changed** — i.e. when this host actually picked a new policy up. Deliberately not advanced on every report, or it would just be a second `lastReportedAt`. |
 | `policyStaleAfterSeconds` | `int?` | the staleness threshold last **served** to this node, denormalized so the §4 sweeper judges each node against the cadence it was told instead of one global env var (#1140). A container child inherits its host's. Written only when the report **echoed a `policyRevision`** — an agent that predates the policy channel is not running a served threshold, so its row stays null and keeps the env var — and rewritten on every such report, so it self-heals after any policy change. Null = never served one → the sweeper falls back to `INFRA_AGENT_STALE_AFTER_MS`. |
+| `retiredAt` | `datetime?` | when the node was RETIRED (#1701) — gone, not silent; the sweeper skips it. Set by a human retire or the host's own decommissioning report; cleared by an un-retire or automatically when the node reports again. Null = active, which is every row that predates the column. On the list row, the graph projection and the fleet row. |
+| `retiredById` | `uuid?` | FK → [[user]], `onDelete: SetNull`. The human who retired it; null for an agent self-retire or a departed user. |
+| `alertsSnoozedUntil` | `datetime?` | offline alerts snoozed until this instant (#1701). Only a FUTURE value suppresses `infra.agent_offline`; the OFFLINE flip itself still happens, and a past value is inert. On the list row, the graph projection and the fleet row. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete = off the map. |
@@ -298,7 +323,7 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
   `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
   its edges with it, so the canvas cannot draw or highlight that relationship). Each item is
-  projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }` — the `owners` /
+  projected to exactly `{ id, label, kind, status, ipAddress, chassis, retiredAt, alertsSnoozedUntil, x, y }` (the two lifecycle timestamps since #1701, for the Retired and Snoozed badges) — the `owners` /
   `assetName` relation joins and the `shortcuts` blob are dropped, because the board never drew them,
   so this complete read is strictly **cheaper** than the paged list read it replaced. Bounded at
   `INFRA_GRAPH_NODES_MAX` = **2000**, with `truncated` **REQUIRED** on the wire (`total >
@@ -330,6 +355,11 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   **re-pointing an already-linked node is a `400`**, #1117).
 - `PATCH /infra/nodes/:id/position` — persist canvas `{ x, y }` (debounced on drag-stop).
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
+- `POST /infra/nodes/:id/retire` / `POST /infra/nodes/:id/unretire` — retire or un-retire the node
+  (#1701). Both are idempotent and return the node. `infra:manage`, human-only.
+- `PUT /infra/nodes/:id/snooze` `{ until }` / `DELETE /infra/nodes/:id/snooze` — set or clear the
+  offline-alert snooze (#1701). A `400` when `until` is not in the future or is more than 90 days ahead.
+  `infra:manage`, human-only.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream
   set reachable over active inverse RUNS_ON/DEPENDS_ON edges, each with a hop `depth`. "What's
   affected if this goes down." This recursive query remains **estate-wide** and is not computed from
@@ -401,7 +431,9 @@ See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
   (they inherit their host's `agentVersion`, so counting them would inflate every bucket); the test is
   the child-key namespace, not `kind`, which a VM guest shares with a VM host (AUD-057). The same
   population feeds the major-behind line on the update email. `osFamily` is
-  projected out of `specs` per read rather than added as a column. Deliberately **not** on the 5–40s
+  projected out of `specs` per read rather than added as a column. A retired host stays a row (with
+  `retiredAt`) but is counted only under `summary.retired` — not in `total`, the version buckets,
+  `notReporting` or `degraded` — and not in the major-behind email count (#1701). Deliberately **not** on the 5–40s
   poll the node list is on: it is a page an operator opens, and it is the heavier read (#1135).
 
 The web consumes it at **Assets › Topology › Agents** (`?view=agents`, #1207): the distribution, the
