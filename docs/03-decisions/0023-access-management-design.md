@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -214,6 +214,57 @@ Rows archived before this change keep their dangling reference; nothing is backf
 - A model's `move` target may sit in any category.
 - A model write that names an archived category is a `400`, and restoring a model whose category is
   archived is a `409`.
+
+**Amended 2026-10-21 (#1604): writes racing the delete.** A writer used to check that the parent was
+live with a plain read and write after it, so a delete committing in between left the new row on an
+archived parent. Writes and deletes now serialize on the parent row:
+- **Writers** lock the parent they name `FOR SHARE` inside their transaction, with the liveness test in the
+  locking statement (READ COMMITTED re-reads a row that changed while the lock waited). That covers asset
+  create, move and receive (each unit) and a purchase's delivery location ([[location]]); application and
+  consumable create and re-categorisation; and asset-model create and re-categorisation
+  ([[asset-category]]). Which writes are checked is unchanged: an update that keeps a legacy archived
+  parent still goes through.
+- **Deletes** lock their own row `FOR UPDATE` before they read the rows that point at it. The category
+  deletes already did; the location delete now does too, after the tree lock.
+- **Lock order:** parent rows before the rows that point at them, and, among dependents, **purchases
+  before assets before purchase lines** — the order a link and an apply already take (purchase
+  `FOR KEY SHARE`, the assets, then the line through the asset's FK). Every path follows it:
+  - a writer takes the parent rows it names (custom status, location, category) before its own row;
+  - the **location delete** takes the tree lock, its own row `FOR UPDATE`, its live **child locations**
+    `FOR NO KEY UPDATE` in id order, its open purchases `FOR UPDATE` in id order, then its assets
+    `FOR UPDATE` in id order. The children come first because they are parents too: the delete
+    re-parents them, and a write moving an asset or a purchase into a child holds the child `FOR SHARE`
+    before that row (#1604 review). Purchases come before assets so the delete cannot cross a link or an
+    apply on the same purchase and assets (#1696);
+  - the **asset-model delete** takes both model rows, the purchases of the mapped lines `FOR SHARE`, its
+    assets `FOR UPDATE`, then the open lines `FOR UPDATE`, all in id order — so it does not cross a
+    location delete over the same purchase and assets, nor a link of its asset to its line that leaves
+    the model alone;
+  - a category delete takes its rows, then the rows filed under them.
+
+  For the pairs above, no transaction waits for an earlier row in this order while it holds a later one, so
+  they do not deadlock. Each pair is reproduced against Postgres in `apps/api/test/parent-row-locks.db.spec.ts`.
+- **Known exception: writes that set a model** (#1703, already the case before this amendment). The link
+  with `apply: ['modelId']`, `applyToLinked` with `modelId`, purchase-from-assets applying the line's
+  model, `updateLine` setting `assetModelId`, and the asset `modelId` writes lock the asset or line first
+  and reach the model only through its FK (`FOR KEY SHARE`). The model delete holds the model and waits for
+  that asset or line, so the two can deadlock (`40P01`); reproduced on Postgres and recorded as an
+  `it.todo` in that suite. The fix is the same rule: the writer locks the model `FOR SHARE` before its own
+  rows.
+- **A lost lock race is a retryable `503`, not a `500` (#1696).** Should a deadlock (`40P01`) or a
+  serialization failure (`40001`) still happen (see the known exception above), Prisma reports it as
+  `P2034` (a model call) or `P2010` with the Postgres code (a raw query). The transaction rolled back, so
+  nothing was saved and the same request should be sent again. The global `PrismaExceptionFilter`
+  answers **`503`** with `Retry-After: 1` and a body
+  `{ statusCode: 503, code: "TRANSACTION_CONFLICT", message }`, the message a generic "try again".
+  It is not a `409`: web flows read a `409` as a specific business conflict, and MCP and headless
+  clients treat it as final. The AI tool error mapper answers `CONFLICT` with the same "try again"
+  message, which the model reads as a cue to retry. A deadlock is logged as an **error** (it means two
+  writes took row locks in different orders, a lock-order bug); a serialization failure as a warning.
+- **Cost:** a parent rename or delete waits for in-flight writes that name the parent, and those writes
+  wait for it. Concurrent writes never wait on each other, since shared locks do not conflict.
+
+Nothing is migrated or backfilled. Rows already left on an archived parent stay as they are.
 
 Related: [[application]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

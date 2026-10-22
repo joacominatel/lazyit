@@ -17,11 +17,19 @@ import { projectApplication } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { applicationMoneyToDb, applicationMoneyToWire } from '../common/money';
+import { lockLiveParent } from '../common/parent-row-lock';
 import {
   keysetOrderBy,
   keysetWhere,
   type KeysetCursor,
 } from '../common/export';
+
+/** The 400 for a write that files an application under a missing or archived category (SEC-052). */
+function categoryNotLive(categoryId: string): BadRequestException {
+  return new BadRequestException(
+    `ApplicationCategory ${categoryId} not found (missing or archived)`,
+  );
+}
 
 /** Optional filters for listing applications. */
 export interface ApplicationFilters {
@@ -194,15 +202,23 @@ export class ApplicationsService {
   }
 
   async create(data: CreateApplication) {
-    await this.assertCategoryLive(this.prisma, data.categoryId);
     const { metadata, ...rest } = data;
-    const application = await this.prisma.application.create({
-      data: {
-        ...applicationMoneyToDb(rest),
-        ...(metadata !== undefined
-          ? { metadata: metadata as Prisma.InputJsonValue }
-          : {}),
-      },
+    const application = await this.prisma.$transaction(async (tx) => {
+      // The category stays locked FOR SHARE until the commit, so a concurrent category delete cannot strand it.
+      if (
+        data.categoryId &&
+        !(await lockLiveParent(tx, 'application_categories', data.categoryId))
+      ) {
+        throw categoryNotLive(data.categoryId);
+      }
+      return tx.application.create({
+        data: {
+          ...applicationMoneyToDb(rest),
+          ...(metadata !== undefined
+            ? { metadata: metadata as Prisma.InputJsonValue }
+            : {}),
+        },
+      });
     });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('applications', projectApplication(application));
@@ -212,14 +228,38 @@ export class ApplicationsService {
   /**
    * Update an application. `tx` runs the write inside a caller's transaction — the purchase license apply
    * (#1477) writes `seatsPurchased` / `renewalDate` here, through this one path, in the same transaction as
-   * its line and event.
+   * its line and event. That caller already holds the application row and never names a category; a caller
+   * that did would have to lock the category before the application, as {@link write} does.
    */
   async update(
     id: string,
     data: UpdateApplication,
     tx?: Prisma.TransactionClient,
   ) {
-    const client = tx ?? this.prisma;
+    const application = tx
+      ? await this.write(tx, id, data)
+      : await this.prisma.$transaction((client) =>
+          this.write(client, id, data),
+        );
+    this.search.upsert('applications', projectApplication(application));
+    return applicationMoneyToWire(application);
+  }
+
+  /**
+   * The update itself, inside a transaction. A named category is locked `FOR SHARE` first (#1604), before the
+   * application row, so a concurrent category delete (which locks the category `FOR UPDATE`, then moves its
+   * applications) either waits for this write and resolves it with the rest, or commits first and the change
+   * is refused. 400 unless the category is LIVE (SEC-052): a soft-deleted one still passes the foreign key.
+   * Write-only: reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   */
+  private async write(
+    client: Prisma.TransactionClient,
+    id: string,
+    data: UpdateApplication,
+  ) {
+    const categoryLive = data.categoryId
+      ? await lockLiveParent(client, 'application_categories', data.categoryId)
+      : true;
     // 404 if missing or already soft-deleted (the read filter hides archived rows).
     const existing = await client.application.findFirst({
       where: { id },
@@ -229,11 +269,15 @@ export class ApplicationsService {
       throw new NotFoundException(`Application ${id} not found`);
     }
     // Filing under an archived category is refused (400); keeping a legacy one is not.
-    if (data.categoryId !== existing.categoryId) {
-      await this.assertCategoryLive(client, data.categoryId);
+    if (
+      data.categoryId &&
+      data.categoryId !== existing.categoryId &&
+      !categoryLive
+    ) {
+      throw categoryNotLive(data.categoryId);
     }
     const { metadata, ...rest } = data;
-    const application = await client.application.update({
+    return client.application.update({
       where: { id },
       data: {
         ...applicationMoneyToDb(rest),
@@ -247,29 +291,6 @@ export class ApplicationsService {
           : {}),
       },
     });
-    this.search.upsert('applications', projectApplication(application));
-    return applicationMoneyToWire(application);
-  }
-
-  /**
-   * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
-   * without this an application could be filed under a category the taxonomy hides (SEC-052). Write-only:
-   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
-   */
-  private async assertCategoryLive(
-    client: Prisma.TransactionClient | PrismaService,
-    categoryId: string | null | undefined,
-  ): Promise<void> {
-    if (!categoryId) return;
-    const category = await client.applicationCategory.findFirst({
-      where: { id: categoryId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!category) {
-      throw new BadRequestException(
-        `ApplicationCategory ${categoryId} not found (missing or archived)`,
-      );
-    }
   }
 
   /**

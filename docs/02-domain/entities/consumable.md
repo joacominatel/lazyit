@@ -3,7 +3,7 @@ title: Consumable
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Consumable
@@ -24,7 +24,8 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
   [[0041-soft-delete-reuse-and-restore]]), `description?`, `notes?`.
 - `categoryId?` — FK → [[consumable-category]], `onDelete: SetNull`. A create, or an update that changes
   it, is a `400` when the category is missing or soft-deleted; a legacy archived category left unchanged
-  is accepted.
+  is accepted. The named category is locked `FOR SHARE` in the write's transaction, before the
+  consumable row, so a concurrent category delete cannot strand it there (#1604).
 - `currentStock` — Int, **cached** on-hand quantity (default 0). **Never edited directly** — only
   through a [[consumable-movement]], maintained transactionally ([[0034-consumables-design]]). The
   ledger is the source of truth; this column is a derived cache kept in sync in the same transaction.
