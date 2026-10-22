@@ -1,6 +1,8 @@
 import type {
   ApplyLicense,
   ApplyLicenseResult,
+  ApplyToLinkedAssets,
+  ApplyToLinkedAssetsResult,
   AssetPurchaseProvenance,
   CancelRemainingUnits,
   CreatePurchaseFromAssets,
@@ -14,6 +16,8 @@ import type {
   PendingPurchaseSummary,
   PurchaseExtractionDraft,
   PurchaseExtractionStatus,
+  PurchaseLinkedPreview,
+  PurchaseLinkedPreviewRequest,
   PurchaseLinkPreview,
   PurchaseOrder,
   PurchaseOrderDetail,
@@ -232,6 +236,41 @@ export function unlinkAssetsFromLine(
   return apiFetch<UnlinkAssetsResult>(`${linePath(id, lineId)}/unlink-assets`, {
     method: "POST",
     body: { assetIds },
+  });
+}
+
+/**
+ * What re-applying the line's current values would do to the assets ALREADY linked to it (#1502;
+ * `purchaseOrder:read` + `asset:read`, writes nothing): every live linked asset with its diff, whether its cost
+ * still holds the previous purchase value, and what the confirmation pre-checks. `previousUnitPrice` is the
+ * price before the edit (`null` = the line had none).
+ */
+export function getLinkedPreview(
+  id: string,
+  lineId: string,
+  data: PurchaseLinkedPreviewRequest,
+  signal?: AbortSignal,
+): Promise<PurchaseLinkedPreview> {
+  return apiFetch<PurchaseLinkedPreview>(`${linePath(id, lineId)}/linked-preview`, {
+    method: "POST",
+    body: data,
+    signal,
+  });
+}
+
+/**
+ * Copy the line's current `fields` onto assets already linked to it (#1502; `purchaseOrder:write` +
+ * `asset:write`): fills and replaces only, never a clear; cost and currency together. At most 200 ids per
+ * call (the caller chunks). Partial success: `{ updated, unchanged, failed, line }`.
+ */
+export function applyToLinkedAssets(
+  id: string,
+  lineId: string,
+  data: ApplyToLinkedAssets,
+): Promise<ApplyToLinkedAssetsResult> {
+  return apiFetch<ApplyToLinkedAssetsResult>(`${linePath(id, lineId)}/apply-to-linked`, {
+    method: "POST",
+    body: data,
   });
 }
 

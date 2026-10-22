@@ -313,7 +313,15 @@
     "createdFromAssets": "Created from {count, plural, one {# selected asset} other {# selected assets}} ({lines, plural, one {# line} other {# lines}})",
     "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out",
     "supplierMerged": "Supplier {from} merged into {to}",
-    "supplierMergedGeneric": "Supplier merged into another one"
+    "supplierMergedGeneric": "Supplier merged into another one",
+    "linkedValuesApplied": "Updated {count, plural, one {# linked asset} other {# linked assets}} of “{line}” from the purchase: {fields}",
+    "applyFields": {
+      "purchaseCost": "cost",
+      "purchaseDate": "purchase date",
+      "warrantyEnd": "warranty end",
+      "company": "company",
+      "modelId": "model"
+    }
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
@@ -546,7 +554,13 @@
     "unlinkTitle": "Unlink from the purchase?",
     "unlinkDescription": "Unlink {asset} from {purchase}? Its purchase values stay as they are.",
     "unlinkedToast": "Unlinked from the purchase",
-    "unlinkError": "Couldn't unlink the asset"
+    "unlinkError": "Couldn't unlink the asset",
+    "applyValue": "Apply purchase value",
+    "applyTitle": "Apply the purchase value?",
+    "applyDescription": "Set the purchase cost of {asset} to {value}, the price on {purchase}? Its current cost, {current}, is replaced, and the currency label changes with it.",
+    "appliedToast": "Purchase cost updated from the purchase",
+    "alreadyApplied": "The cost already matches the purchase",
+    "applyError": "Couldn't apply the purchase value"
   },
   "pending": {
     "subtitle": "Lines still waiting for units, oldest order first.",
@@ -836,5 +850,23 @@
     },
     "saveFix": "Fix the marked values to save",
     "savedPart": "Saved"
+  },
+  "linkedUpdate": {
+    "title": "Update cost on linked assets?",
+    "description": "The unit price of “{line}” changed. Choose the linked assets whose purchase cost should follow it — nothing changes until you confirm.",
+    "previewError": "Couldn't compare the linked assets with the purchase.",
+    "none": "No live asset is linked to this line any more.",
+    "noCost": "no cost",
+    "change": "{from} → {to}",
+    "overridden": "Overridden",
+    "alreadySame": "Already the same",
+    "assetLabel": "Update the cost of {asset}",
+    "help": "Assets that still had the old purchase price, or no cost, are ticked. Assets whose cost was changed by hand are marked overridden and left unticked. The currency moves with the cost.",
+    "keep": "Keep their costs",
+    "submit": "Update {count, plural, =0 {assets} one {# asset} other {# assets}}",
+    "updatedToast": "{count, plural, =0 {No asset needed a change} one {# asset updated} other {# assets updated}}",
+    "partialToast": "{updated, plural, one {# asset updated} other {# assets updated}} · {failed, plural, one {# not updated} other {# not updated}}",
+    "partialError": "{updated, plural, one {# asset was updated} other {# assets were updated}}, then the update stopped; {notSent, plural, one {# asset was} other {# assets were}} not changed. Edit the line price again to retry.",
+    "error": "Couldn't update the linked assets"
   }
 }
