@@ -3,7 +3,11 @@ import type { UserSessionList } from "@lazyit/shared";
 
 import { ApiError } from "../client";
 import { useClientOnlyQuery } from "../client-only-query";
-import { endMySession, listMySessions } from "../endpoints/auth-session";
+import {
+  endMySession,
+  listMySessions,
+  revokeAllMySessions,
+} from "../endpoints/auth-session";
 
 /** Query keys for the caller's own per-device sessions (#1420). */
 export const mySessionKeys = {
@@ -51,5 +55,17 @@ export function useEndMySession() {
         void queryClient.invalidateQueries({ queryKey: mySessionKeys.all });
       }
     },
+  });
+}
+
+/**
+ * "Sign out everywhere and disconnect AI apps" (`POST /auth/sessions/revoke-all`, #1699). On success this
+ * browser's token is already dead, so the component signs out locally (no cache work here). A failure
+ * leaves the user signed in with nothing changed, so they can retry; a 401 flows through the global
+ * auth-expiry reaction like any other mutation.
+ */
+export function useSignOutEverywhere() {
+  return useMutation<void, unknown, void>({
+    mutationFn: () => revokeAllMySessions(),
   });
 }
