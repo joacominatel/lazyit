@@ -110,9 +110,13 @@ export function AssignUserDialog({
   const held = useHeldAssets({ userId: userId || undefined, excludeAssetId: assetId });
 
   // Every close path (Cancel, the X, Escape, the overlay, Done) lands here: nothing marked is sent.
+  // Submitting covers the gap between the click and the mutation starting (validation runs first), so
+  // a double click can't send the assignment twice.
+  const pending = form.formState.isSubmitting || assign.isPending;
+
   // While the assignment and its releases run, the dialog stays open so their outcome lands in it.
   function handleOpenChange(next: boolean) {
-    if (!next && assign.isPending) return;
+    if (!next && pending) return;
     if (!next) {
       dispatchMarks({ type: "close" });
       setReport(null);
@@ -231,6 +235,7 @@ export function AssignUserDialog({
                         onValueChange={(id) => pickUser(id, field.onChange)}
                         excludeUserIds={excludeUserIds}
                         ariaInvalid={fieldState.invalid}
+                        disabled={pending}
                         placeholder={t("selectUser")}
                         searchPlaceholder={t("searchUser")}
                         emptyText={t("noAssignableUsers")}
@@ -256,6 +261,7 @@ export function AssignUserDialog({
                       onChange={(event) => field.onChange(event.target.value)}
                       placeholder={t("notesPlaceholder")}
                       rows={2}
+                      disabled={pending}
                       aria-invalid={fieldState.invalid || undefined}
                     />
                     <FieldError errors={[fieldState.error]} />
@@ -269,7 +275,7 @@ export function AssignUserDialog({
             held={held}
             marks={marks}
             dispatch={dispatchMarks}
-            disabled={assign.isPending}
+            disabled={pending}
             className="border-t pt-4 md:border-t-0 md:border-l md:pt-0 md:pl-6"
           />
         </div>
@@ -279,12 +285,12 @@ export function AssignUserDialog({
             type="button"
             variant="outline"
             onClick={() => handleOpenChange(false)}
-            disabled={assign.isPending}
+            disabled={pending}
           >
             {tc("cancel")}
           </Button>
-          <Button type="submit" form={FORM_ID} disabled={assign.isPending}>
-            {assign.isPending && <ArrowPathIcon className="animate-spin" />}
+          <Button type="submit" form={FORM_ID} disabled={pending}>
+            {pending && <ArrowPathIcon className="animate-spin" />}
             {t("assign")}
           </Button>
         </DialogFooter>

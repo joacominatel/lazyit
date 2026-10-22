@@ -26,6 +26,7 @@ let heldAssets: AssetListItem[] = [];
 // The user id each read was asked for — `undefined` means the read stays idle (never sent).
 let assignmentsReadFor: (string | undefined)[] = [];
 let assetsReadFor: (string | undefined)[] = [];
+let assetsLoading = false;
 
 void mock.module(PERMISSIONS, () => ({
   ...realPermissions,
@@ -42,7 +43,8 @@ void mock.module(ASSETS_HOOKS, () => ({
   ...realAssetsHooks,
   useAssetsHeldBy: (id: string | undefined) => {
     assetsReadFor.push(id);
-    return { data: id ? { items: heldAssets, total: heldAssets.length } : undefined };
+    if (id && assetsLoading) return { data: undefined, isLoading: true };
+    return { data: id ? { items: heldAssets, total: heldAssets.length } : undefined, isLoading: false };
   },
 }));
 
@@ -96,6 +98,7 @@ beforeEach(() => {
   ];
   assignmentsReadFor = [];
   assetsReadFor = [];
+  assetsLoading = false;
 });
 
 describe("HeldAssetsPanel (#1726)", () => {
@@ -114,6 +117,14 @@ describe("HeldAssetsPanel (#1726)", () => {
     expect(render()).toBe("");
     expect(assignmentsReadFor.every((id) => id === undefined)).toBe(true);
     expect(assetsReadFor.every((id) => id === undefined)).toBe(true);
+  });
+
+  test("stays loading until the asset read settles too, so rows never flash the fallback label", () => {
+    assetsLoading = true;
+    const html = render();
+    expect(html).toContain('role="status"');
+    expect(html).toContain(esc(t.loading));
+    expect(html).not.toContain(`href="/assets/${OLD}"`);
   });
 
   test("hidden until a person is picked", () => {

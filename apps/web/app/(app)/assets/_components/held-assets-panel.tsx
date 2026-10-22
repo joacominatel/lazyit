@@ -66,7 +66,8 @@ export function useHeldAssets({
     visible,
     canRelease,
     rows,
-    isLoading: visible && assignments.isLoading,
+    // Loading until BOTH reads settle, so rows never flash the plain "Asset" fallback label.
+    isLoading: visible && (assignments.isLoading || assets.isLoading),
     isError: visible && assignments.isError,
     refetch: () => void assignments.refetch(),
   };
@@ -124,7 +125,8 @@ export function HeldAssetsPanel({
       </div>
 
       {held.isLoading ? (
-        <div className="space-y-2" aria-busy="true" aria-label={t("loading")}>
+        <div className="space-y-2" role="status" aria-busy="true">
+          <span className="sr-only">{t("loading")}</span>
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
@@ -213,9 +215,17 @@ export function HeldAssetsPanel({
         </ul>
       )}
 
+      {/* The live region is always rendered (empty until the first tick) so even that tick is
+          announced; a live region that mounts with its content is often missed. The visible count
+          below repeats it for sighted users and stays out of the accessibility tree. */}
+      {canRelease ? (
+        <p className="sr-only" aria-live="polite">
+          {markedCount > 0 ? t("markedCount", { count: markedCount }) : null}
+        </p>
+      ) : null}
       {canRelease && markedCount > 0 ? (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium" aria-live="polite">
+          <p className="text-xs font-medium" aria-hidden>
             {t("markedCount", { count: markedCount })}
           </p>
           <label htmlFor={noteId} className="text-xs text-muted-foreground">

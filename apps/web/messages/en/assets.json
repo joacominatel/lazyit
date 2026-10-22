@@ -436,7 +436,7 @@
       "markedCount": "{count, plural, one {# asset will be released} other {# assets will be released}}",
       "noteLabel": "Release note",
       "notePlaceholder": "Optional — e.g. old laptop returned",
-      "noteHelp": "Saved on every asset you release here."
+      "noteHelp": "Saved on every asset you release here, replacing the note that assignment already had."
     },
     "report": {
       "title": "Assigned, but some releases failed",

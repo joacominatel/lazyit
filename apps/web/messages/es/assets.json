@@ -436,7 +436,7 @@
       "markedCount": "{count, plural, one {Se liberará # activo} other {Se liberarán # activos}}",
       "noteLabel": "Nota de liberación",
       "notePlaceholder": "Opcional — p. ej. devolvió la laptop anterior",
-      "noteHelp": "Se guarda en cada activo que liberes aquí."
+      "noteHelp": "Se guarda en cada activo que liberes aquí y reemplaza la nota que ya tenía esa asignación."
     },
     "report": {
       "title": "Asignado, pero algunas liberaciones fallaron",
