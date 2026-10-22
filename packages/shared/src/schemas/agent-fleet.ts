@@ -6,6 +6,7 @@ import {
   InfraNodeStatusSchema,
 } from "./infra";
 import { isMajorBehind, isNewerVersion, parseSemver } from "../utils/semver";
+import { pageSchema } from "./pagination";
 
 /**
  * The agent fleet read surface (ADR-0094 §3/§4, issue #1206) — "how many agents do I have, on what
@@ -287,3 +288,225 @@ export const AgentFleetViewSchema = z.object({
   identitiesNeverUsed: z.number().int().nonnegative().optional(),
 });
 export type AgentFleetView = z.infer<typeof AgentFleetViewSchema>;
+
+// ── The software watchlist (#1684, split from epic #1146 item 4) ──────────────────────────────────
+
+/**
+ * The software watchlist — a short, operator-maintained list of package names, each answered with
+ * ONE fleet-wide distribution: *"openssl: 11 hosts on 3.0.13, 2 hosts on 1.1.1w, 1 host missing,
+ * 3 unknown"*. Computed on read from the package lists the agents already stored on their nodes
+ * (`InfraNode.specs.software`); nothing new is collected and nothing travels toward a host.
+ *
+ * DISTRIBUTION ONLY (CEO decision Q12 on #1146). There is deliberately no version COMPARISON here —
+ * no "outdated", no ordering of versions, no EOL flag and no CVE matching (that needs a live feed,
+ * which the air-gapped promise of ADR-0074 §6 rules out). A version is an opaque string and the only
+ * thing this module does with it is count hosts per distinct value. Nor is there any NORMALIZATION of
+ * products — mapping forty spellings of one product to one entry is a data-curation business the
+ * epic refused. A watch matches a package by its exact name, compared after
+ * {@link normalizeSoftwareName}.
+ */
+
+/** Cap on a watched name — the report contract's own cap on a package name (`software[].name`). */
+export const SOFTWARE_WATCH_NAME_MAX = 255;
+
+/**
+ * How many LIVE watches an instance may hold. A guard rail, not a quota: the feature exists for the
+ * "10–30 packages you care about every Patch Tuesday", and each one is a GROUP BY over every host's
+ * stored package list on every read — so the list endpoint stays unpaged and bounded instead.
+ */
+export const SOFTWARE_WATCH_LIMIT = 100;
+
+/**
+ * The ONE spelling a package name is compared in: whitespace runs collapsed to a single space, the
+ * ends trimmed, lower-cased. PURE and idempotent. A watch STORES its name in this form (so uniqueness
+ * among live watches is uniqueness of the normalized name), and a reported package matches a watch
+ * when its name normalizes to the same string.
+ *
+ * Nothing more than that, on purpose: no stripping of architecture suffixes, versions or vendor
+ * prefixes. `libssl3` and `libssl3:amd64`, or `Mozilla Firefox` and `Mozilla Firefox (x64 en-US)`,
+ * are different names here — a Windows registry `DisplayName` often carries the version or the
+ * architecture, and folding those is the product normalization this feature declines to own.
+ */
+export function normalizeSoftwareName(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * A watched name on the WRITE path: normalized first, then bounded, so `"  OpenSSL "` is stored as
+ * `"openssl"` and a name that is only whitespace is a 400, not an empty watch.
+ */
+export const SoftwareWatchNameSchema = z
+  .string()
+  .max(SOFTWARE_WATCH_NAME_MAX * 4)
+  .transform(normalizeSoftwareName)
+  .pipe(z.string().min(1).max(SOFTWARE_WATCH_NAME_MAX));
+
+/** `POST /infra/software-watches` — the whole body. Strict: there is nothing else to set. */
+export const CreateSoftwareWatchSchema = z.strictObject({
+  name: SoftwareWatchNameSchema,
+});
+export type CreateSoftwareWatch = z.infer<typeof CreateSoftwareWatchSchema>;
+
+/**
+ * Where one host stands for one watched package.
+ *
+ *   - `INSTALLED` — the host's last stored package list names it (at one or more versions).
+ *   - `MISSING`   — the host's last stored package list does NOT name it. Only ever said about a host
+ *     that HAS a stored list, i.e. one whose agent actually enumerated its packages.
+ *   - `UNKNOWN`   — we cannot say. See {@link SoftwareWatchUnknownReasonSchema}. Never folded into
+ *     `MISSING`: "nobody looked" is not "it is not there", and on a Patch-Tuesday view the difference
+ *     is the whole point.
+ */
+export const SoftwareWatchPresenceSchema = z.enum(["INSTALLED", "MISSING", "UNKNOWN"]);
+export type SoftwareWatchPresence = z.infer<typeof SoftwareWatchPresenceSchema>;
+
+/**
+ * Why a host is `UNKNOWN` for a watch.
+ *
+ *   - `NOT_COLLECTED` — the node stores NO package list. That is what software collection being off
+ *     leaves behind, whatever turned it off: the agent policy at any scope (instance, service account
+ *     or node, #1140), the host's own local veto (`LAZYIT_COLLECT_SOFTWARE=false`), or a collector
+ *     that has never been able to enumerate. The server clears the stored list when a report says
+ *     `softwareState: 'disabled'` (#1142), so the stored absence is the evidence, and it is the only
+ *     evidence that covers every layer — a node carries no reporter attribution (#1134), so the
+ *     service-account policy layer cannot be resolved per node on a read.
+ *   - `EXCLUDED_BY_POLICY` — the host stores a list, the name is not on it, AND the name matches a
+ *     `exclude.softwareNames` glob of the policy the server can resolve for that node (the instance
+ *     default plus the node's own override). The agent was told not to report it, so its absence
+ *     proves nothing.
+ */
+export const SoftwareWatchUnknownReasonSchema = z.enum(["NOT_COLLECTED", "EXCLUDED_BY_POLICY"]);
+export type SoftwareWatchUnknownReason = z.infer<typeof SoftwareWatchUnknownReasonSchema>;
+
+/**
+ * One distinct version and how many hosts carry it. `version: null` is the bucket for packages the
+ * agent listed without a version (or with an empty one). A host carrying two versions of one package
+ * (two kernels, a multi-slot runtime) counts once in EACH bucket, so the buckets can sum to more than
+ * `installed` — `installed` counts hosts, the buckets count host×version pairs.
+ */
+export const SoftwareWatchVersionCountSchema = z.object({
+  version: z.string().nullable(),
+  hosts: z.number().int().nonnegative(),
+});
+export type SoftwareWatchVersionCount = z.infer<typeof SoftwareWatchVersionCountSchema>;
+
+/**
+ * One watch's fleet-wide distribution. `installed + missing + unknown === hostsTotal`, always: every
+ * host in the population lands in exactly one presence. `versions` is ordered by host count
+ * (descending), then by the version string as plain text — a STABLE display order and nothing more;
+ * it is not a version ordering and must never be read as "newest first".
+ *
+ * The population is every live, agent-reported HOST (container and hypervisor-guest children carry
+ * no package list of their own; manual nodes have no agent), PENDING and OFFLINE ones included — an
+ * offline host's last list is still the best evidence there is, and the host rows say how old it is.
+ */
+export const SoftwareWatchDistributionSchema = z.object({
+  hostsTotal: z.number().int().nonnegative(),
+  installed: z.number().int().nonnegative(),
+  missing: z.number().int().nonnegative(),
+  unknown: z.number().int().nonnegative(),
+  versions: z.array(SoftwareWatchVersionCountSchema),
+});
+export type SoftwareWatchDistribution = z.infer<typeof SoftwareWatchDistributionSchema>;
+
+/**
+ * A watch as stored. `name` is the normalized form ({@link normalizeSoftwareName}). `createdById` /
+ * `createdByName` name the human who added it — both null when the author was deleted (the name is
+ * only shown for a LIVE author, the auto-confirm rule's rule).
+ */
+export const SoftwareWatchSchema = z.object({
+  id: z.cuid(),
+  name: z.string(),
+  createdAt: z.iso.datetime(),
+  createdById: z.uuid().nullable(),
+  createdByName: z.string().nullable(),
+});
+export type SoftwareWatch = z.infer<typeof SoftwareWatchSchema>;
+
+/**
+ * `GET /infra/software-watches` (one row per live watch, oldest first, at most
+ * {@link SOFTWARE_WATCH_LIMIT}) and `GET /infra/software-watches/:id` — the watch plus its
+ * distribution, computed on that read.
+ */
+export const SoftwareWatchSummarySchema = SoftwareWatchSchema.extend({
+  distribution: SoftwareWatchDistributionSchema,
+});
+export type SoftwareWatchSummary = z.infer<typeof SoftwareWatchSummarySchema>;
+
+/**
+ * One host on a watch's drill-in (`GET /infra/software-watches/:id/hosts`). Deliberately lean — the
+ * node's own drill-in is one click away for everything else.
+ *
+ * `versions` is non-empty only for `INSTALLED` (distinct values, in the same plain-text order as the
+ * buckets; `null` = listed without a version). `unknownReason` is set only for `UNKNOWN`.
+ * `inventoryCollectedAt` is the stored blob's own `reportedAt` — when the package list this row is
+ * judged on was COLLECTED, which on a quiet host can be much older than `lastReportedAt` (the last
+ * check-in), because an unchanged inventory is not rewritten (#1153). Null when the blob carries none.
+ */
+export const SoftwareWatchHostSchema = z.object({
+  id: z.cuid(),
+  label: z.string(),
+  kind: InfraNodeKindSchema,
+  status: InfraNodeStatusSchema,
+  pending: z.boolean(),
+  lastReportedAt: z.iso.datetime().nullable(),
+  inventoryCollectedAt: z.iso.datetime().nullable(),
+  presence: SoftwareWatchPresenceSchema,
+  versions: z.array(z.string().nullable()),
+  unknownReason: SoftwareWatchUnknownReasonSchema.nullable(),
+});
+export type SoftwareWatchHost = z.infer<typeof SoftwareWatchHostSchema>;
+
+/** The paged host list — the house `Page<T>` envelope (ADR-0030). */
+export const SoftwareWatchHostPageSchema = pageSchema(SoftwareWatchHostSchema);
+export type SoftwareWatchHostPage = z.infer<typeof SoftwareWatchHostPageSchema>;
+
+/**
+ * Tally per-host presences into a distribution. PURE — the server builds every summary with it, and a
+ * consumer can re-tally a filtered set without a second request. Version buckets come from the
+ * `INSTALLED` rows' `versions`; `null` and `""` share the null bucket.
+ */
+export function summarizeSoftwareWatch(
+  hosts: readonly Pick<SoftwareWatchHost, "presence" | "versions">[],
+): SoftwareWatchDistribution {
+  const distribution: SoftwareWatchDistribution = {
+    hostsTotal: hosts.length,
+    installed: 0,
+    missing: 0,
+    unknown: 0,
+    versions: [],
+  };
+  const buckets = new Map<string | null, number>();
+  for (const host of hosts) {
+    if (host.presence === "INSTALLED") {
+      distribution.installed += 1;
+      const seen = new Set<string | null>();
+      for (const raw of host.versions) {
+        const version = raw === "" ? null : raw;
+        if (seen.has(version)) continue;
+        seen.add(version);
+        buckets.set(version, (buckets.get(version) ?? 0) + 1);
+      }
+    } else if (host.presence === "MISSING") {
+      distribution.missing += 1;
+    } else {
+      distribution.unknown += 1;
+    }
+  }
+  distribution.versions = [...buckets.entries()]
+    .map(([version, count]) => ({ version, hosts: count }))
+    .sort((a, b) => b.hosts - a.hosts || compareVersionText(a.version, b.version));
+  return distribution;
+}
+
+/**
+ * The plain-text display order for version strings — `null` last, otherwise code-unit order. NOT a
+ * version comparison (Q12): `10.0` sorts before `9.1` here, and that is fine, because nothing reads
+ * meaning into the order beyond "the same every time".
+ */
+export function compareVersionText(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a < b ? -1 : 1;
+}

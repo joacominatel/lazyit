@@ -485,11 +485,19 @@ this build, which that section now states on screen rather than implying only on
   posture and not a styling choice. Still **inert until #1203**: every Docker-served binary reports
   `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills in as
   hosts are re-installed — the view says exactly that rather than implying those agents are fine.
+- ~~**Software watchlist**~~ **Shipped (API, #1684; epic #1146 item 4)** — see [[software-watch]]. The
+  first cross-host read of `specs.software`: an operator-maintained list of package names, each answered
+  on read with *package → versions → host counts, plus the hosts missing it* over the same population the
+  fleet view counts (agent hosts, children excluded). **Distribution only** (CEO Q12): no version
+  comparison, no EOL, no CVE feed. A node storing **no** `software` key — which is what a
+  `softwareState: 'disabled'` report leaves (#1142) — reads **UNKNOWN, never MISSING**. It reads `specs`
+  through two narrow jsonb projections, never the blob, so the #1135 "detail-only" rule for `specs`
+  stands. No column on this table changes.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
 
-Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+Related: [[infra-edge]] · [[infra-node-fact-change]] · [[software-watch]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
 [[0093-chassis-routing-and-asset-adoption]] · [[0094-assisted-agent-update]] ·
 [[0095-hypervisor-guest-inventory]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·
