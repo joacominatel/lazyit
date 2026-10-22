@@ -253,7 +253,7 @@ llevan, aunque el modelo no esté en el nombre.
 - **Empresa** — acota a una empresa (la etiqueta de agrupación de arriba). Solo aparecen las empresas en uso.
 - **Responsable** — muestra solo los activos asignados actualmente a una persona concreta. Empieza a
   escribir un nombre para elegirla; la lista mostrará únicamente las asignaciones vigentes de esa
-  persona.
+  persona. Solo aparece si tu rol puede ver el directorio de usuarios.
 - **Responsabilidad** — filtra según si el activo tiene algún responsable actual (*Con responsables*
   / *Sin responsables*), sin importar quién.
 - **Garantía** — acota a los activos cuya **garantía está por vencer** (*Por vencer ≤ 90d*) o ya

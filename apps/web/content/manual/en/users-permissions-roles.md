@@ -29,8 +29,8 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
 - **Viewer** — read-only. By default a Viewer can look at most areas but change nothing. A few
   sensitive views (the user directory, the access-grant ledger, and purchases and suppliers) are also
   hidden from Viewer by default. A Viewer still sees the name and email of each asset's owners, because
-  who holds an item is part of the inventory (see
-  [Assignments & history](/help/assets-assignments-history)).
+  who holds an item is part of the inventory — but nothing else about them, and cannot list the assets
+  a given person holds (see [Assignments & history](/help/assets-assignments-history)).
 
 ## The Roles & permissions page
 

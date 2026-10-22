@@ -230,7 +230,8 @@ serial, asset tag, and its model's name or manufacturer — so searching a model
 - **Category** and **Location** — narrow to one model category or one place.
 - **Company** — narrow to one company (the grouping label above). Only companies in use appear.
 - **Owner** — show only the assets currently assigned to a specific person. Start typing a name to
-  pick them; the list then shows just that person's live assignments.
+  pick them; the list then shows just that person's live assignments. Offered only if your role can
+  view the user directory.
 - **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
   *No owners*), regardless of who.
 - **Warranty** — narrow to assets whose **warranty is about to lapse** (*Expiring ≤ 90d*) or has

@@ -46,6 +46,13 @@ the inventory record. This is deliberate. It is not the same as browsing the use
 stays hidden from Viewers by default. The **Servers** pages are the exception: there an owner's email
 appears only if your role can view the user directory.
 
+The name and email are **all** a role without access to the user directory sees of an owner. The
+rest of the person's record — their role, employee number, username and directory details such as job
+title or department — stays in the user directory. Listing the assets a particular person holds also
+needs that access, so the assets list's **Owner** filter is not offered to such a role (a shared link
+that carries it simply shows the unfiltered list). Everyone can still see their own assets under
+**My assets**.
+
 ## Acknowledging receipt
 
 Assigning an asset records **who is accountable** for it — but it doesn't prove the person actually
