@@ -378,8 +378,9 @@ deferred by the CEO; the purchase's documents panel warns that the files are not
 after the app DB dump and under the same timestamp, with the dump's schedule and offsite hook and its own
 7-day retention
 ([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
-backup from the first run after an update. The documents panel's "not in the backup" notice is updated in the
-web app separately (#1690).
+backup from the first run after an update. The documents panel's notice now says the files are in the scheduled
+backup, unless an administrator has switched the attachments archive off (#1690); it is a quiet line, no longer a
+warning.
 
 ### 13. Phasing
 

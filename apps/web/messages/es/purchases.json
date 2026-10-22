@@ -219,7 +219,7 @@
     "receiveUnits": "Recibir unidades",
     "cancelRemaining": "Cancelar unidades restantes",
     "linkExisting": "Vincular activos existentes",
-    "documentsBackupNotice": "Los archivos que subas aquí se incluyen en la copia de seguridad programada de lazyit, junto con la base de datos, así que una restauración los recupera con la compra.",
+    "documentsBackupNotice": "Los archivos que subas aquí se incluyen en la copia de seguridad programada de lazyit, junto con la base de datos (salvo que tu administrador haya desactivado ese archivo), así que una restauración los recupera con la compra.",
     "receivesInto": "a <link>{name}</link>",
     "consumableNotMapped": "sin consumible todavía",
     "receiveStock": "Recibir en stock",

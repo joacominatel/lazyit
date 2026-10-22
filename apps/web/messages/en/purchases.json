@@ -219,7 +219,7 @@
     "receiveUnits": "Receive units",
     "cancelRemaining": "Cancel remaining units",
     "linkExisting": "Link existing assets",
-    "documentsBackupNotice": "Files uploaded here are included in lazyit's scheduled backup, together with the database, so a restore brings them back with the purchase.",
+    "documentsBackupNotice": "Files uploaded here are included in lazyit's scheduled backup, together with the database (unless your administrator has switched that archive off), so a restore brings them back with the purchase.",
     "receivesInto": "into <link>{name}</link>",
     "consumableNotMapped": "no consumable yet",
     "receiveStock": "Receive into stock",
