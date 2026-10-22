@@ -93,6 +93,10 @@ and re-reads it through the gated GET, so `setAccessRules` can drop the rules to
   pins each write response to the public shape.
 - The class (a `select`-less Prisma return on a write path, with no runtime serializer) is wider than this
   module. A response serializer is an approved follow-up, tracked separately from #1301.
+- **Follow-up landed (2026-10-21, #1518):** [[0105-prisma-global-omit-for-secret-columns|ADR-0105]] adds a
+  client-level Prisma `omit` for `accessRules` (and the other secret columns), so a `select`-less return
+  no longer carries the rules on any path; the folder reads keep naming the column in their `select`. The
+  CEO deferred the global response serializer.
 
 ## References
 

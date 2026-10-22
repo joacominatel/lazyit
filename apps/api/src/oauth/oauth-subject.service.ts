@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { User } from '../../generated/prisma/client';
+import type { UserRow } from '../prisma/prisma-omit';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -19,18 +19,18 @@ export class OAuthSubjectService {
     private readonly permissions: PermissionResolverService,
   ) {}
 
-  async holdsConnect(user: Pick<User, 'role'>): Promise<boolean> {
+  async holdsConnect(user: Pick<UserRow, 'role'>): Promise<boolean> {
     const granted = await this.permissions.resolve(user.role);
     return granted.has('ai:connect');
   }
 
   /** The account-state gates alone (no permission read). */
-  isUsable(user: User): boolean {
+  isUsable(user: UserRow): boolean {
     return user.isActive && !user.directoryOnly && !user.mustChangePassword;
   }
 
   /** Re-load the user DB-first and apply every gate; `null` when any fails. */
-  async loadEligible(userId: string): Promise<User | null> {
+  async loadEligible(userId: string): Promise<UserRow | null> {
     if (!UUID_REGEX.test(userId)) return null;
     const user = await this.prisma.user.findFirst({ where: { id: userId } });
     if (!user || !this.isUsable(user)) return null;

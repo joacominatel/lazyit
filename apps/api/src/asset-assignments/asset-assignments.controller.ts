@@ -23,6 +23,7 @@ import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import {
   AcknowledgeAssignmentDto,
+  AcknowledgedAssignmentDto,
   AssetAssignmentDto,
   CreateAssetAssignmentDto,
   ReleaseAssetAssignmentDto,
@@ -145,9 +146,9 @@ export class AssetAssignmentsController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @ApiOperation({
     summary:
-      'Acknowledge receipt of an asset checked out to you (self-service; your OWN active assignment; human-only). 409 if already acknowledged / released / not yours.',
+      'Acknowledge receipt of an asset checked out to you (self-service; your OWN active assignment; human-only). 409 if already acknowledged / released / not yours. Returns the assignment in the self-read shape (id, userId, the trimmed owner).',
   })
-  @ApiOkResponse({ type: AssetAssignmentDto })
+  @ApiOkResponse({ type: AcknowledgedAssignmentDto })
   @ApiConflictResponse({
     description:
       'The assignment is already acknowledged, already released, or not the caller’s own',

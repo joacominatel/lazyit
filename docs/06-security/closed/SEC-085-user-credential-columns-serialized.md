@@ -97,6 +97,11 @@ users through the same allowlist.
   auth paths currently read them off the `@CurrentUser` whole row (`PasswordStepUpVerifier`,
   `PasswordLifecycleService`, OAuth consent, the guards), so this needs a dedicated credential read and
   a typed `PrismaService`. That is a cross-module auth refactor and is escalated separately.
+- **Follow-up landed (2026-10-21, #1518):** [[0105-prisma-global-omit-for-secret-columns|ADR-0105]] omits
+  `passwordHash` (and the other secret columns) at the client level. `PrismaService` is typed with the
+  omit, the principal is a `UserRow` without the hash, and the step-up verifier, the OAuth consent and
+  the login read the hash through a dedicated read. The session epochs are not omitted: the guards read
+  them off every principal load, and `PUBLIC_USER_SELECT` keeps them off the wire.
 
 ## References
 

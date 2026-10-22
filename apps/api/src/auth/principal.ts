@@ -1,5 +1,5 @@
 import type { Permission } from '@lazyit/shared';
-import type { ServiceAccount, User } from '../../generated/prisma/client';
+import type { ServiceAccountRow, UserRow } from '../prisma/prisma-omit';
 
 /**
  * The unified PRINCIPAL the request carries after authentication (ADR-0048). lazyit has two kinds of
@@ -23,7 +23,8 @@ export type Principal = HumanPrincipal | ServicePrincipal;
 /** An authenticated human. Authorized by `user.role` via the RolePermission matrix (unchanged). */
 export interface HumanPrincipal {
   kind: 'human';
-  user: User;
+  /** The user row WITHOUT `passwordHash` (ADR-0105 global omit). */
+  user: UserRow;
 }
 
 /**
@@ -32,7 +33,8 @@ export interface HumanPrincipal {
  */
 export interface ServicePrincipal {
   kind: 'service';
-  serviceAccount: ServiceAccount;
+  /** The account row WITHOUT `tokenHash` (ADR-0105 global omit). */
+  serviceAccount: ServiceAccountRow;
   /** The direct permission grants this service account holds (catalog literals). */
   permissions: ReadonlySet<Permission>;
 }

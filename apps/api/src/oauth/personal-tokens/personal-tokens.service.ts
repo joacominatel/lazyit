@@ -308,6 +308,8 @@ export class PersonalTokensService {
     const row = await this.prisma.oAuthToken.findUnique({
       where: { tokenHash: presentedHash },
       include: { grant: true },
+      // Re-compared below in constant time; globally omitted otherwise (ADR-0105 opt-in).
+      omit: { tokenHash: false },
     });
     if (
       !row ||

@@ -14,6 +14,7 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 
 import { SecretManagerService } from './secret-manager.service';
 import type { PrismaService } from '../prisma/prisma.service';
+import { withGlobalOmit } from '../../test/prisma/global-omit';
 import type { Principal } from '../auth/principal';
 import type { ServiceAccount, User } from '../../generated/prisma/client';
 
@@ -386,7 +387,10 @@ class FakePrisma {
 
 function build(): { svc: SecretManagerService; db: FakePrisma } {
   const db = new FakePrisma();
-  const svc = new SecretManagerService(db as unknown as PrismaService);
+  // Answers like the real client: envelopes, wrapped keys and DEKs are globally omitted (ADR-0105).
+  const svc = new SecretManagerService(
+    withGlobalOmit(db) as unknown as PrismaService,
+  );
   return { svc, db };
 }
 
@@ -461,6 +465,9 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
       // One keypair row, now carrying the NEW public key — never a second row (1:1 @unique).
       expect(db.saKeypairs).toHaveLength(1);
       expect(kp.publicKey).toBe('cm90YXRlZFB1Yg==');
+      // The replace path echoes the wrapped private key too (ADR-0105 opt-in on the update).
+      expect(kp.privateKeyEnc).toBe(SA_KEYPAIR.privateKeyEnc);
+      expect(kp.privateKeyIv).toBe(SA_KEYPAIR.privateKeyIv);
       expect(db.audit.at(-1)!.action).toBe('SA_KEYPAIR_CREATED');
     });
 
