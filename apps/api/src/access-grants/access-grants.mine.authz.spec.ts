@@ -35,7 +35,7 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
  *     so the response can only be the caller's own grants — never another user's;
  *   - history is included by default (`activeOnly: false`) so active + revoked show in one read;
  *   - a SERVICE principal is 403 (RolesGuard FAIL-CLOSED on an unannotated route, INV-SA-2);
- *   - the STATIC `mine` route wins over `:id`: `/access-grants/mine` hits `findMine` (→ `findPage`),
+ *   - the STATIC `mine` route wins over `:id`: `/access-grants/mine` hits `findMine`,
  *     NOT `findOne('mine')`.
  */
 
@@ -74,7 +74,7 @@ class FakeAuthGuard implements CanActivate {
 
 describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => {
   let app: INestApplication;
-  const findPage = jest.fn();
+  const findMine = jest.fn();
   const findOne = jest.fn();
 
   const findMany = jest.fn(({ where }: { where: { role: Role } }) =>
@@ -93,7 +93,7 @@ describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => 
       controllers: [AccessGrantsController],
       providers: [
         Reflector,
-        { provide: AccessGrantsService, useValue: { findPage, findOne } },
+        { provide: AccessGrantsService, useValue: { findMine, findOne } },
         { provide: AccessGrantsExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         PermissionResolverService,
@@ -110,13 +110,18 @@ describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => 
   });
 
   beforeEach(() => {
-    findPage.mockReset();
+    findMine.mockReset();
     findOne.mockReset();
   });
 
   it('lets a VIEWER read their OWN grants (active + history), scoped to their id (no accessGrant:read)', async () => {
-    const page = { items: [{ id: 'g1' }], total: 1, limit: 50, offset: 0 };
-    findPage.mockResolvedValue(page);
+    const page = {
+      items: [{ id: 'g1', provisioning: 'DONE' }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    };
+    findMine.mockResolvedValue(page);
 
     const res = await request(app.getHttpServer())
       .get('/access-grants/mine')
@@ -126,9 +131,10 @@ describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(page);
     // Pinned to the CALLER's id; history included by default (activeOnly false).
-    expect(findPage).toHaveBeenCalledTimes(1);
-    expect(findPage).toHaveBeenCalledWith(
-      { userId: 'viewer-1', activeOnly: false, includeExpired: true },
+    expect(findMine).toHaveBeenCalledTimes(1);
+    expect(findMine).toHaveBeenCalledWith(
+      'viewer-1',
+      { activeOnly: false, includeExpired: true },
       expect.anything(),
     );
     expect(findOne).not.toHaveBeenCalled();
@@ -140,13 +146,13 @@ describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => 
       .set('X-Test-Service', 'true');
 
     expect(res.status).toBe(403);
-    expect(findPage).not.toHaveBeenCalled();
+    expect(findMine).not.toHaveBeenCalled();
   });
 
   it('401s an anonymous caller (no principal)', async () => {
     const res = await request(app.getHttpServer()).get('/access-grants/mine');
 
     expect(res.status).toBe(401);
-    expect(findPage).not.toHaveBeenCalled();
+    expect(findMine).not.toHaveBeenCalled();
   });
 });

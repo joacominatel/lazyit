@@ -48,9 +48,28 @@ apps** lets you move between them without going back to the menu.
 - **My assets** — every asset **currently assigned to you** (a live assignment). Each row shows the
   asset's name, its model and location, and its status. Select **View** to open the full asset page.
 - **My application access** — the applications you can currently access, each with its access level and,
-  where set, an expiry date. If a grant has passed its expiry it's flagged as **Expired**.
+  where set, an expiry date. If a grant has passed its expiry it's flagged as **Expired**. Each one also
+  shows whether your account in that application has been set up (see
+  [Account setup status](#account-setup-status)).
 - **Past access** — a history of applications you *used* to have access to, showing when each grant
   started and when it was revoked. This section appears only if you have any past access.
+
+## Account setup status
+
+Getting access in lazyit and having a working account in the application are two steps. Some
+applications are set up automatically by lazyit when you get access; others are set up by IT by hand.
+Each application under **My application access**, and each approved request under
+**My access requests** whose access is still active, shows one of four statuses:
+
+- **No automation** — lazyit does not set up this application on its own. IT creates your account by
+  hand; ask them if you still can't sign in.
+- **Setup in progress** — lazyit is creating your account right now. It usually takes moments.
+- **Set up** — your account was created automatically.
+- **Waiting on IT** — setting up your account needs IT to finish a step, or the automatic setup ran into
+  a problem. IT can see it and finish it; nothing is needed from you.
+
+Hover a status to read what it means. You only ever see this coarse status: the details of how your
+account is set up stay with administrators. Reload the page to see a newer status.
 
 ## Editing your name
 

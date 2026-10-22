@@ -45,6 +45,27 @@ En resumen: lazyit registra quién tiene acceso y *luego* intenta que el mundo e
 conector roto significa que una cuenta aún no se creó — no que lazyit haya perdido el rastro del
 acceso.
 
+## Lo que ve la persona con acceso
+
+La persona que recibió el acceso ve un **estado general** de la configuración de su propia cuenta en su
+perfil y en sus solicitudes aprobadas mientras ese acceso siga vigente — nunca el flujo de trabajo, sus
+pasos ni sus errores, que quedan para quien puede leer flujos de trabajo. Sigue la última ejecución de
+aprovisionamiento de su concesión:
+
+| La última ejecución | La persona ve |
+| --- | --- |
+| No se ejecutó ningún flujo para la concesión | **Sin automatización** |
+| Esperando para arrancar, o en ejecución | **Configuración en curso** |
+| Exitosa | **Configurada** |
+| Esperando una tarea manual, fallida o revertida | **Esperando a IT** |
+
+Así, una ejecución fallida o una tarea manual que todavía no completaste se ve como **Esperando a IT**
+para esa persona hasta que un reintento, una nueva ejecución o la tarea la terminen. Una ejecución
+revertida no se puede reintentar ni volver a ejecutar, así que después de una queda en
+**Esperando a IT** hasta que se le vuelva a otorgar el acceso (lo que arranca una ejecución nueva):
+configura la cuenta a mano y vuelve a otorgarlo, o revócalo si no debe tenerlo. Una ejecución de
+desaprovisionamiento (después de una revocación) no lo cambia.
+
 ## Cada evento de concesión se ejecuta una vez
 
 Cuando una concesión activa un flujo, lazyit crea **una ejecución para ese evento**. Si un paso falla

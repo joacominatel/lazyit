@@ -3,7 +3,7 @@ title: WorkflowRun
 tags: [domain, entity, workflow-engine, access, append-only, async]
 status: accepted
 created: 2026-06-08
-updated: 2026-10-15
+updated: 2026-10-22
 ---
 
 # WorkflowRun
@@ -138,6 +138,10 @@ engine-written; no endpoint creates one directly:
 - `POST /workflow-runs/:id/replay-latest` — clone a FAILED run to a new run on the latest version.
   `workflow:run`. `409` per the idempotency rule above; `422` when the source already succeeded a
   non-idempotent create on or before the failed step ([[0057-retry-fix-and-replay]]).
+
+The grantee never reads runs. What they see is a coarse `provisioning` status on their own grants and
+approved requests (the `/mine` reads, #1700), mapped from the status of the grant's latest
+`ACCESS_GRANTED` run — see [[access-grant#Provisioning status]].
 
 ## Not yet implemented (deferred)
 
