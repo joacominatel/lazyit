@@ -664,7 +664,10 @@ When two machines are found:
 - The new host's **containers are tracked under its own entry**. They arrive in Pending review like
   any container, grouped under the new host, and they **never touch the containers of the server that
   was already there**. They are **not** auto-confirmed by your rules, even one that would normally
-  match: a host lazyit suspects of being a clone is for you to look at.
+  match: a host lazyit suspects of being a clone is for you to look at. One exception: if two clones
+  also share a **serial number**, they end up on one entry, and once lazyit has seen a second machine
+  there it stops tracking that entry's containers until the identity is fixed, rather than let the two
+  machines take turns marking each other's containers offline.
 - A **hypervisor** host in this situation does **not** report its virtual machines or LXC guests until
   its identity is fixed.
 

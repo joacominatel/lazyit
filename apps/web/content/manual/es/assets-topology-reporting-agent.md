@@ -703,7 +703,11 @@ Cuando se detectan dos máquinas:
 - Los **contenedores del host nuevo se registran bajo su propia entrada**. Llegan a Revisión pendiente
   como cualquier contenedor, agrupados bajo el host nuevo, y **nunca tocan los contenedores del
   servidor que ya estaba**. Tus reglas **no** los confirman automáticamente, aunque alguna coincida:
-  un host que lazyit sospecha que es un clon es para que lo mires vos.
+  un host que lazyit sospecha que es un clon es para que lo mires vos. Una excepción: si dos clones
+  además comparten el **número de serie**, terminan en una sola entrada, y una vez que lazyit vio una
+  segunda máquina ahí deja de registrar los contenedores de esa entrada hasta que se corrija la
+  identidad, en lugar de dejar que las dos máquinas se marquen por turnos los contenedores como fuera
+  de línea.
 - Un host **hipervisor** en esta situación **no** reporta sus máquinas virtuales ni sus invitados LXC
   hasta que se corrija su identidad.
 
