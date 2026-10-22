@@ -41,23 +41,24 @@ no pierdes lo que ya completaste. Si no tiene nada más, el panel lo indica. Ten
 normal: el panel nunca advierte ni bloquea, solo te muestra la lista.
 
 Para recuperar algo en el mismo paso, marca **Liberar** en esa fila. Puedes marcar varios y agregar
-una **Nota de liberación** opcional que se guarda en cada activo que liberes (por ejemplo "devolvió la
-notebook anterior"). Todavía no cambia nada:
+una **Nota de liberación** opcional que se guarda en cada activo que liberes y reemplaza la nota que ya
+tenía esa asignación (por ejemplo "devolvió la notebook anterior"). Todavía no cambia nada:
 
 - **Asignar** primero registra la nueva asignación y después libera cada activo marcado. Una
   liberación solo termina la asignación de esa persona, igual que **Liberar** en la página del activo;
   el estado y la ubicación del activo quedan como están.
 - **Cancelar** (o cerrar la ventana) no cambia nada — las marcas simplemente se descartan. Elegir a
   otra persona también las borra.
-- Si la nueva asignación falla, no se libera nada y tus marcas se conservan para que lo intentes de
-  nuevo.
+- Si la nueva asignación falla, no se libera nada. En la ventana de asignar tus marcas se conservan
+  para que lo intentes de nuevo; en un activo nuevo, el formulario muestra un aviso de que los activos
+  marcados quedaron como estaban.
 - Si la asignación funciona pero una liberación no, la ventana queda abierta con un resumen breve: cada
   activo marcado, indicado como **liberado** o **no liberado** con el motivo. Los que no se liberaron
   siguen asignados a la persona; libéralos desde la página del activo.
 
 El mismo panel aparece en los tres lugares donde asignas un responsable: **Asignar usuario** en la
-página de un activo, la acción rápida **Asignar** de la lista de activos y el responsable de **Ventaja
-inicial** al crear un activo. En un activo nuevo, las liberaciones marcadas se aplican justo después de
+página de un activo, **Asignar** en la lista de activos (la acción rápida de la fila, o **Asignar a…**
+en su menú **…**) y el responsable de **Ventaja inicial** al crear un activo. En un activo nuevo, las liberaciones marcadas se aplican justo después de
 crear y asignar el activo, y cualquier liberación que falle se lista en un aviso que queda visible hasta
 que lo cierras.
 

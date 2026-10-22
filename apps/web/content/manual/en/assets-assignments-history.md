@@ -39,21 +39,23 @@ lose what you've filled in. If they hold nothing else, the panel says so. Holdin
 normal: the panel never warns or blocks, it only shows you the list.
 
 To take something back in the same step, tick **Release** on that row. You can tick several, and add
-one optional **Release note** that is saved on every asset you release (for example "old laptop
-returned"). Nothing changes yet:
+one optional **Release note** that is saved on every asset you release, replacing the note that
+assignment already had (for example "old laptop returned"). Nothing changes yet:
 
 - **Assign** first records the new assignment, then releases each ticked asset. A release only ends
   that person's assignment, exactly like **Release** on the asset's page; the asset's status and
   location stay as they are.
 - **Cancel** (or closing the window) changes nothing — the ticks are simply dropped. Picking a
   different person clears them too.
-- If the new assignment fails, nothing is released, and your ticks stay so you can try again.
+- If the new assignment fails, nothing is released. In the assign window your ticks stay so you can
+  try again; on a new asset, the form shows a warning that the ticked assets were left as they were.
 - If the assignment works but a release doesn't, the window stays open with a short report: each
   ticked asset, marked **released** or **not released** with the reason. The ones not released are
   still assigned to the person; release them from the asset's page.
 
 The same panel appears in all three places you assign an owner: **Assign user** on an asset's page,
-the **Assign** quick action on the assets list, and the **Head start** owner when you create an asset.
+**Assign** on the assets list (the row's quick action, or **Assign to…** in its **…** menu), and the
+**Head start** owner when you create an asset.
 On a new asset, the ticked releases run right after the asset is created and assigned, and any release
 that fails is listed in a notice that stays until you close it.
 

@@ -37,7 +37,7 @@ una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assign
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
 responsable desde el activo. Al elegir al responsable también ves lo que ya tiene y puedes marcar lo que
 devuelve; se libera justo después de crear y asignar el activo (ver
-[Entregar un reemplazo](/help/assets-assignments-history)).
+[Entregar un reemplazo](/help/assets-assignments-history#entregar-un-reemplazo-lo-que-la-persona-ya-tiene)).
 
 ¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
 espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre
