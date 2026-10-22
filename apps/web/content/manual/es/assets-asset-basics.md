@@ -35,7 +35,9 @@ un usuario y, al crear el activo, queda registrado como su responsable actual en
 Dejarlo vacío mantiene el flujo clásico — de lo contrario, la asignación es un paso aparte que haces
 una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assignments-history)). Si la
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
-responsable desde el activo.
+responsable desde el activo. Al elegir al responsable también ves lo que ya tiene y puedes marcar lo que
+devuelve; se libera justo después de crear y asignar el activo (ver
+[Entregar un reemplazo](/help/assets-assignments-history)).
 
 ¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
 espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre

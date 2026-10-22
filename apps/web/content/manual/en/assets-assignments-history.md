@@ -27,6 +27,40 @@ A few things to know:
 - You can only assign a **live** asset to a **live** user — deactivated assets and users can't be
   given new assignments.
 
+### Handing out a replacement: what the person already holds
+
+A common swap: you give someone a new laptop and take the old one back. So that the inventory doesn't
+end up saying they still hold both, the assign step shows what the person **already holds**.
+
+Once you pick the person, a **Currently holds** panel opens beside the form (below it on a narrow
+screen). It lists every asset assigned to them right now, except the one you're assigning, with its
+tag, model, status and since when they've had it. Each name opens the asset in a new tab, so you don't
+lose what you've filled in. If they hold nothing else, the panel says so. Holding several assets is
+normal: the panel never warns or blocks, it only shows you the list.
+
+To take something back in the same step, tick **Release** on that row. You can tick several, and add
+one optional **Release note** that is saved on every asset you release (for example "old laptop
+returned"). Nothing changes yet:
+
+- **Assign** first records the new assignment, then releases each ticked asset. A release only ends
+  that person's assignment, exactly like **Release** on the asset's page; the asset's status and
+  location stay as they are.
+- **Cancel** (or closing the window) changes nothing — the ticks are simply dropped. Picking a
+  different person clears them too.
+- If the new assignment fails, nothing is released, and your ticks stay so you can try again.
+- If the assignment works but a release doesn't, the window stays open with a short report: each
+  ticked asset, marked **released** or **not released** with the reason. The ones not released are
+  still assigned to the person; release them from the asset's page.
+
+The same panel appears in all three places you assign an owner: **Assign user** on an asset's page,
+the **Assign** quick action on the assets list, and the **Head start** owner when you create an asset.
+On a new asset, the ticked releases run right after the asset is created and assigned, and any release
+that fails is listed in a notice that stays until you close it.
+
+You need permission to **view the user directory** to see what someone holds; without it the panel
+doesn't appear and assigning works as before. If your role can view the directory but can't release
+assets, the list is shown without the **Release** ticks.
+
 ## Releasing an owner
 
 To end someone's ownership, choose **Release** next to that owner. Releasing one owner does not affect

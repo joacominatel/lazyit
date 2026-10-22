@@ -28,6 +28,43 @@ Algunas cosas a tener en cuenta:
 - Solo puedes asignar un activo **vigente** a un usuario **vigente** — los activos y usuarios
   desactivados no pueden recibir nuevas asignaciones.
 
+### Entregar un reemplazo: lo que la persona ya tiene
+
+Un cambio habitual: le das a alguien una notebook nueva y recuperas la anterior. Para que el
+inventario no termine diciendo que todavía tiene las dos, el paso de asignar muestra lo que la persona
+**ya tiene**.
+
+En cuanto eliges a la persona, se abre un panel **Tiene actualmente** junto al formulario (debajo, en
+una pantalla angosta). Lista cada activo que tiene asignado ahora, salvo el que estás asignando, con su
+etiqueta, modelo, estado y desde cuándo lo tiene. Cada nombre abre el activo en una pestaña nueva, así
+no pierdes lo que ya completaste. Si no tiene nada más, el panel lo indica. Tener varios activos es
+normal: el panel nunca advierte ni bloquea, solo te muestra la lista.
+
+Para recuperar algo en el mismo paso, marca **Liberar** en esa fila. Puedes marcar varios y agregar
+una **Nota de liberación** opcional que se guarda en cada activo que liberes (por ejemplo "devolvió la
+notebook anterior"). Todavía no cambia nada:
+
+- **Asignar** primero registra la nueva asignación y después libera cada activo marcado. Una
+  liberación solo termina la asignación de esa persona, igual que **Liberar** en la página del activo;
+  el estado y la ubicación del activo quedan como están.
+- **Cancelar** (o cerrar la ventana) no cambia nada — las marcas simplemente se descartan. Elegir a
+  otra persona también las borra.
+- Si la nueva asignación falla, no se libera nada y tus marcas se conservan para que lo intentes de
+  nuevo.
+- Si la asignación funciona pero una liberación no, la ventana queda abierta con un resumen breve: cada
+  activo marcado, indicado como **liberado** o **no liberado** con el motivo. Los que no se liberaron
+  siguen asignados a la persona; libéralos desde la página del activo.
+
+El mismo panel aparece en los tres lugares donde asignas un responsable: **Asignar usuario** en la
+página de un activo, la acción rápida **Asignar** de la lista de activos y el responsable de **Ventaja
+inicial** al crear un activo. En un activo nuevo, las liberaciones marcadas se aplican justo después de
+crear y asignar el activo, y cualquier liberación que falle se lista en un aviso que queda visible hasta
+que lo cierras.
+
+Necesitas permiso para **ver el directorio de usuarios** para ver lo que alguien tiene; sin él, el
+panel no aparece y asignar funciona como siempre. Si tu rol puede ver el directorio pero no puede
+liberar activos, la lista se muestra sin las marcas de **Liberar**.
+
 ## Liberar un responsable
 
 Para terminar la pertenencia de alguien, elige **Liberar** junto a ese responsable. Liberar a un
