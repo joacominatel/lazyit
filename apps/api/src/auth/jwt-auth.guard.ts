@@ -31,6 +31,7 @@ import {
   type SessionClaims,
 } from './local/local-credential.service';
 import { UserSessionStore } from './local/user-session.store';
+import { issuedBeforeOidcCutoff } from './oidc-cutoff';
 
 // A hung IdP would otherwise hold a first sign-in for undici's ~300s headers timeout (AUD-036).
 const IDP_FETCH_TIMEOUT_MS = 5_000;
@@ -83,8 +84,9 @@ interface ProfileClaims {
  *
  * OIDC mode (production default) — validates Bearer JWT against the JWKS endpoint of
  *   OIDC_ISSUER. JIT-provisions a User on first login (externalId = sub). Missing/invalid
- *   token → 401 UnauthorizedException. On the JIT path the guard enriches the profile from the
- *   standard OIDC userinfo endpoint (ADR-0038): an OAuth access token carries authorization, not
+ *   token → 401 UnauthorizedException, and so is a token older than the user's
+ *   `oidcTokensNotBefore` cutoff (#1715, see `oidc-cutoff.ts`). On the JIT path the guard
+ *   enriches the profile from the standard OIDC userinfo endpoint (ADR-0038): an OAuth access token carries authorization, not
  *   identity, so email/name claims must be fetched from userinfo. The userinfo endpoint is located
  *   via OIDC Discovery (BYOI-safe; no vendor path hardcoding) and the lookup is fail-soft — any
  *   discovery/userinfo failure falls back to the token's claims, never breaking login.
@@ -428,6 +430,14 @@ export class JwtAuthGuard implements CanActivate {
     // (it 403s instead), so only the active flag is checked here.
     if (!user.isActive) {
       throw new UnauthorizedException('Account disabled');
+    }
+
+    // The OIDC cutoff (#1715): lazyit mints no web session in this mode, so "Sign out everywhere", a
+    // deactivation or an offboarding cannot bump an epoch the IdP token carries. They stamp
+    // `oidcTokensNotBefore` instead, and a token issued — or authenticated — before it is refused with the
+    // SAME 401 as an expired token, so the web signs that device out. Null (every user until then) = no cutoff.
+    if (issuedBeforeOidcCutoff(payload, user.oidcTokensNotBefore)) {
+      throw new UnauthorizedException('Invalid or expired Bearer token');
     }
 
     request.user = user;
