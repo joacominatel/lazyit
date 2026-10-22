@@ -113,7 +113,8 @@ function truncateCell(value: string): string {
 export function xlsxText(value: string): string {
   return escapeXml(
     truncateCell(value)
-      .replace(/_(x[0-9A-Fa-f]{4}_)/g, '_x005F_$1')
+      // Lookahead, not a capture: `_x0041_x0042_` shares an underscore, and both must be escaped.
+      .replace(/_(?=x[0-9A-Fa-f]{4}_)/g, '_x005F_')
       .replace(ESCAPED_CONTROL, (c) => `_x${HEX4(c.charCodeAt(0))}_`)
       .replace(NOT_XML_CHAR, '\uFFFD'),
   );
