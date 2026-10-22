@@ -96,6 +96,21 @@ abiertas, que conserva lo que escribiste. El total acumulado se muestra debajo d
 Una vez guardada, las líneas se editan, agregan y quitan en la página de la compra. Una línea solo se
 puede quitar mientras no se haya recibido ningún activo en ella.
 
+**Cambiar el precio de una línea con activos vinculados.** Cuando guardas un precio unitario nuevo en una
+línea de activos que ya tiene activos, lazyit pregunta **¿Actualizar el costo de los activos vinculados?** y
+lista cada activo vinculado con su costo actual y el nuevo. La regla es *seguir salvo que se haya
+modificado*:
+
+- Un activo cuyo costo sigue siendo el precio de compra **anterior** — o que no tiene costo — aparece
+  **marcado**.
+- Un activo cuyo costo se **cambió a mano** aparece como **Modificado a mano** y sin marcar; márcalo si
+  igual debe seguir el precio nuevo.
+- Nada cambia hasta que eliges **Actualizar**; **Mantener sus costos** deja cada activo como está. La
+  etiqueta de moneda cambia junto con el costo.
+
+Cada activo actualizado registra el cambio en su historial, y el registro de actividad de la compra lo
+registra una vez. Necesitas permiso para editar compras y activos para ver este paso.
+
 ## La moneda es una etiqueta
 
 La **moneda** de una compra es una etiqueta de texto libre — `ARS`, `USD`, `u$s`, `pesos`, lo que
@@ -271,8 +286,11 @@ Los activos comprados antes de que empezaras a registrar compras — o cargados 
 a su línea de compra después. Hay tres caminos:
 
 - En la compra, **Vincular activos existentes** en el menú de una línea: busca y marca los activos. La
-  lista empieza filtrada por el modelo de la línea y por activos **sin compra vinculada**; quita una
-  etiqueta para ampliarla (un activo que ya está en otra compra igual se puede mover aquí, ver más abajo).
+  lista empieza filtrada por el modelo de la línea, por activos **sin compra vinculada** y por activos **con
+  fecha cercana al pedido** — dentro de los 90 días antes o después de la fecha de pedido (o de la fecha de
+  factura, o del día en que se registró la compra, si no tiene fecha de pedido). La fecha de un activo, aquí,
+  es su fecha de compra, o el día en que se cargó en lazyit si no tiene una. Quita una etiqueta para ampliar
+  la lista (un activo que ya está en otra compra igual se puede mover aquí, ver más abajo).
 - En un activo sin vincular, **Vincular a una compra** en su panel **Compra**.
 - En la lista de **Activos**, selecciona varias filas y elige **Compra › Vincular a una compra** en la barra
   de selección. Luego elige la compra y la línea — las líneas del mismo modelo aparecen primero.
@@ -346,7 +364,8 @@ la compra se lee como **Recibida**.
 La pestaña **Unidades pendientes** lista cada línea que todavía espera unidades, **agrupadas por compra,
 el pedido más antiguo primero** — la revisión semanal, y la pantalla para abrir en la puerta del depósito.
 Las compras en borrador y canceladas, las líneas *Otro* y las líneas cuyo resto se canceló no aparecen.
-Se puede filtrar por proveedor.
+Se puede filtrar por proveedor, o activar **Solo atrasadas** para dejar solo las compras cuya fecha de
+entrega prevista ya pasó. La dirección de la pestaña filtrada se puede guardar o compartir.
 
 Cada línea muestra "x de y recibidas" y lo que sigue pendiente, con **Recibir** y, en su menú, **Vincular
 activos existentes** y **Cancelar unidades restantes**. En una línea de consumible, **Recibir** abre
@@ -355,8 +374,16 @@ activos existentes** y **Cancelar unidades restantes**. En una línea de consumi
 marca como **Atrasada**. **Recibir entrega**, en una compra, recibe varias de sus líneas a la vez — mira
 [Recibir una entrega completa](#recibir-una-entrega-completa).
 
-**Exportar CSV**, en la pestaña, descarga todas las líneas pendientes, filtradas por proveedor si hay uno
-elegido — mira [Exportar datos](/help/notifications-activity-data-export).
+Una compra está atrasada desde el día **siguiente** a su entrega prevista, contado según tu propio día: una
+compra prevista para hoy todavía no está atrasada, y una sin fecha prevista nunca lo está.
+
+**Exportar CSV**, en la pestaña, descarga todas las líneas pendientes, con los mismos filtros de proveedor y
+*Solo atrasadas* que la pestaña — mira [Exportar datos](/help/notifications-activity-data-export).
+
+**En el Panel.** Quienes pueden ver compras también ven una fila **Entregas pendientes** en la
+lista *Requiere atención* del **Panel** mientras haya algo esperando: "Entregas pendientes: 3 compras ·
+7 unidades", con "· 1 atrasada" cuando alguna está demorada. Abre esta pestaña — ya en *Solo atrasadas*
+cuando hay algo atrasado. Como las demás filas, puedes descartarla de tu Panel.
 
 ## Documentos
 
@@ -469,7 +496,10 @@ del proveedor — útil para un reclamo de garantía — y los documentos de la 
   y las fechas propios del activo siguen visibles en *Detalles*, como antes.
 - **Distinto de la compra** marca el precio cuando el costo de compra propio del activo es distinto —
   otro importe u otra etiqueta de moneda. Solo se compara el costo: las fechas pueden variar con cada
-  entrega. lazyit nunca corrige el costo por su cuenta; edita el activo si debe coincidir.
+  entrega. lazyit nunca corrige el costo por su cuenta. Si el activo debe coincidir, **Aplicar valor de la
+  compra**, junto a la marca, copia el precio de la compra — con su etiqueta de moneda — en el activo cuando
+  confirmas; el historial del activo y el registro de actividad de la compra lo registran. Se ofrece a
+  quienes pueden editar compras y activos, mientras la compra no esté archivada.
 - Si la compra se **archivó**, el panel sigue diciendo de dónde vino el activo, marcada como archivada y
   sin sus documentos.
 - Un activo sin vincular muestra el panel solo a quien puede vincularlo, con **Vincular a una compra**.
@@ -481,8 +511,9 @@ estado, quién agregó, editó o quitó una línea — con un cambio de precio o
 *antes → después* —, quién recibió, vinculó, movió o desvinculó unidades, quién recibió stock en una línea
 de consumible, quién aplicó asientos de una línea de licencia, quién canceló unidades restantes (con el
 motivo), quién agregó o quitó un documento o cambió su tipo, quién leyó un documento con IA (y con qué
-proveedor — nunca los valores leídos), si la compra se creó a partir de activos seleccionados y si su
-proveedor se fusionó en otro. No se puede editar ni borrar.
+proveedor — nunca los valores leídos), si la compra se creó a partir de activos seleccionados, quién
+actualizó activos vinculados con los valores de la compra (después de un cambio de precio o con *Aplicar
+valor de la compra*) y si su proveedor se fusionó en otro. No se puede editar ni borrar.
 
 ## Proveedores
 
@@ -493,6 +524,19 @@ la aplicación).
 Un proveedor solo necesita un **nombre**. También puede tener un **ID fiscal**, un **sitio web**, un
 **contacto comercial** y un **contacto de soporte / RMA** separado — útil cuando surge un reclamo de
 garantía — y notas. Su página lista las compras que se le hicieron.
+
+**Gasto por año.** La página del proveedor también muestra cuánto se le gastó cada año, una fila por
+**etiqueta de moneda** — los importes en monedas distintas nunca se convierten ni se suman entre sí, y los
+importes sin moneda se muestran aparte como *Sin moneda*. Qué cuenta:
+
+- el año de la **fecha de pedido** de la compra, o del día en que se registró si no tiene una;
+- las compras pedidas y recibidas — **no** los borradores ni las canceladas, ni las archivadas;
+- las unidades de cada línea que **no se cancelaron**, por su precio unitario. Las líneas sin precio no
+  suman nada; cuando un año tiene alguna, su total se marca como **parcial**, con cuántas líneas no tienen
+  precio.
+
+Un total demasiado grande para guardarse se lee *Demasiado grande para mostrar*. La cantidad de compras junto
+a cada total dice cuántas compras abarca.
 
 Los nombres y los ID fiscales no son únicos, así que lazyit nunca rechaza un duplicado; en cambio,
 sugiere. Escribir un ID fiscal que otro proveedor ya tiene te dice de quién es.
