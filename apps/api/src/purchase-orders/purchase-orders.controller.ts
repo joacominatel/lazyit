@@ -74,7 +74,12 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
-import { ExportService } from '../common/export';
+import {
+  EXPORT_FORMAT_QUERY,
+  ExportService,
+  parseExportFormat,
+  XLSX_CONTENT_TYPE,
+} from '../common/export';
 import { PURCHASE_ORDER_EXPORT_COLUMNS } from './purchase-orders-export';
 import { PENDING_LINE_EXPORT_COLUMNS } from './pending-lines-export';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -290,11 +295,12 @@ export class PurchaseOrdersController {
   // STATIC route declared BEFORE `:id` so `/purchase-orders/export` never resolves as an id.
   @Get('export')
   @RequirePermission('purchaseOrder:read')
-  @ApiProduces('text/csv')
+  @ApiProduces('text/csv', XLSX_CONTENT_TYPE)
   @ApiOperation({
     summary:
-      'CSV export of every purchase matching the list filters, one row per purchase (ADR-0103): same permission, filters and rows as GET /purchase-orders, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+      'CSV (default) or XLSX (format=xlsx) export of every purchase matching the list filters, one row per purchase (ADR-0103): same permission, filters, rows and columns as GET /purchase-orders, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited, the format recorded. deleted=only is ADMIN only (403 otherwise).',
   })
+  @ApiQuery(EXPORT_FORMAT_QUERY)
   @ApiQuery({ name: 'q', required: false })
   @ApiQuery({
     name: 'status',
@@ -309,7 +315,9 @@ export class PurchaseOrdersController {
     enum: [...PurchaseOrderReceiptFilterSchema.options],
   })
   @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
-  @ApiOkResponse({ description: 'The filtered purchases as CSV (text/csv).' })
+  @ApiOkResponse({
+    description: 'The filtered purchases as CSV (text/csv) or XLSX.',
+  })
   export(
     @CurrentPrincipal() principal: Principal,
     @Res({ passthrough: true }) res: Response,
@@ -319,7 +327,9 @@ export class PurchaseOrdersController {
     @Query('receipt') receipt?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
+    @Query('format') format?: string | string[],
   ): Promise<StreamableFile> {
+    const fileFormat = parseExportFormat(format);
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
     const filters = {
@@ -328,7 +338,8 @@ export class PurchaseOrdersController {
       supplierId: parseCuidQuery(supplierId, 'supplierId'),
       receipt: parseReceiptQuery(receipt),
     };
-    return this.exports.exportCsv({
+    return this.exports.exportFile({
+      format: fileFormat,
       resource: 'PURCHASE_ORDERS',
       principal,
       response: res,

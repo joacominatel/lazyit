@@ -23,7 +23,12 @@ const { deriveApplicationParams } = await import(
   "@/app/(app)/applications/_components/applications-list-query"
 );
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
-const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
+const {
+  applicationGrantFilterParams,
+  applicationGrantPageFilterParams,
+  getApplicationGrantPage,
+  getApplicationGrants,
+} = await import("./applications");
 const { consumableFilterParams, getConsumables } = await import("./consumables");
 const { getPendingLines, getPurchaseOrders, pendingLineFilterParams, purchaseOrderFilterParams } =
   await import("./purchase-orders");
@@ -86,9 +91,14 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
       warranty: "expired" as const,
       deleted: "only" as const,
       purchase: { purchaseOrderId: CUID, purchaseLinked: false },
+      acquiredFrom: "2026-01-01T00:00:00.000Z",
+      acquiredTo: "2026-06-30T23:59:59.999Z",
     };
     await expectSameFilters(() => getAssets({ ...filters, ...window }), assetFilterParams(filters));
     expect(assetFilterParams(filters).get("purchaseLinked")).toBe("false");
+    // The acquisition window (#1503) travels as the full ISO datetimes the API validates.
+    expect(assetFilterParams(filters).get("acquiredFrom")).toBe("2026-01-01T00:00:00.000Z");
+    expect(assetFilterParams(filters).get("acquiredTo")).toBe("2026-06-30T23:59:59.999Z");
   });
 
   test("Reports › activity", async () => {
@@ -173,6 +183,20 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
     );
   });
 
+  test("the paged grants of one application, every filter (#1660)", async () => {
+    const filters = { status: "expiring" as const, accessLevel: "admin", q: "ana" };
+    await expectSameFilters(
+      () => getApplicationGrantPage(CUID, { ...filters, limit: 25, offset: 50 }),
+      applicationGrantPageFilterParams(filters),
+    );
+    const noLevel = { status: "all" as const, noAccessLevel: true };
+    await expectSameFilters(
+      () => getApplicationGrantPage(CUID, { ...noLevel, limit: 25, offset: 0 }),
+      applicationGrantPageFilterParams(noLevel),
+    );
+    expect(calls[0]).toStartWith(`/applications/${CUID}/access-grants/page?`);
+  });
+
   test("consumables", async () => {
     const filters = { q: "toner", lowStock: true, category: CUID, deleted: "only" as const };
     await expectSameFilters(
@@ -238,12 +262,12 @@ describe("phase 2: each list and its CSV export send identical filter params (AD
     );
   });
 
-  test("pending units, whose only filter is the supplier", async () => {
+  test("pending units: the supplier and Overdue only (#1503)", async () => {
     await expectSameFilters(
-      () => getPendingLines({ supplierId: CUID, limit: 25, offset: 50 }),
-      pendingLineFilterParams({ supplierId: CUID }),
-      1,
+      () => getPendingLines({ supplierId: CUID, expectedBefore: "2026-10-22", limit: 25, offset: 50 }),
+      pendingLineFilterParams({ supplierId: CUID, expectedBefore: "2026-10-22" }),
     );
+    expect(pendingLineFilterParams({ supplierId: CUID }).has("expectedBefore")).toBe(false);
   });
 
   test("access requests (the managers' list)", async () => {

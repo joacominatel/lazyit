@@ -1,6 +1,7 @@
 import type {
   CreateSupplier,
   Supplier,
+  SupplierDetail,
   SupplierListPage,
   SupplierMergePreview,
   SupplierMergeResult,
@@ -17,7 +18,14 @@ import { createCrudEndpoints } from "../crud-endpoints";
 const BASE = "/suppliers";
 
 const crud = createCrudEndpoints<Supplier, CreateSupplier, UpdateSupplier>(BASE);
-export const getSupplier = crud.get;
+/**
+ * One supplier with its yearly totals (#1500): `GET /suppliers/:id` answers a `SupplierDetail` — the supplier
+ * plus `yearlyTotals`, optional so an API older than #1500 still parses.
+ */
+export function getSupplier(id: string, token?: string): Promise<SupplierDetail> {
+  return apiFetch<SupplierDetail>(`${BASE}/${id}`, { token });
+}
+
 export const createSupplier = crud.create;
 export const updateSupplier = crud.update;
 export const deleteSupplier = crud.remove;

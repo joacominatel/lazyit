@@ -69,7 +69,18 @@ describe("InfraNodeListRoleSchema — reporting identity role", () => {
 describe("InfraGraphNodeSchema — the canvas projection", () => {
   test("carries exactly the fields the board draws, and nothing else", () => {
     expect(Object.keys(InfraGraphNodeSchema.shape).sort()).toEqual(
-      ["chassis", "id", "ipAddress", "kind", "label", "status", "x", "y"].sort(),
+      [
+        "alertsSnoozedUntil",
+        "chassis",
+        "id",
+        "ipAddress",
+        "kind",
+        "label",
+        "retiredAt",
+        "status",
+        "x",
+        "y",
+      ].sort(),
     );
   });
 

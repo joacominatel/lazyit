@@ -86,6 +86,8 @@ import {
 } from "../../_components/purchase-display";
 import { LineAssets } from "./line-assets";
 import { LineDialog } from "./line-dialog";
+import { UpdateLinkedAssetsDialog } from "@/components/purchases/update-linked-assets-dialog";
+import { linkedPriceFollowUp } from "@/lib/purchases/linked-update";
 import { PurchaseActivity } from "./purchase-activity";
 
 /**
@@ -209,6 +211,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const [applyingLicense, setApplyingLicense] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
+  // After a line's price changed with assets linked (#1502): offer to update their cost, never on its own.
+  const [linkedFollowUp, setLinkedFollowUp] = useState<{
+    line: PurchaseOrderLine;
+    previousUnitPrice: number | null;
+  } | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
   // Lines whose linked assets are open — read only on demand, so the page stays light (#1476).
   const [openAssets, setOpenAssets] = useState<ReadonlySet<string>>(new Set());
@@ -757,6 +764,22 @@ export function PurchaseDetailView({ id }: { id: string }) {
           purchaseId={purchase.id}
           currency={currency}
           line={lineDialog.line}
+          onUpdated={(updated, previous) => {
+            // Re-applying writes the assets: purchase and asset write, as linking (the API checks both).
+            if (!canReceive) return;
+            const followUp = linkedPriceFollowUp(previous, updated);
+            if (followUp) setLinkedFollowUp({ line: updated, previousUnitPrice: followUp.previousUnitPrice });
+          }}
+        />
+      ) : null}
+
+      {linkedFollowUp ? (
+        <UpdateLinkedAssetsDialog
+          purchaseId={purchase.id}
+          lineId={linkedFollowUp.line.id}
+          lineDescription={linkedFollowUp.line.description}
+          previousUnitPrice={linkedFollowUp.previousUnitPrice}
+          onClose={() => setLinkedFollowUp(null)}
         />
       ) : null}
 

@@ -30,3 +30,13 @@ export function endMySession(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+/**
+ * "Sign out everywhere and disconnect AI apps" (`POST /auth/sessions/revoke-all`, 204; #1699). Ends every
+ * session of the caller — the current one included — AND disconnects every connected AI app and personal
+ * token (both server-side counters move). Works in local and OIDC mode; in OIDC mode the identity
+ * provider's own session is not ended. The caller then drops this browser's cookie (`signOutLocally`).
+ */
+export function revokeAllMySessions(): Promise<void> {
+  return apiFetch<void>("/auth/sessions/revoke-all", { method: "POST" });
+}

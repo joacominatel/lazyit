@@ -1,7 +1,9 @@
 import { EmailDispatchService } from './email-dispatch.service';
 import {
   EMAIL_NOTIFICATION_TYPES,
+  SECURITY_NOTICE_NOTIFICATION_TYPES,
   isEmailableNotificationType,
+  isSecurityNoticeType,
   type NotificationEmailJob,
 } from './email.constants';
 import * as mailer from './email.mailer';
@@ -71,6 +73,19 @@ describe('email allowlist (curated)', () => {
         'workflow.run_failed',
       ].sort(),
     );
+  });
+});
+
+describe('security notices (#1699)', () => {
+  it('mcp.client_connected is the only security notice, and it is emailable', () => {
+    expect([...SECURITY_NOTICE_NOTIFICATION_TYPES]).toEqual([
+      'mcp.client_connected',
+    ]);
+    for (const type of SECURITY_NOTICE_NOTIFICATION_TYPES) {
+      expect(isEmailableNotificationType(type)).toBe(true);
+    }
+    expect(isSecurityNoticeType('low_stock')).toBe(false);
+    expect(isSecurityNoticeType('access_request.decided')).toBe(false);
   });
 });
 
@@ -213,6 +228,68 @@ describe('EmailDispatchService.dispatch', () => {
       },
     });
     await service.dispatch({ ...baseJob, recipientUserId: 'u-123' }); // type = 'low_stock'
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  // A security notice ignores the opt-out (#1699): a stored opt-out entry for it is ignored on read.
+  const mcpNotice: NotificationEmailJob = {
+    ...baseJob,
+    type: 'mcp.client_connected',
+    severity: 'warning',
+    title: 'New AI agent connected: Claude',
+    summary: null,
+    entityType: null,
+    entityId: null,
+    recipientUserId: 'u-123',
+  };
+
+  it('TARGETED security notice: emailed even though the user opted OUT of it', async () => {
+    const { service, sendMail } = setup({
+      userFindFirst: {
+        email: 'owner@example.com',
+        notificationEmailOptOutTypes: ['mcp.client_connected'],
+      },
+    });
+    await service.dispatch(mcpNotice);
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(mailArg(sendMail).to).toBe('owner@example.com');
+  });
+
+  it('BROADCAST security notice: no opted-out recipient is dropped', async () => {
+    const { service, sendMail } = setup({
+      userFindMany: [
+        {
+          email: 'a@example.com',
+          notificationEmailOptOutTypes: ['mcp.client_connected'],
+        },
+        { email: 'b@example.com', notificationEmailOptOutTypes: [] },
+      ],
+    });
+    await service.dispatch({ ...mcpNotice, recipientUserId: null });
+    expect(mailArg(sendMail).bcc).toEqual(['a@example.com', 'b@example.com']);
+  });
+
+  it('a security notice carries the "cannot be turned off" footer, not the preferences link', async () => {
+    const render = jest.spyOn(mailer, 'renderNotificationEmail');
+    const { service } = setup({
+      userFindFirst: {
+        email: 'owner@example.com',
+        notificationEmailOptOutTypes: [],
+      },
+    });
+    await service.dispatch(mcpNotice);
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'security-notice' }),
+    );
+    await service.dispatch({ ...baseJob, recipientUserId: 'u-123' });
+    expect(render).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'notification' }),
+    );
+  });
+
+  it('a security notice still sends nothing while email is off', async () => {
+    const { service, sendMail } = setup({ resolveConfig: null });
+    await service.dispatch(mcpNotice);
     expect(sendMail).not.toHaveBeenCalled();
   });
 

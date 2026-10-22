@@ -8,7 +8,10 @@ import {
   formatFrom,
   renderNotificationEmail,
 } from './email.mailer';
-import type { NotificationEmailJob } from './email.constants';
+import {
+  isSecurityNoticeType,
+  type NotificationEmailJob,
+} from './email.constants';
 import type { NotificationType } from '@lazyit/shared';
 
 /** The roles email recipient-resolution considers (the full RBAC set — ADR-0046). */
@@ -64,6 +67,7 @@ export class EmailDispatchService {
       summary: job.summary,
       appUrl: process.env.WEB_ORIGIN ?? null,
       brandName: 'lazyit',
+      kind: isSecurityNoticeType(job.type) ? 'security-notice' : 'notification',
     });
     const transporter = buildTransport(config);
     const targeted = job.recipientUserId != null;
@@ -93,6 +97,9 @@ export class EmailDispatchService {
    * the in-app bell audience is untouched (that resolution lives elsewhere). Fail-soft is preserved by the
    * worker's outer catch — this method only reads a column and does an array membership check.
    *
+   * A SECURITY NOTICE (`isSecurityNoticeType`, #1699) ignores the opt-out: a stored entry for it — legal
+   * before the rule, never migrated away — is ignored here, so the notice still reaches the inbox.
+   *
    * ponytail: the broadcast audience is resolved per-ROLE via the permission resolver (there is no per-user
    * permission override system); the opt-out is a flat per-user `String[]` filtered in-memory here.
    */
@@ -100,13 +107,15 @@ export class EmailDispatchService {
     recipientUserId: string | null,
     type: NotificationType,
   ): Promise<string[]> {
+    const honoursOptOut = !isSecurityNoticeType(type);
     if (recipientUserId) {
       const user = await this.prisma.user.findFirst({
         where: { id: recipientUserId, isActive: true, deletedAt: null },
         select: { email: true, notificationEmailOptOutTypes: true },
       });
       // Opted OUT of this type by email → no email to this one user (the bell still fired).
-      if (user?.notificationEmailOptOutTypes?.includes(type)) return [];
+      if (honoursOptOut && user?.notificationEmailOptOutTypes?.includes(type))
+        return [];
       const email = user?.email?.trim();
       return email ? [email] : [];
     }
@@ -132,7 +141,8 @@ export class EmailDispatchService {
     const seen = new Set<string>();
     for (const u of users) {
       // Drop any user who opted OUT of this type by email (issue #879).
-      if (u.notificationEmailOptOutTypes.includes(type)) continue;
+      if (honoursOptOut && u.notificationEmailOptOutTypes.includes(type))
+        continue;
       const email = u.email?.trim();
       if (email) seen.add(email);
     }

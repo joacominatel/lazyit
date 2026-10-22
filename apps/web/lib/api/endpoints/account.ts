@@ -31,6 +31,11 @@ export interface NotificationPreferences {
   emailableTypes: NotificationType[];
   /** Types the caller has opted OUT of by email (a subset of `emailableTypes`). */
   optedOutTypes: NotificationType[];
+  /**
+   * Security notices (#1699): always emailed, never opt-out-able — shown as a fixed-on row and never
+   * sent in a PUT. Optional so a response from an API that predates the field still renders.
+   */
+  mandatoryTypes?: NotificationType[];
 }
 
 /** Read the caller's notification-email preferences (`GET /account/notification-preferences`). */

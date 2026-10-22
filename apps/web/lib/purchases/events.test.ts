@@ -281,3 +281,23 @@ describe("Phase 2 events (#1477) read as sentences, tolerant of a thin payload",
     });
   });
 });
+
+describe("LINKED_VALUES_APPLIED (#1502)", () => {
+  test("reads the line, how many assets changed and the fields", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "LINKED_VALUES_APPLIED",
+        payload: { lineId: "l1", fields: ["purchaseCost"], assetIds: ["a", "b", "c"], applied: { a: ["purchaseCost"] } },
+      }),
+    ).toEqual({ kind: "linkedValuesApplied", lineId: "l1", count: 3, fields: ["purchaseCost"] });
+  });
+
+  test("a payload missing pieces still reads, never undefined", () => {
+    expect(describePurchaseEvent({ eventType: "LINKED_VALUES_APPLIED", payload: { fields: [1, "", "warrantyEnd"] } })).toEqual({
+      kind: "linkedValuesApplied",
+      lineId: null,
+      count: null,
+      fields: ["warrantyEnd"],
+    });
+  });
+});

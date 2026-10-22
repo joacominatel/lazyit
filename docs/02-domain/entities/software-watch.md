@@ -3,13 +3,15 @@ title: SoftwareWatch
 tags: [domain, entity, infra, agent, software]
 status: accepted
 created: 2026-10-21
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # SoftwareWatch
 
-> 🟢 implemented (API, #1684) · Area: Infra topology · Implementation order: after [[infra-node]] (it
-> reads the package lists agents store there) · Web surface: follows separately on #1684
+> 🟢 implemented (API + web, #1684) · Area: Infra topology · Implementation order: after [[infra-node]]
+> (it reads the package lists agents store there) · Web surface: the **Software watchlist** section of
+> Topology › Agents (`/assets/diagram?view=agents&fleet=software`, see [[0074-server-reporting-agent]]
+> §1 amendment, "Web surface") · Manual: the reporting-agent page, "Software watchlist"
 
 ## Purpose
 
@@ -51,14 +53,19 @@ return per effort on the reporting-agent backlog: a `GROUP BY` over data already
   `/guest/` child (those carry no package list of their own, #1139 / [[0095-hypervisor-guest-inventory]]),
   not soft-deleted. Manual nodes are out (no agent, no list). **PENDING and OFFLINE hosts are in**: an
   offline host's last list is still the best evidence there is, and each host row says how old it is.
-  Retired hosts (#1146 Q11) will leave the population when that lifecycle ships — it adds `retiredAt:
-  null` to the one predicate (`SOFTWARE_WATCH_POPULATION_WHERE`).
+  **Retired hosts are out** (#1701, #1146 Q11): `retiredAt: null` is part of the one predicate
+  (`SOFTWARE_WATCH_POPULATION_WHERE`). A decommissioned server is neither running a version nor
+  "missing" a package. OFFLINE is not retired, and an offline host stays in.
 - **INSTALLED / MISSING / UNKNOWN** — every host lands in exactly one, so `installed + missing + unknown
   = hostsTotal`:
   - **INSTALLED** — the host's stored list names the package (at one or more versions). This wins over
     everything: a list that names it is evidence, whatever the policy says now.
   - **MISSING** — the host **stores a list** and the list does not name the package. Only ever said about
     a host whose agent actually enumerated its packages.
+    - **Known gap — a truncated list reads MISSING.** A host whose package list was cut at the package
+      limit (`LAZYIT_SOFTWARE_MAX` on the host, or the policy's software cap) stores a list that can
+      omit an installed package, and the read classifies that host MISSING rather than UNKNOWN. The
+      Manual states it; a follow-up issue tracks classifying it.
   - **UNKNOWN** — we cannot say, and it is **never folded into MISSING**:
     - `NOT_COLLECTED` — the node stores **no list at all**. That is what software collection being off
       leaves behind, whatever turned it off: the agent policy at any scope (instance, service account or

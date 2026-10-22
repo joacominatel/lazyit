@@ -266,6 +266,23 @@ describe('InfraController — permission gating (ADR-0070 §8)', () => {
     ).toContain('HumanOnlyGuard');
   });
 
+  it.each([
+    'retireNode',
+    'unretireNode',
+    'snoozeNodeAlerts',
+    'unsnoozeNodeAlerts',
+  ] as const)(
+    'gates %s on infra:manage AND refuses a machine caller (#1701)',
+    (method) => {
+      // A reporting agent retires only its OWN node, through the decommissioning report — never
+      // through these routes.
+      expect(permsOf(method)).toEqual(['infra:manage']);
+      expect(
+        guardsOf(method).map((g) => (g as { name: string }).name),
+      ).toContain('HumanOnlyGuard');
+    },
+  );
+
   it('gates plain mutations on infra:manage', () => {
     expect(permsOf('patchPosition')).toEqual(['infra:manage']);
     expect(permsOf('updateNode')).toEqual(['infra:manage']);

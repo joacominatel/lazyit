@@ -20,6 +20,8 @@ type StaleNode = {
   lastReportedAt: Date | null;
   /** The staleness this node was last SERVED (#1140). Absent ⇒ the env fallback applies. */
   policyStaleAfterSeconds?: number | null;
+  /** Offline alerts snoozed until this instant (#1701). Absent ⇒ not snoozed. */
+  alertsSnoozedUntil?: Date | null;
 };
 /** The single-arg tuple of a `NotificationsService.emit` call — cast `mock.calls` to read it typed. */
 type EmitCall = [EmitNotificationInput];
@@ -27,6 +29,7 @@ type FlipArgs = {
   where: {
     status: unknown;
     deletedAt: null;
+    retiredAt: null;
     OR: { id: string; lastReportedAt: Date | null }[];
   };
 };
@@ -163,6 +166,7 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
     expect(arg.where).toEqual({
       status: { not: 'OFFLINE' },
       deletedAt: null,
+      retiredAt: null,
       OR: [{ id: 'n1', lastReportedAt: last }],
     });
   });
@@ -308,6 +312,106 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
       );
       expect(fresh.bootedAtMs).toBeGreaterThanOrEqual(before);
       expect(fresh.bootedAtMs).toBeLessThanOrEqual(Date.now());
+    });
+  });
+
+  // ── Retire + snooze (#1701, epic #1146 Q11/Q15) ─────────────────────────────────────────────────
+
+  describe('retired nodes', () => {
+    it('never selects a retired node — it is gone, not silent', async () => {
+      const { sweeper, findMany } = makeSweeper([]);
+
+      await sweeper.sweep();
+
+      const arg = (findMany.mock.calls as unknown[][])[0][0] as {
+        where: Record<string, unknown>;
+      };
+      expect(arg.where).toMatchObject({
+        source: 'AGENT',
+        deletedAt: null,
+        retiredAt: null,
+      });
+    });
+
+    it('a node retired between the read and the flip is not flipped either', async () => {
+      const { sweeper, updateMany } = makeSweeper([
+        {
+          id: 'n1',
+          label: 'web-01',
+          lastReportedAt: new Date('2026-06-30T00:00:00.000Z'),
+        },
+      ]);
+
+      await sweeper.sweep();
+
+      const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+      expect(arg.where.retiredAt).toBeNull();
+    });
+  });
+
+  describe('snoozed nodes', () => {
+    const NOW = Date.parse('2026-10-22T12:00:00.000Z');
+    const last = new Date('2026-10-22T09:00:00.000Z'); // three hours silent
+
+    it('flips a snoozed node OFFLINE but announces nothing for it', async () => {
+      const { sweeper, updateMany, emit } = makeSweeper(
+        [
+          {
+            id: 'n1',
+            label: 'web-01',
+            lastReportedAt: last,
+            alertsSnoozedUntil: new Date('2026-10-23T00:00:00.000Z'),
+          },
+          { id: 'n2', label: 'db-01', lastReportedAt: last },
+        ],
+        { nowMs: NOW },
+      );
+
+      const count = await sweeper.sweep();
+
+      expect(count).toBe(2);
+      const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+      expect(arg.where.OR.map((c) => c.id)).toEqual(['n1', 'n2']);
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect((emit.mock.calls as EmitCall[])[0][0].metadata).toMatchObject({
+        nodeId: 'n2',
+      });
+    });
+
+    it('an EXPIRED snooze is inert — the node is announced as normal', async () => {
+      const { sweeper, emit } = makeSweeper(
+        [
+          {
+            id: 'n1',
+            label: 'web-01',
+            lastReportedAt: last,
+            alertsSnoozedUntil: new Date('2026-10-22T11:59:59.999Z'),
+          },
+        ],
+        { nowMs: NOW },
+      );
+
+      await sweeper.sweep();
+
+      expect(emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('a snooze ending exactly now no longer suppresses', async () => {
+      const { sweeper, emit } = makeSweeper(
+        [
+          {
+            id: 'n1',
+            label: 'web-01',
+            lastReportedAt: last,
+            alertsSnoozedUntil: new Date(NOW),
+          },
+        ],
+        { nowMs: NOW },
+      );
+
+      await sweeper.sweep();
+
+      expect(emit).toHaveBeenCalledTimes(1);
     });
   });
 });

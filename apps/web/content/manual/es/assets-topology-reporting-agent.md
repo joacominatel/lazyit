@@ -1168,6 +1168,10 @@ distribución completa vive en una tabla porque una tabla que abriste vos no te 
 La vista es de solo lectura en el sentido más fuerte: **lazyit nunca le envía nada a un host.** Te
 dice lo que sabe y te da un comando para que lo ejecutes vos.
 
+La vista tiene una segunda sección, **Software vigilado**, en el selector de arriba: los mismos hosts,
+contados por los paquetes que tienen en vez de por la versión del agente. Tiene su propia sección más
+abajo: [Software vigilado](#software-vigilado).
+
 ### El comando de actualización
 
 Hacé clic en **Actualizar** en una fila atrasada y lazyit muestra el comando exacto para esa máquina,
@@ -1371,6 +1375,75 @@ desaparecer al servidor de tu inventario y parecería una caída, mientras que u
 nunca lo hace. Ojo con el "a partir de esta versión": las instancias anteriores a esta release siguen
 rechazando un reporte que mencione algo que no reconocen, así que si vas a correr agentes que se
 actualizan por su cuenta, actualizá primero la instancia.
+
+## Software vigilado
+
+Cada agente envía la lista de paquetes instalados en su host, y la pestaña **Software** de cada host
+muestra esa lista. El **software vigilado** responde la pregunta que no se puede responder de a un host
+por vez: *en todo el parque, ¿qué versiones de `openssl` hay, y dónde falta?*
+
+Abrí **Activos › Topología › Agentes** y cambiá a **Software vigilado** arriba de la vista. Agregá los
+paquetes que tu equipo sigue de cerca —normalmente los 10 a 30 que revisás cada Patch Tuesday— y cada
+uno tiene su tarjeta:
+
+> **openssl** — sobre 17 hosts con agente: 11 en `3.0.13`, 2 en `1.1.1w`, 1 sin el paquete, 3
+> desconocidos.
+
+- **Las versiones**, cada una con cuántos hosts la tienen. Un host con dos versiones instaladas (dos
+  kernels, dos runtimes lado a lado) cuenta en ambas, así que las versiones pueden sumar más que los
+  hosts que tienen el paquete. Un paquete que el agente listó sin versión tiene su propia línea, *Sin
+  versión reportada*.
+- **No lo tienen** — hosts cuya última lista de paquetes **no** nombra el paquete.
+- **Desconocidos** — hosts de los que lazyit no puede decir nada. Se cuentan aparte de los que no lo
+  tienen a propósito (ver más abajo).
+
+Cada número abre los hosts que tiene detrás, de a una página, cada uno con un enlace a su nodo en el
+mapa. La fila de cada host dice además qué tan vieja es la lista de paquetes con la que se lo evalúa: un
+host sin reportar sigue contando, según su última lista.
+
+**Es una distribución, nada más.** lazyit cuenta versiones; no las juzga. No hay "desactualizado", ni
+marca de fin de soporte, ni cruce con vulnerabilidades: lazyit no tiene contra qué fuente compararlas, y
+funciona completamente sin conexión. Las versiones se listan por **cuántos hosts tienen cada una**, no
+por número de versión: la primera línea es la versión más común, no la más nueva.
+
+**Los nombres se comparan exactos.** Escribí el nombre del paquete tal como lo reporta el agente. Los
+espacios y las mayúsculas no importan (`OpenSSL` y `openssl` son el mismo paquete vigilado), pero no se
+junta nada más: no hay comodines, y `libssl3` y `libssl3:amd64`, o un programa de Windows cuyo nombre
+incluye su versión, son nombres distintos. Ante la duda, copiá el nombre de la pestaña **Software** de
+un host.
+
+### No tenerlo no es lo mismo que desconocido
+
+**No lo tiene** solo se dice de un host cuyo agente efectivamente listó sus paquetes y este no estaba. Un
+host del que lazyit no puede decir nada es **desconocido**, con el motivo en su fila:
+
+- **Sin lista de paquetes** — el host no tiene ninguna lista guardada. Eso es lo que deja **desactivar
+  la recolección de software**: en **Configuración → Agentes de inventario**, o en el propio host
+  (`LAZYIT_COLLECT_SOFTWARE=false`). También es el estado de un host que todavía no envió una lista.
+- **Excluido por la configuración de agentes** — el nombre coincide con un patrón de exclusión de
+  paquetes de la configuración de agentes, así que al agente se le pidió no reportarlo.
+
+Así, desactivar la recolección de software para un grupo de hosts nunca hace que todos los paquetes
+vigilados parezcan faltar en ellos: simplemente pasan a desconocidos.
+
+Hay cosas que todavía pueden hacer que un host figure **sin el paquete** aunque lo tenga: un **límite
+de paquetes** lo bastante bajo como para dejarlo afuera de la lista, o una exclusión configurada solo
+en el archivo de configuración del propio host o para una sola cuenta de servicio, que lazyit no ve. Si
+un host sin el paquete te sorprende, abrí su pestaña **Software**.
+
+### Quién lo ve y quién lo cambia
+
+- **Verlo** requiere el mismo permiso que ver la topología: la lista solo suma lo que la pestaña
+  **Software** de cada host ya les muestra a esas mismas personas.
+- **Agregar y quitar** un paquete requiere permiso para administrar la topología, y lo tiene que hacer
+  una persona que inició sesión en lazyit: el token de una cuenta de servicio no puede cambiar la lista.
+  Quitar un paquete solo lo saca de la lista: nada cambia en ningún host, y podés volver a agregarlo
+  cuando quieras. La lista admite hasta 100 paquetes.
+
+> **Tratá esta vista como sensible.** Una lista de qué versiones corren en qué máquinas es justo el
+> mapa que buscaría un atacante. La ve cualquiera que pueda ver la topología. Si un grupo de hosts
+> tiene que quedar afuera, desactivá la recolección de software para ellos en la configuración de
+> agentes: sus paquetes dejan de recolectarse y guardarse, y aquí aparecen como desconocidos.
 
 ## Qué sigue
 

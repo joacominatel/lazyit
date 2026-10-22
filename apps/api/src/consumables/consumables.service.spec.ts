@@ -50,6 +50,7 @@ type TxMock = {
     findFirst: jest.Mock;
     update: jest.Mock;
     updateMany: jest.Mock;
+    create: jest.Mock;
   };
   consumableMovement: {
     create: jest.Mock;
@@ -90,6 +91,8 @@ describe('ConsumablesService', () => {
   let consumableMovement: MovementModelMock;
   let tx: TxMock;
   let consumableCategory: { findFirst: jest.Mock };
+  // Categories the create/update `FOR SHARE` lock (#1604) finds archived; every other id is live.
+  let archivedCategories: Set<string>;
   let prisma: {
     consumable: ConsumableModelMock;
     consumableCategory: { findFirst: jest.Mock };
@@ -120,11 +123,17 @@ describe('ConsumablesService', () => {
       create: jest.fn(),
       count: jest.fn(),
     };
+    archivedCategories = new Set();
+    // Create/update run in a transaction too (#1604); by default the tx client serves them from the same
+    // model mocks the plain reads use, so a test seeds one place. Movement tests override per call.
     tx = {
       consumable: {
-        findFirst: jest.fn(),
-        update: jest.fn(),
+        findFirst: jest.fn((args: unknown): unknown =>
+          consumable.findFirst(args),
+        ),
+        update: jest.fn((args: unknown): unknown => consumable.update(args)),
         updateMany: jest.fn(),
+        create: jest.fn((args: unknown): unknown => consumable.create(args)),
       },
       consumableMovement: {
         create: jest.fn(),
@@ -135,7 +144,15 @@ describe('ConsumablesService', () => {
       asset: { findFirst: jest.fn() },
       location: { findFirst: jest.fn() },
       assetHistory: { create: jest.fn().mockResolvedValue({}) },
-      $queryRaw: jest.fn().mockResolvedValue([]),
+      $queryRaw: jest.fn(
+        (strings: TemplateStringsArray, ...values: unknown[]) =>
+          Promise.resolve(
+            strings.join('?').includes('FROM "consumable_categories"') &&
+              !archivedCategories.has(values[0] as string)
+              ? [{ id: values[0] }]
+              : [],
+          ),
+      ),
     };
     consumableCategory = { findFirst: jest.fn() };
     prisma = {
@@ -373,22 +390,26 @@ describe('ConsumablesService', () => {
     });
   });
 
+  // The category ids create/update locked FOR SHARE (#1604), in call order.
+  const lockedCategories = () =>
+    (tx.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][])
+      .filter(([strings]) =>
+        strings.join('?').includes('FROM "consumable_categories"'),
+      )
+      .map(([, id]) => id);
+
   describe('archived category on write (AUD-025, SEC-052)', () => {
     it('create refuses an archived or missing category with 400 and writes nothing', async () => {
-      consumableCategory.findFirst.mockResolvedValue(null);
+      archivedCategories.add('cat1');
 
       await expect(
         service.create({ name: 'Toner', unit: 'units', categoryId: 'cat1' }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(consumableCategory.findFirst).toHaveBeenCalledWith({
-        where: { id: 'cat1', deletedAt: null },
-        select: { id: true },
-      });
+      expect(lockedCategories()).toEqual(['cat1']);
       expect(consumable.create).not.toHaveBeenCalled();
     });
 
     it('create files under a live category', async () => {
-      consumableCategory.findFirst.mockResolvedValue({ id: 'cat1' });
       consumable.create.mockResolvedValue({ id: 'k1' });
 
       await service.create({
@@ -404,7 +425,7 @@ describe('ConsumablesService', () => {
 
     it('update refuses moving to an archived category with 400 and writes nothing', async () => {
       consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: null });
-      consumableCategory.findFirst.mockResolvedValue(null);
+      archivedCategories.add('archived');
 
       await expect(
         service.update('k1', { categoryId: 'archived' }),
@@ -417,12 +438,76 @@ describe('ConsumablesService', () => {
         id: 'k1',
         categoryId: 'legacy',
       });
+      archivedCategories.add('legacy');
       consumable.update.mockResolvedValue({ id: 'k1' });
 
       await service.update('k1', { categoryId: 'legacy', notes: 'x' });
 
       expect(consumableCategory.findFirst).not.toHaveBeenCalled();
       expect(consumable.update).toHaveBeenCalled();
+    });
+  });
+
+  // A category delete locks the category FOR UPDATE before it moves the consumables filed under it; create and
+  // update hold it FOR SHARE until they commit, so a delete cannot slip between the check and the write (#1604).
+  describe('the category a write names is locked FOR SHARE (#1604)', () => {
+    const categorySql = () =>
+      (tx.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][])
+        .map(([strings]) => strings.join('?'))
+        .find((sql) => sql.includes('FROM "consumable_categories"'));
+
+    it('create locks the category, with its liveness in the locking statement, before inserting — in one transaction', async () => {
+      consumable.create.mockResolvedValue({ id: 'k1' });
+
+      await service.create({ name: 'Toner', unit: 'units', categoryId: 'c1' });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(categorySql()).toMatch(/"deletedAt" IS NULL[\s\S]*FOR SHARE/);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.consumable.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create under a category a concurrent delete archived while it waited is a 400 — nothing written', async () => {
+      archivedCategories.add('c1');
+
+      await expect(
+        service.create({ name: 'Toner', unit: 'units', categoryId: 'c1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consumable.create).not.toHaveBeenCalled();
+    });
+
+    it('a re-categorisation locks the target category before reading or writing the consumable', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: 'c0' });
+      consumable.update.mockResolvedValue({ id: 'k1' });
+
+      await service.update('k1', { categoryId: 'c1' });
+
+      expect(lockedCategories()).toEqual(['c1']);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.consumable.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(consumable.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('a re-categorisation into a category archived while it waited is a 400 — nothing written', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: 'c0' });
+      archivedCategories.add('c1');
+
+      await expect(
+        service.update('k1', { categoryId: 'c1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(consumable.update).not.toHaveBeenCalled();
+    });
+
+    it('an edit that names no category takes no category lock', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: 'c0' });
+      consumable.update.mockResolvedValue({ id: 'k1' });
+
+      await service.update('k1', { notes: 'x' });
+      await service.update('k1', { categoryId: null });
+
+      expect(lockedCategories()).toEqual([]);
     });
   });
 

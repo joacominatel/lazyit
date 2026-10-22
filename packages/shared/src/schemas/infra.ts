@@ -198,10 +198,76 @@ export const InfraNodeSchema = z.object({
    * (#1135) — which is what lets the canvas filter endpoints client-side with no second request.
    */
   chassis: AgentChassisSchema.nullish().catch(null),
+  /**
+   * RETIRED (#1701, epic #1146 Q11): the node is GONE, not merely silent. OFFLINE says "it has not
+   * reported lately"; retired says "it is not coming back" — a decommissioned server, an uninstalled
+   * agent. The staleness sweeper skips a retired node, so it is never flipped OFFLINE or announced
+   * again, and its history, edges and Asset link are kept. Set by a human
+   * (`POST /infra/nodes/:id/retire`) or by the host's own agent on uninstall (`decommissioning: true`);
+   * a retired node that reports again is un-retired automatically. Null = active.
+   *
+   * `.nullish()` for read tolerance: an API that predates the column omits it, which reads as active.
+   */
+  retiredAt: z.iso.datetime().nullish(),
+  /** The human who retired it. Null for an agent self-retire, a departed user, or an active node. */
+  retiredById: z.string().nullish(),
+  /**
+   * OFFLINE-ALERT SNOOZE (#1701, epic #1146 Q15): while this instant is in the future, the sweeper
+   * still flips the node OFFLINE but sends no `infra.agent_offline` nudge for it. A past value is
+   * inert. Null = not snoozed; `.nullish()` for an older API. Use {@link isAlertsSnoozed} to read it.
+   */
+  alertsSnoozedUntil: z.iso.datetime().nullish(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
 });
+
+/**
+ * Is a node's offline alerting snoozed at `now` (#1701)? PURE, so the API sweeper and the web badge
+ * answer the same question the same way: only a value strictly in the FUTURE snoozes. Absent, null,
+ * past or unparseable all answer `false` — the safe direction, because a wrong `true` would silence a
+ * real outage.
+ */
+export function isAlertsSnoozed(
+  alertsSnoozedUntil: string | Date | null | undefined,
+  now: Date | number = Date.now(),
+): boolean {
+  if (alertsSnoozedUntil === null || alertsSnoozedUntil === undefined) return false;
+  const until =
+    alertsSnoozedUntil instanceof Date
+      ? alertsSnoozedUntil.getTime()
+      : Date.parse(alertsSnoozedUntil);
+  if (!Number.isFinite(until)) return false;
+  const at = now instanceof Date ? now.getTime() : now;
+  return until > at;
+}
+
+/**
+ * The longest a snooze may run, in days (#1701). A maintenance window, not a mute switch: a host that
+ * should never alert again is RETIRED, which says so on the map instead of hiding behind a date.
+ */
+export const INFRA_NODE_SNOOZE_MAX_DAYS = 90;
+
+/**
+ * `PUT /infra/nodes/:id/snooze` body (#1701). `until` must be in the future and at most
+ * {@link INFRA_NODE_SNOOZE_MAX_DAYS} days ahead; both bounds need the server clock, so they are
+ * enforced in the service, not here.
+ */
+export const SnoozeInfraNodeAlertsSchema = z.strictObject({
+  until: z.iso.datetime({ offset: true }),
+});
+export type SnoozeInfraNodeAlerts = z.infer<typeof SnoozeInfraNodeAlertsSchema>;
+
+/**
+ * The fact key the ingest path records a retire-lifecycle transition under in the node's fact history
+ * (#1701), as a `FACT_CHANGED` row whose values are {@link InfraNodeLifecycleValue}s. Only MACHINE
+ * transitions are recorded there — an agent's own decommission and the automatic un-retire of a node
+ * that reported again — because that table is written by the ingest path alone; a human retire is
+ * curation, attributed by `retiredById` instead.
+ */
+export const INFRA_NODE_LIFECYCLE_FACT = "node.lifecycle";
+export const INFRA_NODE_LIFECYCLE_VALUES = ["active", "retired"] as const;
+export type InfraNodeLifecycleValue = (typeof INFRA_NODE_LIFECYCLE_VALUES)[number];
 
 /**
  * Payload to create a node. `kind` + `label` are required; everything else is optional with a DB
@@ -1515,6 +1581,21 @@ export const AgentReportSchema = z.object({
    * absent echo writes nothing rather than clearing the stored value.
    */
   policyRevision: z.number().int().nonnegative().optional().catch(undefined),
+  /**
+   * "This host is being uninstalled" (#1701, epic #1146 Q11). `lazyit-agent decommission`, which the
+   * installers' uninstall runs, sends one last report carrying `true` BEFORE the token is destroyed, and the server RETIRES the node that report's
+   * own `(reportingSource, externalId)` resolves to — never another node, never a container or guest
+   * child, never the linked Asset. The report's facts are NOT ingested: the host is leaving, so its
+   * last snapshot stays the one it reported while it was in service. An unknown host is a 404 (nothing
+   * to retire, and nothing is created).
+   *
+   * ADDITIVE and loose in both directions. A server that predates the field STRIPS it (the root is a
+   * loose `z.object()`, #1138) and ingests the report as an ordinary check-in — the host simply goes
+   * OFFLINE later, exactly the pre-#1701 behaviour — and its ack carries no `retired`, which is how the
+   * agent tells the operator to retire the node by hand. An older agent never sends it.
+   * `.catch(undefined)`: an unrecognised value degrades to an ordinary report, never to a retirement.
+   */
+  decommissioning: z.boolean().optional().catch(undefined),
 });
 export type AgentReport = z.infer<typeof AgentReportSchema>;
 
@@ -2307,6 +2388,13 @@ export const AgentReportAckSchema = z.object({
    * not know is simply ignored.
    */
   softwareDelta: z.boolean().optional(),
+  /**
+   * "The node is retired" (#1701) — set ONLY on the ack to a `decommissioning: true` report. Its
+   * absence on that ack means the server predates decommissioning and treated the report as an
+   * ordinary check-in, which the uninstaller reports so the operator can retire the node by hand.
+   * Optional in both directions, like the other ack keys.
+   */
+  retired: z.boolean().optional(),
 });
 export type AgentReportAck = z.infer<typeof AgentReportAckSchema>;
 

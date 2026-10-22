@@ -3,7 +3,7 @@ title: AssetCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # AssetCategory
@@ -35,7 +35,8 @@ Drives grouping and filtering, and — via an optional **advisory specs dictiona
   assets follow their model, so the preview and the `409` count them too. Without a resolution the
   delete is a `409` `DELETE_RESOLUTION_REQUIRED` with `{ assetModels, assets }`. The re-point and the
   soft delete share one transaction under a `FOR UPDATE` lock on both categories, with the live models
-  locked `FOR NO KEY UPDATE` in id order; models have no history
+  locked `FOR NO KEY UPDATE` in id order. A model write naming the category holds it `FOR SHARE`, so
+  the two serialize (#1604); models have no history
   table, so nothing else is written. Archived models keep their reference, and restoring the category
   re-links nothing. The `SetNull` FK only matters for a hard delete, which the API never issues.
 - **Categories archived before the delete resolution** still have their models pointing at them; a

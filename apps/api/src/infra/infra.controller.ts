@@ -59,8 +59,10 @@ import {
   InfraSecretRefSchema,
   MAX_PAGE_LIMIT,
   MergeInfraNodeSchema,
+  SnoozeInfraNodeAlertsSchema,
   UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
+  type SnoozeInfraNodeAlerts,
 } from '@lazyit/shared';
 import { z } from 'zod';
 import {
@@ -102,6 +104,9 @@ class AgentReportDto extends createZodDto(AgentReportSchema) {}
 class AgentReportAckDto extends createZodDto(AgentReportAckSchema) {}
 class ConfirmInfraNodeDto extends createZodDto(ConfirmInfraNodeSchema) {}
 class MergeInfraNodeDto extends createZodDto(MergeInfraNodeSchema) {}
+class SnoozeInfraNodeAlertsDto extends createZodDto(
+  SnoozeInfraNodeAlertsSchema,
+) {}
 class InfraIdentityMatchDto extends createZodDto(InfraIdentityMatchSchema) {}
 class BulkConfirmInfraNodesDto extends createZodDto(
   BulkConfirmInfraNodesSchema,
@@ -310,7 +315,7 @@ export class InfraController {
   @UseGuards(InfraReportRateLimitGuard)
   @ApiOperation({
     summary:
-      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet) with its kind PROPOSED from the reported virtualization/chassis (#1139; a report with no evidence falls back to PHYSICAL_HOST); a known host refreshes its inventory + liveness without touching human curation, and is never re-kinded. A report carrying host.containers[] also reconciles CONTAINER child nodes joined to the host by an active RUNS_ON edge — absent means the collector never probed (nothing is touched), [] means it probed and found none (existing children go OFFLINE, never deleted). Rate-limited per service account, and a NEW host or child is refused once that account has enrolled its per-window quota — already-known hosts keep refreshing regardless, and a budget spent mid-list never fails the host report. Returns a minimal ack.',
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet) with its kind PROPOSED from the reported virtualization/chassis (#1139; a report with no evidence falls back to PHYSICAL_HOST); a known host refreshes its inventory + liveness without touching human curation, and is never re-kinded. A report carrying host.containers[] also reconciles CONTAINER child nodes joined to the host by an active RUNS_ON edge — absent means the collector never probed (nothing is touched), [] means it probed and found none (existing children go OFFLINE, never deleted). Rate-limited per service account, and a NEW host or child is refused once that account has enrolled its per-window quota — already-known hosts keep refreshing regardless, and a budget spent mid-list never fails the host report. A report carrying `decommissioning: true` (sent by `lazyit-agent decommission` when the installer uninstalls the agent, #1701) ingests nothing: it RETIRES the node its own reporting key resolves to — never another node, a child or the linked Asset — and acks with `retired: true`; 404 when no live node carries that key. Returns a minimal ack.',
   })
   @ApiOkResponse({ type: AgentReportAckDto })
   // FORWARD-COMPATIBLE (#1138): the contract root is no longer `strictObject`, so a report from a
@@ -644,6 +649,64 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeDto })
   restoreNode(@Param('id') id: string) {
     return this.infra.restoreNode(id);
+  }
+
+  // ── Retire + snooze (#1701, epic #1146 Q11/Q15) ─────────────────────────────
+  // HUMAN-ONLY, like every other infra write that changes how a node is treated: a reporting agent
+  // retires only its OWN node, and only through the `decommissioning` report on `POST /infra/report`.
+
+  @Post('nodes/:id/retire')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Retire a node (#1701): mark it GONE rather than silent. The staleness sweeper skips a retired node, so it is never flipped OFFLINE or announced again; its history, edges and linked Asset are untouched (the Asset is never retired or disposed). Idempotent — an already-retired node keeps its original stamp. If the host reports again it is un-retired automatically, and that is recorded in its change history.',
+  })
+  @ApiOkResponse({ type: InfraNodeDto })
+  retireNode(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.infra.retireNode(id, principal);
+  }
+
+  @Post('nodes/:id/unretire')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Un-retire a node (#1701): the staleness sweeper judges it again from its next tick, so a host that is still silent goes OFFLINE and is announced. Idempotent.',
+  })
+  @ApiOkResponse({ type: InfraNodeDto })
+  unretireNode(@Param('id') id: string) {
+    return this.infra.unretireNode(id);
+  }
+
+  @Put('nodes/:id/snooze')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary:
+      'Snooze a node’s offline alerts until `until` (#1701) — a maintenance window. The node still goes OFFLINE when it stops reporting; only the agent-offline notification is withheld while `until` is in the future. `until` must be in the future and at most 90 days ahead (400 otherwise). Replaces any current snooze.',
+  })
+  @ApiOkResponse({ type: InfraNodeDto })
+  snoozeNodeAlerts(
+    @Param('id') id: string,
+    @Body() dto: SnoozeInfraNodeAlertsDto,
+  ) {
+    const body: SnoozeInfraNodeAlerts = dto;
+    return this.infra.snoozeNodeAlerts(id, body.until);
+  }
+
+  @Delete('nodes/:id/snooze')
+  @RequirePermission('infra:manage')
+  @UseGuards(HumanOnlyGuard)
+  @ApiOperation({
+    summary: 'End a node’s offline-alert snooze now (#1701). Idempotent.',
+  })
+  @ApiOkResponse({ type: InfraNodeDto })
+  unsnoozeNodeAlerts(@Param('id') id: string) {
+    return this.infra.unsnoozeNodeAlerts(id);
   }
 
   @Post('nodes/:id/confirm')

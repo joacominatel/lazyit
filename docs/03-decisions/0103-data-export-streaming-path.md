@@ -1,9 +1,9 @@
 ---
 title: "ADR-0103: Data export — one server-side streaming path per list"
-tags: [adr, api, export, csv, security, audit, reports]
+tags: [adr, api, export, csv, xlsx, security, audit, reports]
 status: accepted
 created: 2026-10-16
-updated: 2026-10-21
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -17,6 +17,10 @@ at the data level. Amends [[0030-list-pagination-contract]] (exports page by key
 [[0044-recent-activity-view]] (the view gains a `sourceKey`) and [[0081-audit-log-read-surface]] (a
 fourth audit source). Builds on [[0083-versioning-and-releases]] (the provenance stamp),
 [[0048-service-accounts]] (actor attribution) and [[0100-money-as-64-bit-minor-units]].
+
+Amended 2026-10-22 (#1501, CEO decision on #1495): the engine also writes **XLSX**, opted in per
+route — today the purchases list and the asset inventory (§11). This lifts "XLSX not built" from the
+consequences; JSON files are still not built.
 
 ## Context
 
@@ -53,7 +57,8 @@ Most other list screens (users, access grants, consumables, purchases, …) have
 
 `apps/api/src/common/export/` holds the engine; each resource keeps its own route. A route is a few
 lines: the list's `@RequirePermission`, its own filter parser, its own `where` builder, a column set,
-and one call to `ExportService.exportCsv()`.
+and one call to `ExportService.exportCsv()` — or `exportFile()` with a `format`, on a route that offers
+XLSX (§11).
 
 | Piece | Responsibility |
 | --- | --- |
@@ -179,6 +184,48 @@ it; mixing the two families is a `400`. The audit row records the filters that w
 `activeOnly` / `includeExpired` only when `status` is absent, and `noAccessLevel: true` for a no-level
 export (a `null` level would otherwise be dropped by the audit sanitizer and read as "any level").
 
+### 11. XLSX, opted in per route (2026-10-22, #1501)
+
+The CEO accepted the scoping on #1495: the export engine gains `format=csv|xlsx`, enabled for the
+purchases list and the asset inventory, and offered to other routes later, one at a time.
+
+- **The contract.** `GET /purchase-orders/export` and `GET /assets/export` take `?format=`: `csv`
+  (the default when omitted) or `xlsx`; any other value, or the parameter repeated, is a **400** before
+  any read. The other export routes do not read the parameter and stay CSV. `DATA_EXPORT_FORMATS` and
+  `DATA_EXPORT_XLSX_RESOURCES` (`ASSETS`, `PURCHASE_ORDERS`) in `@lazyit/shared` are the list the web
+  reads. An XLSX answer is `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` with
+  `attachment; filename="lazyit-<name>-YYYY-MM-DD.xlsx"`.
+- **Everything else is the same export.** Same permission, filter parser, `where`, per-caller column
+  allowlist, keyset batches, 100,000-row cap (422), limiter (429) and `DataExportLog` row. The format is
+  recorded **inside the existing `filters` JSON** as `format: "xlsx"`; a CSV export records no `format`
+  key, exactly as before. No migration.
+- **The file.** One sheet, named after the export (`purchases`, `assets`), with the CSV's exact columns
+  and headers in the same order. Row 1 is a bold header, frozen, with an autofilter over the written
+  rows (and the matching hidden `_xlnm._FilterDatabase` name). Cells are typed from the column `kind`:
+  `number` → a number; `money` (integer minor units, [[0100-money-as-64-bit-minor-units]]) → the exact
+  major-unit number in `#,##0.00`, next to its currency column as in the CSV; `date` → a real Excel date,
+  shown `yyyy-mm-dd` when the value is a UTC midnight (the date-only fields) and `yyyy-mm-dd hh:mm:ss`
+  otherwise, in **UTC** like the CSV's ISO timestamps. A value that is not of its column's type falls
+  back to text, as does a date before 1900-03-01 (Excel's 1900 leap-year bug).
+- **Text is an inline string, never a formula.** No cell is written as a formula, so `=`, `+`, `-`,
+  `@` and their full-width forms are shown verbatim and need no `'` guard (the guard of §8 is CSV-only).
+  Text is XML-escaped; control characters other than tab and LF become ECMA-376 `_xHHHH_` escapes, a
+  literal `_xHHHH_` is kept literal, characters XML cannot hold become U+FFFD, and a text above
+  Excel's 32,767-character cell limit is cut to it (the CSV keeps it whole).
+- **No provenance stamp and not importable.** The `# lazyit` line stays CSV-only. The asset importer
+  still rejects `.xlsx` with its "export to CSV" message ([[0069-migrator-import]] §12, unchanged): the
+  XLSX is for reading in a spreadsheet, the CSV for the round trip.
+- **The writer is in-house, on the existing `jszip`** (no new dependency, `bun.lock` unchanged):
+  `xlsx-sheet.ts` writes the SpreadsheetML parts and streams the sheet XML one batch at a time;
+  `stream-xlsx.ts` zips them with `generateNodeStream({ streamFiles: true })`, the sheet entry fed by a
+  Node stream. `streamFiles` writes each entry with a trailing data descriptor instead of holding it to
+  learn its size and CRC, so memory stays at one batch plus the deflate window: the spike measured
+  ~14 MB at 100,000 and at 300,000 rows, where a buffered entry grew with the file (87 MB at 300,000),
+  and `stream-xlsx.spec.ts` asserts the bound at the cap. The workbook part is zipped after the sheet,
+  so the filter name carries the exact row count. The response stream emits `close` on success, failure
+  and disconnect alike, which is what frees the limiter slot; a batch failing mid-stream destroys the
+  response as in §4.
+
 ## Consequences
 
 - One export path with one set of guarantees: no duplicated rows, a refusal instead of a silent
@@ -194,13 +241,19 @@ export (a `null` level would otherwise be dropped by the audit sanitizer and rea
 - **Ceiling:** the limiter is per replica, and the concurrency slot is in memory: a restart frees it,
   and two replicas allow two parallel exports per principal.
 - **Ceiling:** the recorded `rowCount` is the count at start, not the number of rows actually sent.
-- **Deliberately not built:** XLSX or JSON files, background or emailed exports, scheduled exports,
+- **XLSX (§11, 2026-10-22):** two routes offer it. Each further route is an opt-in: read
+  `?format=`, call `exportFile()`, add a route test, and add the resource to
+  `DATA_EXPORT_XLSX_RESOURCES`. **Cost:** the XLSX is larger to produce than the CSV (DEFLATE on the
+  request thread, about 10 s for a wide 100,000-row file) and the writer is ours to maintain; files use
+  zip data descriptors, which every current spreadsheet reads but a few old zip tools do not.
+- **Deliberately not built:** JSON files, background or emailed exports, scheduled exports,
   column pickers, sort-respecting exports, flattened asset `specs` or custom fields (#872), detail-page
   exports beyond the listed ledgers, any server-side secret export.
 
 ## References
 
 - Epic #1597 and its proposal. [[data-export-log]] · [[INVARIANTS]] INV-EXP-1.
+- §11: #1501 and the CEO decision on #1495; [[purchases/ux-proposal]] §7.
 - [[0030-list-pagination-contract]] · [[0044-recent-activity-view]] · [[0081-audit-log-read-surface]] ·
   [[0083-versioning-and-releases]] · [[0069-migrator-import]] · [[0048-service-accounts]] ·
   [[0061-secret-manager-zero-knowledge]] · [[0098-consumable-delivery-targets]] ·

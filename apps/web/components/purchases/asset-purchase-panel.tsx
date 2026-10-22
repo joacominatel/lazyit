@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { fetchAttachmentBlob } from "@/lib/api/endpoints/attachments";
-import { useAssetPurchase, useUnlinkAssets } from "@/lib/api/hooks/use-purchase-orders";
+import { useApplyToLinked, useAssetPurchase, useUnlinkAssets } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
@@ -40,7 +40,9 @@ type PanelAsset = Pick<
  * The asset's *Purchase* panel (ADR-0099 §8 and §10, CEO decision D-A; UX proposal §2.3): where the asset
  * was bought — supplier, the purchase (linked), its dates and invoice numbers, the line, the supplier's
  * support contact for warranty claims, and the purchase's documents (the same rows, read-only here;
- * uploading and deleting happen on the purchase). Cost is the one value flagged *differs from purchase*.
+ * uploading and deleting happen on the purchase). Cost is the one value flagged *differs from purchase*, with
+ * *Apply purchase value* (#1502) next to it for someone who can link — a confirmation, then the line's price
+ * and currency label are copied onto this asset (`apply-to-linked`, audited on both sides).
  *
  * Shown only to a viewer holding `purchaseOrder:read`; without it the panel does not render and its read
  * is never made (the API refuses it too). An unlinked asset shows the panel only to someone who can link
@@ -95,7 +97,9 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
   const titleOf = usePurchaseTitle();
   const { data, isLoading, isError } = useAssetPurchase(asset.id, { enabled: true });
   const unlink = useUnlinkAssets();
+  const applyValue = useApplyToLinked();
   const [confirming, setConfirming] = useState(false);
+  const [confirmingApply, setConfirmingApply] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   if (isLoading) {
@@ -121,6 +125,8 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
   const title = titleOf(provenanceTitleSource(purchase, line));
   const supplier = purchase.supplier;
   const differs = costDiffersFromPurchase(asset, line, purchase.currency);
+  // Re-applying writes the asset from its line: the same permissions as unlinking, on a live purchase.
+  const canApplyValue = differs && canUnlink && !archived;
   const support = supplier
     ? [supplier.supportContactName, supplier.supportContactEmail, supplier.supportContactPhone].filter(Boolean)
     : [];
@@ -158,6 +164,28 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
           toast.success(t("unlinkedToast"));
         },
         onError: (error) => notifyError(error, t("unlinkError")),
+      },
+    );
+  }
+
+  function confirmApply() {
+    applyValue.mutate(
+      { id: purchase.id, lineId: line.id, assetIds: [asset.id], fields: ["purchaseCost"] },
+      {
+        onSuccess: (outcome) => {
+          setConfirmingApply(false);
+          if (outcome.error) {
+            notifyError(outcome.error, t("applyError"));
+            return;
+          }
+          const failure = failureViews(outcome.failed, new Map())[0];
+          if (failure) {
+            toast.error(failure.reasonKey ? treasons(failure.reasonKey) : failure.error);
+            return;
+          }
+          toast.success(outcome.updated > 0 ? t("appliedToast") : t("alreadyApplied"));
+        },
+        onError: (error) => notifyError(error, t("applyError")),
       },
     );
   }
@@ -219,6 +247,11 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
               <span className="inline-flex flex-wrap items-center gap-2">
                 {formatMoney(line.unitPrice, locale, purchase.currency)}
                 {differs ? <StatusBadge tone="neutral">{t("differs")}</StatusBadge> : null}
+                {canApplyValue ? (
+                  <Button variant="outline" size="xs" onClick={() => setConfirmingApply(true)}>
+                    {t("applyValue")}
+                  </Button>
+                ) : null}
               </span>
             ) : (
               "—"
@@ -276,6 +309,31 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
           )}
         </div>
       </div>
+
+      <AlertDialog open={confirmingApply} onOpenChange={setConfirmingApply}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("applyTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("applyDescription", {
+                asset: asset.assetTag ?? asset.name,
+                current:
+                  asset.purchaseCost == null
+                    ? "—"
+                    : formatMoney(asset.purchaseCost, locale, asset.purchaseCurrency ?? null),
+                value: line.unitPrice === null ? "—" : formatMoney(line.unitPrice, locale, purchase.currency),
+                purchase: title,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={applyValue.isPending}>{tc("cancel")}</AlertDialogCancel>
+            <Button disabled={applyValue.isPending} onClick={confirmApply}>
+              {t("applyValue")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>

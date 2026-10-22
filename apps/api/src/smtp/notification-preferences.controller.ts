@@ -44,10 +44,11 @@ export class NotificationPreferencesController {
   @ApiOperation({
     summary: 'Read the caller’s email notification preferences (any user)',
     description:
-      'Returns { emailableTypes, optedOutTypes }: the full server-curated catalog of types that CAN be ' +
-      'emailed (so the UI renders one toggle per type without hardcoding the allowlist) plus the subset ' +
-      'the caller has opted OUT of. Self-only — resolved from the JWT, never a supplied user id. The ' +
-      'in-app bell is unaffected (email-channel only).',
+      'Returns { emailableTypes, optedOutTypes, mandatoryTypes }: the full server-curated catalog of types ' +
+      'that CAN be emailed (so the UI renders one toggle per type without hardcoding the allowlist), the ' +
+      'subset the caller has opted OUT of, and the security notices that are always emailed and cannot be ' +
+      'opted out of (never listed in optedOutTypes). Self-only — resolved from the JWT, never a supplied ' +
+      'user id. The in-app bell is unaffected (email-channel only).',
   })
   @ApiOkResponse({ type: NotificationEmailPreferencesDto })
   get(@CurrentUser() user?: User): Promise<NotificationEmailPreferences> {
@@ -61,7 +62,8 @@ export class NotificationPreferencesController {
     description:
       'Idempotent full replacement: the body { optedOutTypes } is the complete desired opt-out list, ' +
       'not a delta. Each entry must be a known EMAILABLE notification type (unknown → 400 via the enum; ' +
-      'a valid-but-non-emailable type → 400). De-duplicated before storing. Self-only (JWT-keyed). ' +
+      'a valid-but-non-emailable type → 400). A security notice (mandatoryTypes) is dropped, not refused. ' +
+      'De-duplicated before storing. Self-only (JWT-keyed). ' +
       'Returns the fresh preferences so the client needs no refetch.',
   })
   @ApiOkResponse({ type: NotificationEmailPreferencesDto })

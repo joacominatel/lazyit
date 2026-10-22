@@ -74,8 +74,8 @@ export const platformToolset: AiToolset = {
     ),
     unexposed(
       UserSessionsController,
-      ['list', 'end'],
-      'Excluded: authentication — the per-device sessions are the credentials themselves (structural exclusion).',
+      ['list', 'end', 'revokeAll'],
+      'Excluded: authentication — the per-device sessions are the credentials themselves, and sign out everywhere disconnects the AI apps too (structural exclusion).',
     ),
     unexposed(
       KeypairController,

@@ -3,7 +3,7 @@ title: UserSession
 tags: [domain, entity, auth, security]
 status: accepted
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-22
 ---
 
 # UserSession
@@ -45,7 +45,8 @@ token's epoch and has not expired. One primary-key read per request; no cache, s
 effect on the next request on every replica.
 
 A row is **listed** only while it is live: minted at the user's *current* `sessionEpoch` and not past
-`expiresAt`. Every lever that bumps the epoch — sign out everywhere, password change or reset, admin reset,
+`expiresAt`. Every lever that bumps the epoch — sign out everywhere (plain, or *and disconnect AI apps*,
+#1699), password change or reset, admin reset,
 deactivation, offboarding, the AD/LDAP sync's soft offboard, the recovery CLI — therefore removes the
 user's sessions from the list at once, without each of those code paths knowing about this table.
 
