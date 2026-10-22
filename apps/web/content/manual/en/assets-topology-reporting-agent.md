@@ -443,8 +443,10 @@ move. While a node is snoozed it still turns **Offline** when it stops reporting
 but nobody is notified, in the bell or by email. You can snooze for 4 hours, 1 day, 3 days, 1 week or
 30 days (90 days is the longest lazyit accepts), and end a snooze early at any time. Two things to know:
 
-- The snooze covers an outage that **starts** inside the window. If the server is still offline when
-  the window ends, lazyit does not announce it then. The Offline status is already on the map.
+- What counts is **when lazyit marks the server Offline**, not when it actually went quiet. If that
+  happens while the snooze is running, nobody is notified, and nobody is notified later either when the
+  window ends: the Offline status is already on the map. If the server is only marked Offline after
+  the window has ended, the alert goes out as usual.
 - A snooze is not a mute switch. For a server that should never alert again, retire it.
 
 **Where to find them.** Every node has a **Lifecycle** menu: in the node's details on the map
@@ -1356,7 +1358,8 @@ gets a card:
 
 Every number opens the hosts behind it, a page at a time, each linking to its node on the map. A host's
 row also says how old the package list it is judged on is — an offline host still counts, by its last
-list.
+list. A **retired** host does not count at all: it is gone, so it neither runs a version nor is
+missing one (see [Retired servers and snoozed alerts](#retired-servers-and-snoozed-alerts)).
 
 **It is a distribution, nothing more.** lazyit counts versions; it does not judge them. There is no
 "outdated", no end-of-life flag and no vulnerability matching — lazyit has no feed to check against, and

@@ -467,9 +467,10 @@ cambio de hardware, una mudanza de datacenter. Mientras un nodo está en pausa i
 la campana ni por correo. Podés pausar por 4 horas, 1 día, 3 días, 1 semana o 30 días (lo máximo que
 acepta lazyit son 90 días), y terminar una pausa antes cuando quieras. Dos cosas para tener en cuenta:
 
-- La pausa cubre una caída que **empieza** dentro de la ventana. Si el servidor sigue fuera de
-  línea cuando termina la ventana, lazyit no lo avisa en ese momento. El estado Fuera de línea ya está
-  en el mapa.
+- Lo que cuenta es **cuándo lazyit marca el servidor como Fuera de línea**, no cuándo dejó de
+  reportar. Si eso pasa mientras la pausa está en curso, no se avisa a nadie, y tampoco se avisa después,
+  cuando termina la ventana: el estado Fuera de línea ya está en el mapa. Si el servidor recién se marca
+  como Fuera de línea después de que terminó la ventana, el aviso sale como siempre.
 - Una pausa no es un silenciador permanente. Si un servidor no debería volver a avisar nunca, retiralo.
 
 **Dónde encontrarlas.** Cada nodo tiene un menú de **Ciclo de vida**: en los detalles del nodo en el
@@ -1446,7 +1447,9 @@ uno tiene su tarjeta:
 
 Cada número abre los hosts que tiene detrás, de a una página, cada uno con un enlace a su nodo en el
 mapa. La fila de cada host dice además qué tan vieja es la lista de paquetes con la que se lo evalúa: un
-host sin reportar sigue contando, según su última lista.
+host sin reportar sigue contando, según su última lista. Un host **retirado** no cuenta para nada: está
+dado de baja, así que ni tiene una versión ni le falta una (ver
+[Servidores retirados y alertas pausadas](#servidores-retirados-y-alertas-pausadas)).
 
 **Es una distribución, nada más.** lazyit cuenta versiones; no las juzga. No hay "desactualizado", ni
 marca de fin de soporte, ni cruce con vulnerabilidades: lazyit no tiene contra qué fuente compararlas, y
