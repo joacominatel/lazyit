@@ -7,7 +7,8 @@ import type { Prisma, User } from '../../generated/prisma/client';
  * `manager` (resolved from `managerId`/`managerName`, ADR-0058) is added by the serializer.
  *
  * Never listed: `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`,
- * `mustChangePassword` (credentials and revocation counters, ADR-0086/0097), the raw manager columns,
+ * `oidcTokensNotBefore`, `mustChangePassword` (credentials and revocation state, ADR-0086/0097), the raw
+ * manager columns,
  * `notificationEmailOptOutTypes` (served by its own self-service endpoint) and the AD reconcile keys
  * `directorySourceId` / `directoryOffboardedAt` / `directoryReenabledAt` (ADR-0091).
  *

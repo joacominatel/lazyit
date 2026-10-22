@@ -114,6 +114,12 @@ model User {
   // change / reset, admin reset, the recovery CLI, deactivation, offboarding and an admin "revoke sessions"
   // bump BOTH. NOT NULL with a default: existing rows get 0 on update.
   mcpCredentialEpoch Int      @default(0)
+  // The OIDC-mode cutoff (#1715, ADR-0097 decision 8 amended 2026-10-22): the OIDC branch of the auth guard
+  // refuses an IdP access token issued (`iat`) — or, when the token carries it, authenticated
+  // (`auth_time`) — before this instant, minus a small clock-skew tolerance. In OIDC mode lazyit mints no
+  // web session, so `sessionEpoch` cannot end one; this is what "Sign out everywhere", a deactivation, an
+  // offboarding and the directory sync's soft offboard set instead. Nullable, no backfill: null = no cutoff.
+  oidcTokensNotBefore DateTime?
   // One-time-credential flag (ADR-0086 §5, F1c). Set true when an admin PROVISIONS or RESETS a local
   // credential (create with a temp password / admin reset) so the user is a temp secret holder, not the
   // owner of their final password. F1c only STORES it; ENFORCEMENT (forcing the change at next login) is

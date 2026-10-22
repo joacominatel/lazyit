@@ -19,6 +19,8 @@ const SECRET_LIKE =
 const ALLOWLIST: Record<string, string> = {
   // The short, non-secret prefix shown in the UI to recognise a token (ADR-0048); the secret is never stored.
   'ServiceAccount.tokenPrefix': 'display prefix, not the token',
+  // The OIDC sign-out cutoff (#1715): a timestamp the auth guard compares, not a credential.
+  'User.oidcTokensNotBefore': 'revocation timestamp, not a token',
   // A foreign key to WorkflowSecret: an id, not secret material.
   'WorkflowConnection.secretId': 'foreign key to the (omitted) secret row',
   // SHA-256 of an uploaded import file, used to spot a re-upload; a content digest, not a credential.
