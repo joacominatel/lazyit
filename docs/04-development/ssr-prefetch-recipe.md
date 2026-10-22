@@ -3,7 +3,7 @@ title: "SSR server-prefetch recipe (apply the ADR-0067 mold to a new route)"
 tags: [development, frontend, ssr, tanstack-query, nextjs]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-30
+updated: 2026-10-22
 ---
 
 # SSR server-prefetch recipe
@@ -141,6 +141,13 @@ set of *defined* keys and their values must agree (which the shared function gua
 on the client by `isAdmin`; reproducing that key server-side would need the session's role, so the
 page skips the prefetch when the archived sentinel is present and lets the client fetch it (a
 low-frequency slice — graceful degrade, no key mismatch). Marked with `// ponytail:` in each page.
+
+**One permission-dependent filter:** the assets list's `owner` → `assignedToUserId` needs `user:read`
+on the API (#1685). The server prefetch keeps it (`deriveAssetFilters`'s `canFilterByOwner` defaults to
+true); the client passes `canFilterByOwner` as "permissions still loading, or `user:read` held", so a
+privileged caller's first key matches the prefetch, and for a caller without `user:read` the filter is
+dropped once permissions load — the list loads instead of a 403 (a Viewer's prefetch of that URL just
+fails and is not dehydrated).
 
 ### Still deferred (diminishing returns — #733)
 

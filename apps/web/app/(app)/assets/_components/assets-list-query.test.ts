@@ -56,3 +56,28 @@ describe("the custom status filter (ADR-0101)", () => {
     expect(statusFilterChoice({ status: "ALL", statusLabel: "ALL" }, kindOf)).toBeNull();
   });
 });
+
+describe("the owner filter needs user:read (#1685)", () => {
+  const OWNER = "7b3f6c1e-2a4d-4e8b-9c1a-3f5e7d9b1c2a";
+  const stateFor = (search: string) =>
+    deriveListState(new URLSearchParams(search), ASSET_LIST_OPTIONS);
+
+  test("?owner= maps to assignedToUserId by default (the server prefetch) and with user:read", () => {
+    expect(filtersFor(`owner=${OWNER}`).assignedToUserId).toBe(OWNER);
+    expect(
+      deriveAssetFilters(stateFor(`owner=${OWNER}`), {
+        isAdmin: false,
+        canFilterByOwner: true,
+      }).assignedToUserId,
+    ).toBe(OWNER);
+  });
+
+  test("without user:read the owner filter is dropped, so the list loads instead of a 403", () => {
+    expect(
+      deriveAssetFilters(stateFor(`owner=${OWNER}`), {
+        isAdmin: false,
+        canFilterByOwner: false,
+      }).assignedToUserId,
+    ).toBeUndefined();
+  });
+});

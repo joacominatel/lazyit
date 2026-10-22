@@ -521,7 +521,9 @@ const assetSearchInput = z
     assignedToUserId: z
       .uuid()
       .optional()
-      .describe('Only assets currently checked out to this user.'),
+      .describe(
+        'Only assets currently checked out to this user. Needs permission to view the user directory.',
+      ),
     ownership: z
       .enum(['HAS', 'NONE'])
       .optional()

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   type INestApplication,
 } from '@nestjs/common';
@@ -508,7 +509,31 @@ const record = (
           : {},
   } as never);
 
+/** The harness's real permission resolver, set by {@link bootHarness} (the per-caller gates below use it). */
+let harnessResolver: PermissionResolverService | undefined;
+
+/** `principal` holds `user:read`, through the real resolver (the fake mirrors AssetsService). */
+function canReadUsers(principal?: Principal): Promise<boolean> {
+  return harnessResolver
+    ? harnessResolver.principalHas(principal, 'user:read')
+    : Promise.resolve(false);
+}
+
 export const assetsService = {
+  // The #1685 gates, with the real service's semantics.
+  canReadOwnerDetails: jest.fn((principal?: Principal) =>
+    canReadUsers(principal),
+  ),
+  authorizePersonFilter: jest.fn(
+    async (assignedToUserId: string | undefined, principal?: Principal) => {
+      if (assignedToUserId === undefined) return;
+      if (!(await canReadUsers(principal))) {
+        throw new ForbiddenException(
+          'Filtering assets by person needs user:read',
+        );
+      }
+    },
+  ),
   findPage: jest.fn((filters: Row, page: PageQ, selfId?: string) => {
     let rows = [...state.assets.values()].filter((a) =>
       page.deleted === 'only' ? a.deletedAt !== null : a.deletedAt === null,
@@ -1134,6 +1159,7 @@ export async function bootHarness(): Promise<Harness> {
   }).compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>();
   await app.init();
+  harnessResolver = app.get(PermissionResolverService);
   return {
     app,
     tools: app.get(AiToolService),

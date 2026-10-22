@@ -48,6 +48,13 @@ contactarlo, es parte del registro del inventario. Es deliberado, y no equivale 
 de usuarios, que sigue oculto para los Lectores por defecto. Las páginas de **Servidores** son la
 excepción: allí el correo de un responsable aparece solo si tu rol puede ver el directorio de usuarios.
 
+El nombre y el correo son **todo** lo que ve de un responsable un rol sin acceso al directorio de
+usuarios. El resto de la ficha de la persona —su rol, número de legajo, nombre de usuario y datos del
+directorio como el puesto o el área— sigue en el directorio de usuarios. Listar los activos que tiene
+una persona concreta también requiere ese acceso, así que el filtro **Responsable** de la lista de
+activos no se le ofrece a ese rol (un enlace compartido que lo incluya muestra la lista sin filtrar).
+Cualquiera puede seguir viendo sus propios activos en **Mis activos**.
+
 ## Confirmar la recepción
 
 Asignar un activo registra **quién es responsable** de él, pero no prueba que la persona realmente lo

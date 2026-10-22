@@ -13,7 +13,7 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import { assetOwnerUserSelect } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -26,6 +26,11 @@ export interface FindAssignmentsFilters {
   activeOnly?: boolean;
   /** When true, inline each assignment's owner (`user`). Used by GET /assets/:id/assignments. */
   includeUser?: boolean;
+  /**
+   * With `includeUser`: true inlines the owner's full public columns, for a caller holding `user:read`;
+   * false (the default, fail-closed) only its id, name, email and `deletedAt` (#1685).
+   */
+  fullUser?: boolean;
 }
 
 /**
@@ -71,6 +76,7 @@ export class AssetAssignmentsService {
     userId,
     activeOnly = true,
     includeUser = false,
+    fullUser = false,
   }: FindAssignmentsFilters) {
     const args: Prisma.AssetAssignmentFindManyArgs = {
       where: {
@@ -80,9 +86,10 @@ export class AssetAssignmentsService {
       },
       orderBy: { assignedAt: 'desc' },
       // Inline the owner only when asked (other callers keep the lean shape) — through the PUBLIC column
-      // allowlist, never the whole row (SEC-085: `user: true` served the owner's passwordHash).
+      // allowlist, never the whole row (SEC-085: `user: true` served the owner's passwordHash), and only
+      // the id, name and email unless the caller holds `user:read` (#1685).
       ...(includeUser
-        ? { include: { user: { select: PUBLIC_USER_SELECT } } }
+        ? { include: { user: { select: assetOwnerUserSelect(fullUser) } } }
         : {}),
     };
     return this.prisma.assetAssignment.findMany(args);
