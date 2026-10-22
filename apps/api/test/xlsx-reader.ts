@@ -25,11 +25,11 @@ const ENTITIES: Record<string, string> = {
   '&apos;': "'",
 };
 
-/** XML entities, then ECMA-376 `_xHHHH_` escapes, as Excel decodes an inline string. */
+/** XML entities, then ECMA-376 `_xHHHH_` escapes (either hex case), as Excel decodes an inline string. */
 export function decodeXlsxText(text: string): string {
   return text
     .replace(/&(amp|lt|gt|quot|apos);/g, (e) => ENTITIES[e])
-    .replace(/_x([0-9A-F]{4})_/g, (_m, hex: string) =>
+    .replace(/_x([0-9A-Fa-f]{4})_/g, (_m, hex: string) =>
       String.fromCharCode(parseInt(hex, 16)),
     );
 }
