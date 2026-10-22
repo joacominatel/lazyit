@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # InfraNode
@@ -490,7 +490,7 @@ this build, which that section now states on screen rather than implying only on
   posture and not a styling choice. Still **inert until #1203**: every Docker-served binary reports
   `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills in as
   hosts are re-installed — the view says exactly that rather than implying those agents are fine.
-- ~~**Software watchlist**~~ **Shipped (API, #1684; epic #1146 item 4)** — see [[software-watch]]. The
+- ~~**Software watchlist**~~ **Shipped (API + web, #1684; epic #1146 item 4)** — see [[software-watch]]. The
   first cross-host read of `specs.software`: an operator-maintained list of package names, each answered
   on read with *package → versions → host counts, plus the hosts missing it* over the same population the
   fleet view counts (agent hosts, children excluded). **Distribution only** (CEO Q12): no version

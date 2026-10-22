@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-21
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -212,14 +212,17 @@ assets:
   value" switch checks them all;
 - cost and its currency always move together;
 - **unlinking never clears values**, and editing a line price afterwards only *proposes* updates to linked
-  assets (pre-checked only where the asset still holds the old purchase value). *Not built — deferred
-  (2026-10-02, #1489):* a price edit changes no linked asset and proposes nothing; the asset's *Purchase*
-  panel marks the line price *Differs from purchase*, and an ordinary asset edit changes the cost
+  assets (pre-checked only where the asset still holds the old purchase value). *Deferred on 2026-10-02
+  (#1489)* — until #1502, a price edit changed no linked asset and proposed nothing
   ([[#Decisions while building (Phase 1 flows web, #1475)]]). The rule that nothing is ever overwritten
-  silently holds either way. *Built (API), 2026-10-21, #1502:* the proposal's routes —
+  silently holds throughout. *Built (API), 2026-10-21, #1502:* the proposal's routes —
   `POST /purchase-orders/:id/lines/:lineId/linked-preview` (pre-checked only where the asset still holds the
   previous price the caller names) and `…/apply-to-linked` (one transaction, the link's lock order, audited
-  on both sides). Not exposed to the AI. The screens follow in a web unit ([[purchase-order-line]]).
+  on both sides). Not exposed to the AI ([[purchase-order-line]]). *Built (web), 2026-10-22, #1502:* saving a
+  new unit price on an asset line with linked assets opens *Update cost on linked assets?* — each asset current
+  → new, pre-checked per the preview, a hand-changed cost marked *overridden*; the apply is chunked to the
+  200-id cap. The asset's *Purchase* panel offers *Apply purchase value* beside *Differs from purchase*, through
+  the same route, after a confirmation. Both need `purchaseOrder:write` + `asset:write`.
 
 A divergence between an asset's cost and its line is shown ("differs from purchase"); it is never
 corrected silently.
@@ -415,14 +418,22 @@ day. `GET /suppliers/:id` adds `yearlyTotals: [{ year, currency, amount, unprice
 of the order date, else of when the purchase was recorded; live purchases that are neither draft nor cancelled,
 each line as (quantity − cancelled) × unit price; grouped per label by the shared rule of §5 — never converted,
 `amount: null` beyond `MONEY_MAX`. No migration; the field is optional in the contract. The rules are on
-[[supplier]]; the supplier page shows them in a follow-up web change.
+[[supplier]]. *Built (web), 2026-10-22, #1500:* the supplier page shows them as *Spend per year* — one row per
+year and label, *No currency* apart, a `null` amount as too large to display, unpriced lines as a partial-total
+hint.
 
 *Built (API), 2026-10-21 (#1498, #1503, #1502):* `GET /purchase-orders/pending-summary` (the dashboard's
 *Pending deliveries* counts, over exactly the Pending units rows; `/dashboard/summary` unchanged);
 `expectedBefore` (the viewer's today) on the pending lines, their export and the `purchase_pending_lines`
 tool, for *Overdue only*; `acquiredFrom` / `acquiredTo` on the asset list and export, for the link picker's
-*created near the order date* chip; and the line price follow-up of §2. The web half follows in its own
-unit; a later docs unit consolidates this note ([[purchase-order]], [[purchase-order-line]], [[asset]]).
+*created near the order date* chip; and the line price follow-up of §2 ([[purchase-order]],
+[[purchase-order-line]], [[asset]]). *Built (web), 2026-10-22 (#1498, #1503, #1502):* the dashboard's *Needs
+attention* row "Pending deliveries: N purchases · M units (· K overdue)", for `purchaseOrder:read`, linking to
+*Pending units* (on *Overdue only* when K > 0); *Overdue only* on *Pending units* (`?overdue=1`, the viewer's
+local day as `expectedBefore`, the export following); the link picker's removable *near the order date* chip,
+on by default — ±90 whole UTC days around the order date, else the invoice date, else the day the purchase was
+recorded (opened from *Pending units*, whose rows carry no invoice date, it falls back straight to the recorded
+day); and the price follow-up of §2.
 
 ### 14. Upgrade safety
 
@@ -778,7 +789,7 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   (not built, #1473). *The label is built in #1476 (below), with its screens (Phase 1b web, below).*
 - **Pending units** is its own tab (`/purchases/pending`): open lines grouped by purchase, oldest order first,
   filtered by supplier, a purchase past its expected date marked *Overdue* (text, not colour alone). The
-  proposal's *Overdue only* toggle is not built — the list has no such filter.
+  proposal's *Overdue only* toggle was not built then; *built 2026-10-22 (#1503)* — §13.
 - **The purchase's activity log** now reads the flows' events (units received, linked, moved, cancelled with
   the reason; documents added and removed), still tolerant of a type it does not know.
 - **Contract gaps, left to a backend follow-up.** (1) Nothing lists the assets linked to a line or purchase,
@@ -923,7 +934,7 @@ None reopens a CEO decision.
   by the list read only, never by the CSV export.
 - **The link picker starts on assets not linked to a purchase** (the UX proposal's chip), removable, beside the
   model chip; without `purchaseOrder:read` the chip does not exist. The proposal's *created within 90 days of
-  the order date* chip is not built — the list has no such filter.
+  the order date* chip was not built then; *built 2026-10-22 (#1503)* as the *near the order date* chip — §13.
 - **The asset panel titles the purchase by the purchase's `createdAt`**, closing #1475's fallback to the line's
   date; a read without it still falls back to the line's.
 - **The activity log reads `STOCK_RECEIVED` and `DOCUMENT_UPDATED`** (set, changed, removed), and the label on

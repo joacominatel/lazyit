@@ -37,17 +37,57 @@ export function linkPickerFilters({
   modelId,
   notLinked,
   canReadPurchases,
+  window = null,
 }: {
   q: string;
   modelId: string | null;
   notLinked: boolean;
   canReadPurchases: boolean;
+  /** The "near the order date" chip's window (#1503), when the chip is on. */
+  window?: AcquiredWindow | null;
 }): AssetFilters {
   const purchase = notLinked ? purchaseAssetFilter(canReadPurchases, { purchaseLinked: false }) : undefined;
   return {
     q: q || undefined,
     modelId: modelId ?? undefined,
     ...(purchase ? { purchase } : {}),
+    ...(window ? { acquiredFrom: window.from, acquiredTo: window.to } : {}),
     limit: 50,
+  };
+}
+
+/** How far either side of the purchase's date the link picker looks by default (UX proposal §3.e). */
+export const NEAR_ORDER_DAYS = 90;
+
+/** An acquisition window, as full ISO datetimes, both inclusive. */
+export interface AcquiredWindow {
+  /** The day the window is centred on (`YYYY-MM-DD`, UTC) — what the chip names. */
+  anchor: string;
+  from: string;
+  to: string;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The link picker's "near the order date" window (#1503; CEO decision on #1495): ±{@link NEAR_ORDER_DAYS}
+ * days around the purchase's order date — else its invoice date, else the day it was recorded — from the
+ * start of the first day to the last millisecond of the last one, in UTC (dates are stored at UTC midnight).
+ * The API matches it against each asset's purchase date, else the day the asset was recorded. `null` when
+ * the purchase carries no usable date.
+ */
+export function nearOrderWindow(
+  purchase: { orderDate: string | null; invoiceDate?: string | null; createdAt: string | null },
+  days: number = NEAR_ORDER_DAYS,
+): AcquiredWindow | null {
+  const source = purchase.orderDate ?? purchase.invoiceDate ?? purchase.createdAt;
+  if (!source) return null;
+  const at = new Date(source).getTime();
+  if (Number.isNaN(at)) return null;
+  const day = Math.floor(at / DAY_MS) * DAY_MS;
+  return {
+    anchor: new Date(day).toISOString().slice(0, 10),
+    from: new Date(day - days * DAY_MS).toISOString(),
+    to: new Date(day + (days + 1) * DAY_MS - 1).toISOString(),
   };
 }

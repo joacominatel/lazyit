@@ -91,9 +91,14 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
       warranty: "expired" as const,
       deleted: "only" as const,
       purchase: { purchaseOrderId: CUID, purchaseLinked: false },
+      acquiredFrom: "2026-01-01T00:00:00.000Z",
+      acquiredTo: "2026-06-30T23:59:59.999Z",
     };
     await expectSameFilters(() => getAssets({ ...filters, ...window }), assetFilterParams(filters));
     expect(assetFilterParams(filters).get("purchaseLinked")).toBe("false");
+    // The acquisition window (#1503) travels as the full ISO datetimes the API validates.
+    expect(assetFilterParams(filters).get("acquiredFrom")).toBe("2026-01-01T00:00:00.000Z");
+    expect(assetFilterParams(filters).get("acquiredTo")).toBe("2026-06-30T23:59:59.999Z");
   });
 
   test("Reports › activity", async () => {
@@ -257,12 +262,12 @@ describe("phase 2: each list and its CSV export send identical filter params (AD
     );
   });
 
-  test("pending units, whose only filter is the supplier", async () => {
+  test("pending units: the supplier and Overdue only (#1503)", async () => {
     await expectSameFilters(
-      () => getPendingLines({ supplierId: CUID, limit: 25, offset: 50 }),
-      pendingLineFilterParams({ supplierId: CUID }),
-      1,
+      () => getPendingLines({ supplierId: CUID, expectedBefore: "2026-10-22", limit: 25, offset: 50 }),
+      pendingLineFilterParams({ supplierId: CUID, expectedBefore: "2026-10-22" }),
     );
+    expect(pendingLineFilterParams({ supplierId: CUID }).has("expectedBefore")).toBe(false);
   });
 
   test("access requests (the managers' list)", async () => {

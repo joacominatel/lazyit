@@ -1,6 +1,8 @@
 import type {
   ApplyLicense,
   ApplyLicenseResult,
+  ApplyToLinkedAssets,
+  ApplyToLinkedAssetsResult,
   AssetPurchaseProvenance,
   CancelRemainingUnits,
   CreatePurchaseFromAssets,
@@ -11,8 +13,11 @@ import type {
   LinkAssetsResult,
   LinkAssetsToLine,
   PendingPurchaseLinePage,
+  PendingPurchaseSummary,
   PurchaseExtractionDraft,
   PurchaseExtractionStatus,
+  PurchaseLinkedPreview,
+  PurchaseLinkedPreviewRequest,
   PurchaseLinkPreview,
   PurchaseOrder,
   PurchaseOrderDetail,
@@ -234,6 +239,41 @@ export function unlinkAssetsFromLine(
   });
 }
 
+/**
+ * What re-applying the line's current values would do to the assets ALREADY linked to it (#1502;
+ * `purchaseOrder:read` + `asset:read`, writes nothing): every live linked asset with its diff, whether its cost
+ * still holds the previous purchase value, and what the confirmation pre-checks. `previousUnitPrice` is the
+ * price before the edit (`null` = the line had none).
+ */
+export function getLinkedPreview(
+  id: string,
+  lineId: string,
+  data: PurchaseLinkedPreviewRequest,
+  signal?: AbortSignal,
+): Promise<PurchaseLinkedPreview> {
+  return apiFetch<PurchaseLinkedPreview>(`${linePath(id, lineId)}/linked-preview`, {
+    method: "POST",
+    body: data,
+    signal,
+  });
+}
+
+/**
+ * Copy the line's current `fields` onto assets already linked to it (#1502; `purchaseOrder:write` +
+ * `asset:write`): fills and replaces only, never a clear; cost and currency together. At most 200 ids per
+ * call (the caller chunks). Partial success: `{ updated, unchanged, failed, line }`.
+ */
+export function applyToLinkedAssets(
+  id: string,
+  lineId: string,
+  data: ApplyToLinkedAssets,
+): Promise<ApplyToLinkedAssetsResult> {
+  return apiFetch<ApplyToLinkedAssetsResult>(`${linePath(id, lineId)}/apply-to-linked`, {
+    method: "POST",
+    body: data,
+  });
+}
+
 /** Cancel units that will not arrive (default: every pending unit); 409 when nothing is pending. */
 export function cancelRemainingUnits(
   id: string,
@@ -248,10 +288,19 @@ export function cancelRemainingUnits(
 
 export const PENDING_LINE_EXPORT_PATH = `${BASE}/pending-lines/export`;
 
-/** The pending-units list's filters, never the page window; the CSV export sends exactly these. */
-export function pendingLineFilterParams({ supplierId }: { supplierId?: string } = {}): URLSearchParams {
+/**
+ * The pending-units list's filters, never the page window; the CSV export sends exactly these. `expectedBefore`
+ * (the viewer's today, `YYYY-MM-DD`) keeps only overdue purchases' lines — *Overdue only* (#1503).
+ */
+export interface PendingLineFilters {
+  supplierId?: string;
+  expectedBefore?: string;
+}
+
+export function pendingLineFilterParams({ supplierId, expectedBefore }: PendingLineFilters = {}): URLSearchParams {
   const qs = new URLSearchParams();
   if (supplierId) qs.set("supplierId", supplierId);
+  if (expectedBefore) qs.set("expectedBefore", expectedBefore);
   return qs;
 }
 
@@ -260,10 +309,10 @@ export function pendingLineFilterParams({ supplierId }: { supplierId?: string } 
  * draft nor cancelled, oldest purchase first, each with its purchase header.
  */
 export function getPendingLines(
-  { supplierId, limit, offset }: { supplierId?: string; limit?: number; offset?: number } = {},
+  { supplierId, expectedBefore, limit, offset }: PendingLineFilters & { limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<PendingPurchaseLinePage> {
-  const qs = pendingLineFilterParams({ supplierId });
+  const qs = pendingLineFilterParams({ supplierId, expectedBefore });
   if (limit !== undefined) qs.set("limit", String(limit));
   if (offset !== undefined) qs.set("offset", String(offset));
   const search = qs.toString();
@@ -271,6 +320,16 @@ export function getPendingLines(
     search ? `${BASE}/pending-lines?${search}` : `${BASE}/pending-lines`,
     { signal },
   );
+}
+
+/**
+ * The dashboard's *Pending deliveries* row (#1498, `purchaseOrder:read`): the purchases with units pending, the
+ * units, and how many of those purchases are overdue — over exactly the *Pending units* rows. `expectedBefore`
+ * is the viewer's today (`YYYY-MM-DD`), the same day `isOverdue` compares against.
+ */
+export function getPendingSummary(expectedBefore: string, signal?: AbortSignal): Promise<PendingPurchaseSummary> {
+  const qs = new URLSearchParams({ expectedBefore });
+  return apiFetch<PendingPurchaseSummary>(`${BASE}/pending-summary?${qs.toString()}`, { signal });
 }
 
 /**

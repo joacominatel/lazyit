@@ -77,6 +77,13 @@ export interface AssetFilters {
    * `purchaseAssetFilter`, which drops them for a viewer without the permission.
    */
   purchase?: PurchaseAssetFilter;
+  /**
+   * The acquisition window (#1503): full ISO datetimes, both inclusive. An asset's acquisition date is its
+   * purchase date, else when it was recorded. A plain-column filter (`asset:read` is enough) — the link
+   * picker's "near the order date" chip.
+   */
+  acquiredFrom?: string;
+  acquiredTo?: string;
 }
 
 /**
@@ -110,6 +117,8 @@ export function assetFilterParams(filters: AssetFilters = {}): URLSearchParams {
   if (purchase?.purchaseOrderLineId) params.set("purchaseOrderLineId", purchase.purchaseOrderLineId);
   if (purchase?.purchaseOrderId) params.set("purchaseOrderId", purchase.purchaseOrderId);
   if (purchase?.purchaseLinked !== undefined) params.set("purchaseLinked", String(purchase.purchaseLinked));
+  if (filters.acquiredFrom) params.set("acquiredFrom", filters.acquiredFrom);
+  if (filters.acquiredTo) params.set("acquiredTo", filters.acquiredTo);
   return params;
 }
 
