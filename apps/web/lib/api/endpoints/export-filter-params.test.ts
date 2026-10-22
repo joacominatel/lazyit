@@ -44,6 +44,7 @@ const {
   getConsumableMovements,
 } = await import("./consumables");
 const { articleFilterParams, getArticles } = await import("./articles");
+const { exportParams } = await import("@/lib/export/export-file");
 
 const WINDOW_KEYS = ["limit", "offset", "sort", "dir"];
 const CUID = "ck0000000000000000000000a1";
@@ -335,6 +336,60 @@ describe("phase 2: each list and its CSV export send identical filter params (AD
     await expectSameFilters(
       () => getArticles({ ...filters, sort: "title", limit: 25, offset: 50 }),
       articleFilterParams(filters),
+    );
+  });
+});
+
+describe("the Excel export sends the list's filters too, plus format=xlsx (ADR-0103 §11)", () => {
+  /** The XLSX request's params: exactly the CSV's, plus one `format=xlsx`. */
+  async function expectSameFiltersAsXlsx(
+    call: () => Promise<unknown>,
+    csvParams: URLSearchParams,
+  ) {
+    const xlsx = exportParams(csvParams, "xlsx");
+    expect(xlsx.getAll("format")).toEqual(["xlsx"]);
+    xlsx.delete("format");
+    await expectSameFilters(call, xlsx);
+    expect(entries(xlsx)).toEqual(entries(exportParams(csvParams, "csv")));
+  }
+
+  test("assets, purchase filters and the acquisition window included", async () => {
+    const filters = {
+      q: "dell",
+      categoryId: CUID,
+      modelId: CUID,
+      locationId: CUID,
+      status: "IN_STORAGE" as const,
+      statusLabelId: CUID,
+      company: "Acme",
+      assignedToUserId: UUID,
+      ownership: "HAS" as const,
+      warranty: "expired" as const,
+      deleted: "only" as const,
+      purchase: { purchaseOrderId: CUID, purchaseLinked: false },
+      acquiredFrom: "2026-01-01T00:00:00.000Z",
+      acquiredTo: "2026-06-30T23:59:59.999Z",
+    };
+    await expectSameFiltersAsXlsx(
+      () => getAssets({ ...filters, ...window }),
+      assetFilterParams(filters),
+    );
+  });
+
+  test("purchases, the multi-status filter included", async () => {
+    const filters = {
+      q: "INV-1",
+      status: ["DRAFT" as const, "ORDERED" as const],
+      supplierId: CUID,
+      receipt: "PENDING" as const,
+      deleted: "only" as const,
+    };
+    await expectSameFiltersAsXlsx(
+      () => getPurchaseOrders({ ...filters, ...window }),
+      purchaseOrderFilterParams(filters),
+    );
+    expect(exportParams(purchaseOrderFilterParams(filters), "xlsx").get("status")).toBe(
+      purchaseOrderFilterParams(filters).get("status"),
     );
   });
 });
