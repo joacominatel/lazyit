@@ -398,6 +398,17 @@
       "confirm": "Fusionar",
       "mergedToast": "{source} fusionado en {target}",
       "error": "No se pudieron fusionar los proveedores"
+    },
+    "yearly": {
+      "title": "Gasto por año",
+      "year": "Año",
+      "total": "Total",
+      "purchases": "Compras",
+      "noCurrency": "Sin moneda",
+      "tooLarge": "Demasiado grande para mostrar",
+      "partial": "Parcial: {count, plural, one {# línea no tiene} other {# líneas no tienen}} precio",
+      "empty": "Todavía no se gastó nada con este proveedor. Los borradores y las compras canceladas no se cuentan.",
+      "help": "Según la fecha de pedido (o cuándo se registró la compra), contando las compras pedidas y recibidas —no los borradores ni las canceladas— y solo las unidades que no se cancelaron. Cada etiqueta de moneda se suma por separado; nada se convierte."
     }
   },
   "fromPurchase": {

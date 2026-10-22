@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowsPointingInIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { useTranslations } from "next-intl";
+import type { SupplierYearlyTotal } from "@lazyit/shared";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -23,6 +24,7 @@ import { usePurchaseOrders } from "@/lib/api/hooks/use-purchase-orders";
 import { useDeleteSupplier, useSupplier } from "@/lib/api/hooks/use-suppliers";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { yearlyTotalGroups } from "@/lib/purchases/supplier-totals";
 import {
   MoneyTotals,
   PurchaseStatusBadge,
@@ -63,7 +65,72 @@ function Contact({ name, email, phone }: { name: string | null; email: string | 
   );
 }
 
-/** One supplier (ADR-0099 §2): identity, sales and support contacts, notes, and their purchases. */
+/**
+ * What the team spent with the supplier, per year and currency label (#1500; ADR-0099 §5, D-C) — derived by
+ * the API on every read: live purchases that are neither draft nor cancelled, each line as (quantity −
+ * cancelled) × unit price, the year from the order date (else when the purchase was recorded). Labels are
+ * never converted or summed across. Not shown at all when the API sends no totals (older than #1500).
+ */
+function YearlyTotals({ totals }: { totals: readonly SupplierYearlyTotal[] | undefined }) {
+  const t = useTranslations("purchases.suppliers.yearly");
+  const locale = useLocale();
+  const groups = yearlyTotalGroups(totals, locale);
+  if (groups === null) return null;
+  return (
+    <DetailPanel title={t("title")}>
+      {groups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("year")}</TableHead>
+                  <TableHead>{t("total")}</TableHead>
+                  <TableHead className="text-right">{t("purchases")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {groups.flatMap((group) =>
+                  group.entries.map((entry, index) => (
+                    <TableRow key={entry.key}>
+                      <TableCell className="font-mono tabular-nums">
+                        {index === 0 ? group.year : <span className="sr-only">{group.year}</span>}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {entry.text === null ? (
+                          <span className="text-muted-foreground">{t("tooLarge")}</span>
+                        ) : (
+                          <span className="font-mono tabular-nums">{entry.text}</span>
+                        )}
+                        {entry.noCurrency ? (
+                          <span className="text-muted-foreground"> · {t("noCurrency")}</span>
+                        ) : null}
+                        {entry.unpricedLines > 0 ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {t("partial", { count: entry.unpricedLines })}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">{entry.purchaseCount}</TableCell>
+                    </TableRow>
+                  )),
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("help")}</p>
+        </div>
+      )}
+    </DetailPanel>
+  );
+}
+
+/**
+ * One supplier (ADR-0099 §2): identity, sales and support contacts, notes, what was spent with it per year
+ * (#1500), and their purchases.
+ */
 export function SupplierDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases.suppliers");
   const tPurchases = useTranslations("purchases");
@@ -190,6 +257,8 @@ export function SupplierDetailView({ id }: { id: string }) {
           </dl>
         ) : null}
       </DetailPanel>
+
+      <YearlyTotals totals={supplier.yearlyTotals} />
 
       <DetailPanel
         title={t("detail.purchasesSection")}

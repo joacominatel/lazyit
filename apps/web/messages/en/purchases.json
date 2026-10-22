@@ -398,6 +398,17 @@
       "confirm": "Merge",
       "mergedToast": "{source} merged into {target}",
       "error": "Couldn't merge the suppliers"
+    },
+    "yearly": {
+      "title": "Spend per year",
+      "year": "Year",
+      "total": "Total",
+      "purchases": "Purchases",
+      "noCurrency": "No currency",
+      "tooLarge": "Too large to display",
+      "partial": "Partial: {count, plural, one {# line has} other {# lines have}} no price",
+      "empty": "Nothing spent with this supplier yet. Drafts and cancelled purchases are not counted.",
+      "help": "From the order date (or when the purchase was recorded), counting ordered and received purchases — not drafts or cancelled ones — and only the units that were not cancelled. Each currency label is totalled on its own; nothing is converted."
     }
   },
   "fromPurchase": {
