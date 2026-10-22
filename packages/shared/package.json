@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
-    "test": "bun test"
+    "test": "bun test --isolate"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",

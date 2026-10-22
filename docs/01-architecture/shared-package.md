@@ -3,7 +3,7 @@ title: The @lazyit/shared Package
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-10-22
 ---
 
 # The `@lazyit/shared` Package
@@ -159,7 +159,7 @@ specific framework. Apps depend on it via `workspace:*`, never the reverse ([[mo
   `src/index.ts` (extensionless imports); import as `@lazyit/shared`.
 - Validation flow: define the **zod schema here** → API uses it for request validation, web
   uses it for forms → share the type via `z.infer`. One definition, no duplication.
-- Tests for `shared` run with `bun test` ([[0012-testing-strategy]]).
+- Tests for `shared` run with `bun test --isolate` (`bun run test`) ([[0012-testing-strategy]], [[workflows]]).
 
 Related: [[monorepo]] · [[code-conventions]] · [[authorization]] · [[role-permission]] ·
 [[service-account]] · [[0007-flexible-asset-specs-jsonb]] · [[0012-testing-strategy]] ·
