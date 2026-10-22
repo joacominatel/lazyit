@@ -13,18 +13,19 @@ import {
   PERMISSIONS,
   SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS,
 } from '@lazyit/shared';
-import type {
-  Prisma as PrismaTypes,
-  ServiceAccount,
-} from '../../generated/prisma/client';
+import type { Prisma as PrismaTypes } from '../../generated/prisma/client';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { ServiceAccountRow } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
 import { assertWithinPermissionCeiling } from './permission-ceiling';
 import { mintToken, randomHash } from './service-account-token';
 
-/** A ServiceAccount row joined with its permission grants — the shape every read/write returns. */
-type ServiceAccountWithPermissions = ServiceAccount & {
+/**
+ * A ServiceAccount row (no `tokenHash`: ADR-0105 global omit) joined with its permission grants — the
+ * shape every read/write returns.
+ */
+type ServiceAccountWithPermissions = ServiceAccountRow & {
   permissions: { permission: string }[];
 };
 

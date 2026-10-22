@@ -14,6 +14,7 @@ import {
   type SecretEnvelope,
 } from './secret.service';
 import type { PrismaService } from '../../prisma/prisma.service';
+import { withGlobalOmit } from '../../../test/prisma/global-omit';
 import { CredentialUnavailableError } from '../handlers/step-handler';
 
 // A deterministic 32-byte key (64 hex chars) for the round-trip tests.
@@ -227,7 +228,8 @@ describe('SecretService — write-only CRUD (redaction)', () => {
   });
   beforeEach(() => {
     prisma = makeFakePrisma();
-    service = new SecretService(prisma);
+    // Answers like the real client: the envelope is globally omitted unless a read opts in (ADR-0105).
+    service = new SecretService(withGlobalOmit(prisma));
   });
 
   it('create returns ONLY the redacted descriptor (no cleartext / ciphertext)', async () => {

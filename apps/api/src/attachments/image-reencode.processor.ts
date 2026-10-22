@@ -5,6 +5,10 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import type { SandboxedJob } from 'bullmq';
 import { PrismaClient } from '../../generated/prisma/client';
 import {
+  PRISMA_GLOBAL_OMIT,
+  type AppPrismaClient,
+} from '../prisma/prisma-omit';
+import {
   attachmentsTmpDir,
   blobPathFor,
   promoteBlob,
@@ -42,10 +46,10 @@ interface ReencodeJobResult {
   error?: string;
 }
 
-let prismaSingleton: PrismaClient | undefined;
+let prismaSingleton: AppPrismaClient | undefined;
 
 /** One PrismaClient per child, reused across jobs (no Nest DI here — the BullMQ sandbox contract). */
-function getPrisma(): PrismaClient {
+function getPrisma(): AppPrismaClient {
   if (!prismaSingleton) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
@@ -53,6 +57,8 @@ function getPrisma(): PrismaClient {
     }
     prismaSingleton = new PrismaClient({
       adapter: new PrismaPg({ connectionString }),
+      // The same client-level omit as PrismaService (ADR-0105).
+      omit: PRISMA_GLOBAL_OMIT,
     });
   }
   return prismaSingleton;
