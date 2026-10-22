@@ -705,6 +705,19 @@ function sharesDerivedKeyWithAnotherMachine(
 }
 
 /**
+ * The sticky "second machine seen on this derived key" mark a clone node's marker already carries
+ * (#1158), or `undefined`. Tolerant read: anything but a non-empty string is "not marked".
+ */
+function storedSharedKeySeenAt(
+  rest: Record<string, unknown> | undefined,
+): string | undefined {
+  const conflict = rest?.identityConflict;
+  if (typeof conflict !== 'object' || conflict === null) return undefined;
+  const seenAt = (conflict as Record<string, unknown>).sharedKeySeenAt;
+  return typeof seenAt === 'string' && seenAt.length > 0 ? seenAt : undefined;
+}
+
+/**
  * How the nudge opens, and what it calls the colliding fact, for the reporting host's OS family.
  *
  * The family comes from the report being ingested — {@link osFamily}, which defaults an `os`-less
@@ -2002,14 +2015,26 @@ export class InfraService {
       ipAddressSource: string;
       policyRevision?: number | null;
     }): Promise<AgentReportAck> => {
+      const detectedAt =
+        (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString();
+      // Read here rather than inside the refresh, because the container guard below needs what the
+      // node held BEFORE this report overwrites it. Same row, same read, handed on.
+      const stored = await this.storedNodeSpecs(node.id);
+      // STICKY (#1158). Once a report's MACs share nothing with the ones the node last held, a second
+      // machine may be reporting under this derived key, and that is remembered on the marker for as
+      // long as the marker lives. Comparing only against the previous report would forget it the
+      // moment the other machine reported twice in a row — and reconcile, retiring the first
+      // machine's children. See {@link reconcileCollidingHostContainers} for how it clears.
+      const sharedKeySeenAt =
+        storedSharedKeySeenAt(stored.rest) ??
+        (sharesDerivedKeyWithAnotherMachine(stored.identity, incoming)
+          ? now.toISOString()
+          : undefined);
       const conflict: AgentReportIdentityConflict = {
         ...conflictFacts,
-        detectedAt:
-          (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
+        detectedAt,
+        ...(sharedKeySeenAt !== undefined ? { sharedKeySeenAt } : {}),
       };
-      // Read here rather than inside the refresh, because the container guard below needs the
-      // identity the node held BEFORE this report overwrites it. Same row, same read, handed on.
-      const stored = await this.storedNodeSpecs(node.id);
       const samePolicyGeneration = this.samePolicyGeneration(
         report,
         node.policyRevision,
@@ -2038,7 +2063,7 @@ export class InfraService {
         samePolicyGeneration,
         principal,
         policy,
-        sharesDerivedKeyWithAnotherMachine(stored.identity, incoming),
+        sharedKeySeenAt !== undefined,
       );
     };
 
@@ -2218,11 +2243,17 @@ export class InfraService {
    *    in `/container` makes `<key>/container/<name>` parse back to a different host key (the first
    *    separator wins) and nests one clone's prefix inside another's. AUD-102 already keeps the full
    *    separator out of the node key; this is the one partial shape it cannot see.
-   *  - **A second machine is landing on the same derived key.** Two clones that share the first serial
-   *    resolve to ONE clone node, exactly as two clones shared one node before #1141 — their MACs
-   *    alternate on it. Reconciling there would bring the cross-retire thrash straight back, so a report
-   *    whose MACs share nothing with the ones the node held is treated as that case. A genuine NIC swap
-   *    on a clone costs one skipped tick: the node then holds the new MACs and the next report reconciles.
+   *  - **A second machine has been seen on the same derived key.** Two clones that share the first
+   *    serial resolve to ONE clone node, exactly as two clones shared one node before #1141 — their MACs
+   *    alternate on it. The first report whose MACs share nothing with the ones the node held stamps
+   *    `identityConflict.sharedKeySeenAt`, and from then on this node reconciles no containers. The
+   *    mark is STICKY on purpose: a per-report comparison forgets it as soon as one machine reports
+   *    twice in a row (jittered timers do this routinely), and that second report would reconcile and
+   *    retire the other machine's children. It clears only with the marker itself — the clone's
+   *    machine-id is fixed (the node is no longer reached), the operator merges the node (a merge drops
+   *    the marker) or discards it (the next report starts a fresh node). A genuine NIC swap on a lone
+   *    clone therefore also stops its container tracking until then: wrongly untracked is recoverable,
+   *    a cross-retire thrash writes OFFLINE flips and fact-change rows every tick.
    *
    * Children land PENDING and are NOT offered to the auto-confirm rules, the same posture the clone's
    * own node gets ({@link autoConfirmProposal}): a host under suspicion is for a human to look at.
@@ -2251,7 +2282,7 @@ export class InfraService {
     }
     if (sharedDerivedKey) {
       this.logger.warn(
-        `Containers for colliding host ${report.host.hostname} were not reconciled: its network cards share nothing with the ones last reported under ${nodeKey}, so a second machine may be reporting under the same derived key.`,
+        `Containers for colliding host ${report.host.hostname} were not reconciled: a second machine has been seen reporting under ${nodeKey} (network cards that shared nothing with the ones held), so its containers stay untracked until the identity conflict is resolved.`,
       );
       return this.finishAck(ack, policy, report.agentVersion);
     }
@@ -5424,6 +5455,13 @@ export type AgentReportIdentityConflict = {
    * says how long it has been true rather than only "still true as of the last check-in".
    */
   detectedAt: string;
+  /**
+   * When a SECOND machine was first seen reporting under this node's derived key (#1158) — a report
+   * whose MACs shared nothing with the ones the node held. Carried across every re-stamp like
+   * `detectedAt`; while present the node reconciles no containers. Absent on every marker written
+   * before #1158 and on every clone only one machine has reported under.
+   */
+  sharedKeySeenAt?: string;
 };
 
 /**

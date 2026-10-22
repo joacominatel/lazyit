@@ -5847,6 +5847,193 @@ describe('InfraService', () => {
         expect(retiredIds()).toEqual([]);
       });
 
+      // ── The shared-derived-key mark is STICKY (#1158 review) ──────────────
+      //
+      // Two clones sharing a first serial land on ONE clone node. A guard that only compared a report
+      // with the PREVIOUS one forgot the second machine as soon as it reported twice in a row (B, C,
+      // C): the second C matched the MACs C itself had just written, reconciled, and retired B's
+      // children — then B did the same back. These tests run whole SEQUENCES against a store that
+      // carries the clone node's blob from one report to the next, exactly as the database does.
+      describe('a second machine on the derived key is remembered, not re-guessed per report', () => {
+        const MACHINES = {
+          B: { hostname: 'web-02', mac: 'aa:bb:cc:dd:ee:02' },
+          C: { hostname: 'web-03', mac: 'aa:bb:cc:dd:ee:03' },
+        } as const;
+        type Machine = keyof typeof MACHINES;
+
+        const hostOf = (m: Machine) => ({
+          hostname: MACHINES[m].hostname,
+          identifiers: [
+            { kind: 'serial', value: 'SN-BETA' },
+            { kind: 'mac', value: MACHINES[m].mac },
+          ],
+        });
+        const MARKER = {
+          reportedExternalId: 'machine-id-baked',
+          peerNodeId: 'node-1',
+          peerLabel: 'web-01',
+          discriminator: 'SN-BETA',
+          detectedAt: '2026-07-30T00:00:00.000Z',
+        };
+
+        /** The clone node's stored `specs`, rewritten by every refresh that writes one. */
+        let cloneSpecs: Record<string, unknown>;
+
+        function wireStore(initial: Record<string, unknown>): void {
+          cloneSpecs = initial;
+          prisma.infraNode.findFirst.mockImplementation(
+            (args: { where?: { externalId?: string } }) => {
+              const key = args.where?.externalId;
+              if (key === 'machine-id-baked') return Promise.resolve(ORIGINAL);
+              if (key === CLONE_KEY) {
+                return Promise.resolve({
+                  id: 'node-2',
+                  assetId: null,
+                  ipAddressSource: 'AGENT',
+                });
+              }
+              return Promise.resolve(null);
+            },
+          );
+          // Both raw reads the ingest path makes, answered from the store by node id.
+          prisma.$queryRaw.mockImplementation(
+            (sql: { strings: readonly string[]; values: unknown[] }) => {
+              const text = sql.strings.join('?');
+              const specs =
+                sql.values[0] === 'node-2'
+                  ? cloneSpecs
+                  : {
+                      host: {
+                        hostname: 'web-01',
+                        identifiers: STORED_PEER_IDENTITY,
+                      },
+                    };
+              if (text.includes("'detectedAt'")) {
+                const marker = specs.identityConflict as
+                  { detectedAt?: string } | undefined;
+                return Promise.resolve([
+                  { detectedAt: marker?.detectedAt ?? null },
+                ]);
+              }
+              if (text.includes('AS host')) {
+                const rest = { ...specs };
+                delete rest.software;
+                return Promise.resolve([
+                  { host: specs.host, rest, hasSoftware: false },
+                ]);
+              }
+              return Promise.resolve([]);
+            },
+          );
+          prisma.infraNode.update.mockImplementation(
+            (args: { where: { id: string }; data: { specs?: unknown } }) => {
+              if (args.where.id === 'node-2' && args.data.specs !== undefined) {
+                cloneSpecs = args.data.specs as Record<string, unknown>;
+              }
+              return Promise.resolve({ id: args.where.id, state: 'PENDING' });
+            },
+          );
+          prisma.infraNode.create.mockResolvedValue({ id: 'node-clone-new' });
+          seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
+        }
+
+        /** One report from `m`, carrying `[]` — the shape that retires everything under the prefix. */
+        async function reportFrom(
+          m: Machine,
+        ): Promise<{ reconciled: boolean; retired: string[] }> {
+          prisma.infraNode.findMany.mockClear();
+          prisma.infraNode.updateMany.mockClear();
+          const ack = await service.ingestReport(
+            reportWithContainersFrom(
+              MACHINES[m].hostname,
+              'SN-BETA',
+              MACHINES[m].mac,
+              [],
+            ),
+            AGENT_SA,
+          );
+          expect(ack.accepted).toBe(true);
+          return {
+            reconciled: prisma.infraNode.findMany.mock.calls.length > 0,
+            retired: retiredIds(),
+          };
+        }
+
+        const seenAt = (): unknown =>
+          (cloneSpecs.identityConflict as Record<string, unknown> | undefined)
+            ?.sharedKeySeenAt;
+
+        it('B, C, C, B: only the first report (one machine seen so far) reconciles', async () => {
+          wireStore({ host: hostOf('B'), identityConflict: MARKER });
+
+          const results = [];
+          for (const m of ['B', 'C', 'C', 'B'] as const) {
+            results.push(await reportFrom(m));
+          }
+
+          expect(results.map((r) => r.reconciled)).toEqual([
+            true,
+            false,
+            false,
+            false,
+          ]);
+          // Nothing after C appeared retires anything — not B's children, not C's.
+          expect(results.slice(1).flatMap((r) => r.retired)).toEqual([]);
+          // The mark was stamped once, by C's first report, and carried unchanged ever after.
+          expect(typeof seenAt()).toBe('string');
+          // `detectedAt` still says when the COLLISION started.
+          expect(
+            (cloneSpecs.identityConflict as { detectedAt: string }).detectedAt,
+          ).toBe(MARKER.detectedAt);
+        });
+
+        it('C, B, B: the newcomer reporting first marks the key, and B never reconciles again', async () => {
+          wireStore({ host: hostOf('B'), identityConflict: MARKER });
+
+          const results = [];
+          for (const m of ['C', 'B', 'B'] as const) {
+            results.push(await reportFrom(m));
+          }
+
+          expect(results.map((r) => r.reconciled)).toEqual([
+            false,
+            false,
+            false,
+          ]);
+          expect(results.flatMap((r) => r.retired)).toEqual([]);
+          expect(typeof seenAt()).toBe('string');
+        });
+
+        it('the mark survives re-stamps: a stored mark keeps the node unreconciled even on matching MACs', async () => {
+          const mark = '2026-08-01T00:00:00.000Z';
+          wireStore({
+            host: hostOf('C'),
+            identityConflict: { ...MARKER, sharedKeySeenAt: mark },
+          });
+
+          const result = await reportFrom('C');
+
+          expect(result.reconciled).toBe(false);
+          expect(result.retired).toEqual([]);
+          expect(seenAt()).toBe(mark);
+        });
+
+        it('it CLEARS with the marker: a node whose marker was dropped (merge) or never had the mark reconciles again', async () => {
+          // A merge deletes `identityConflict` from the adopting node; a pre-#1158 marker never had
+          // the field. Either way the node starts unmarked, and one machine reporting reconciles.
+          wireStore({ host: hostOf('B') });
+
+          const result = await reportFrom('B');
+
+          expect(result.reconciled).toBe(true);
+          expect(seenAt()).toBeUndefined();
+          // …and the second machine re-marks it on its first report, as on any fresh node.
+          expect((await reportFrom('C')).reconciled).toBe(false);
+          expect(typeof seenAt()).toBe('string');
+          expect((await reportFrom('B')).reconciled).toBe(false);
+        });
+      });
+
       it('a derived key that cannot scope child keys unambiguously reconciles nothing', async () => {
         // A serial ending in `/container` keeps its slash (AUD-102 only swaps a FULL separator), and
         // `<key>/container/<name>` would then parse back to `machine-id-baked#SN`.
