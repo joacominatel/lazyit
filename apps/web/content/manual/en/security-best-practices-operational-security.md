@@ -70,9 +70,12 @@ When a credential or an account may have been exposed, work in this order.
 
 ### An AI app you don't recognize connected to your account
 
-lazyit notifies you the first time a new AI app or personal token is used on your account. If it wasn't
-you, [revoke it](/help/ai-assistant-connected-apps#revoking) at once and change your password (which also
-ends every other connection), then tell an administrator.
+lazyit notifies you the first time a new AI app or personal token is used on your account — in the bell,
+and by email whenever your instance sends email (this security notice can't be turned off). If it wasn't
+you, [revoke it](/help/ai-assistant-connected-apps#revoking) at once, or use
+[Sign out everywhere and disconnect AI apps](/help/getting-started-your-profile#sign-out-everywhere-and-disconnect-ai-apps)
+to end every session and every connection in one step. Change your password (on single sign-on, at your
+sign-in provider), then tell an administrator.
 
 ### A shared secret may have leaked
 

@@ -31,7 +31,9 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
   cerrar sesión. Con cuentas locales dice **Cerrar sesión en todos los dispositivos**, porque cerrar
   sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)), y
   debajo **Tus sesiones** lista cada dispositivo con la sesión iniciada para que puedas cerrar solo uno
-  (ver [Tus sesiones](#tus-sesiones)).
+  (ver [Tus sesiones](#tus-sesiones)). Toda cuenta tiene además **Cerrar sesión en todos lados y
+  desconectar las apps de IA**, que cierra tu sesión *y* corta tus apps de IA y tus tokens personales (ver
+  [Cerrar sesión en todos lados y desconectar las apps de IA](#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia)).
 - **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Mirá
   [Tu idioma y tu tema en todos tus dispositivos](#tu-idioma-y-tu-tema-en-todos-tus-dispositivos).
 
@@ -115,6 +117,32 @@ Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseñ
 > seguís con la sesión iniciada lo define tu proveedor de identidad, y cerrar sesión termina tu sesión
 > en este navegador.
 
+Cerrar sesión —en todos los dispositivos o solo en este— **no desconecta tus apps de IA ni tus tokens
+personales**. Son de tu cuenta, no de una sesión del navegador. Para cortarlos también, usá la acción de
+abajo.
+
+### Cerrar sesión en todos lados y desconectar las apps de IA
+
+**Cuenta → Contraseña y sesiones → Cerrar sesión en todos lados y desconectar las apps de IA** es el botón
+para "puede que otra persona esté usando mi cuenta". lazyit te pide confirmación antes, porque no se puede
+deshacer. Después, todo a la vez:
+
+- **Terminan todas tus sesiones** —este navegador, tus otras computadoras y tu teléfono, incluidas las que
+  mantuviste con **Mantener la sesión iniciada**— y quedás en la pantalla de inicio de sesión.
+- **Todas las apps de IA y los tokens personales conectados dejan de funcionar** y desaparecen de
+  [Apps conectadas](/help/ai-assistant-connected-apps). Para volver a usar uno, conectalo de nuevo
+  (aprobá la app o creá un token nuevo).
+- Lo que el asistente de IA estaba haciendo por vos en el chat se detiene.
+
+Tu contraseña **no** cambia. Si creés que alguien la conoce, cambiala también (cuentas locales) — ver
+[Cambiar tu contraseña](#cambiar-tu-contraseña).
+
+También funciona con inicio de sesión único: se cierra tu sesión de lazyit en este navegador y se
+desconectan todas las apps de IA y los tokens personales. Tu proveedor de inicio de sesión gestiona tus
+sesiones en otros dispositivos, así que cerrá sesión ahí también si hace falta.
+
+El **Cerrar sesión** de siempre no cambia: termina tus sesiones y deja conectadas tus apps de IA.
+
 ### Tus sesiones
 
 En instancias con cuentas locales, **Cuenta → Contraseña y sesiones** muestra **Tus sesiones**: cada
@@ -134,7 +162,9 @@ otros dispositivos. Para cerrarlas todas a la vez, usá **Cerrar sesión en todo
 > **Cerrar una sesión no alcanza si perdiste un dispositivo o te lo robaron.** Solo cierra la sesión de
 > lazyit de ese dispositivo en el navegador. Si perdiste un dispositivo o te lo robaron, **cambiá tu
 > contraseña**: eso cierra la sesión en todos los dispositivos y además desconecta tus apps de IA y tus
-> tokens personales (ver [Apps conectadas](/help/ai-assistant-connected-apps)).
+> tokens personales (ver [Apps conectadas](/help/ai-assistant-connected-apps)). Con inicio de sesión
+> único, usá [Cerrar sesión en todos lados y desconectar las apps de IA](#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia) y cambiá tu contraseña en
+> tu proveedor de inicio de sesión.
 
 Si iniciaste sesión en este dispositivo **antes de que tu instancia se actualizara** para listar las
 sesiones, vas a ver una entrada que dice *Este dispositivo — sesión iniciada antes de la actualización*.
