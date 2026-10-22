@@ -144,8 +144,10 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   those keys never moved. A clone's node is `<externalId>#<discriminator>`, so its children are
   `<externalId>#<discriminator>/container/<name>`, and neither clone's retire sweep can select the
   other's rows. Two cases still reconcile nothing, because the key would not be unique to one machine:
-  a discriminator ending in `/container`, and a report whose MACs share nothing with the ones the
-  clone node last held (two clones sharing a first serial on ONE clone node). A clone's children land
+  a discriminator ending in `/container`, and a clone node on which a second machine has been seen
+  (two clones sharing a first serial on ONE clone node). The latter is **sticky**: the first report
+  whose MACs share nothing with the ones the node held stamps `identityConflict.sharedKeySeenAt`, and
+  it clears only with the marker (machine-id fixed, node merged or discarded). A clone's children land
   PENDING and are not offered to the auto-confirm rules. `/guest/` children are unchanged
   ([[0095-hypervisor-guest-inventory]] "Known limitations"): a hypervisor host in collision reports no
   guests until its identity conflict is resolved. A Windows image prepared with `sysprep /generalize` regenerates that key per

@@ -859,10 +859,16 @@ deliberate limits:
 
 - **Two cases keep the old behaviour** (no reconcile, nothing retired), because the derived key would
   not be unique to one machine: a discriminator ending in `/container`, whose child keys would parse
-  back to a shorter key (AUD-102 only swaps a full separator); and a report whose MACs share nothing
-  with the ones the clone node last held — two clones sharing a first serial land on ONE clone node,
-  and reconciling there would bring the thrash back. A genuine NIC swap on a clone costs one skipped
-  tick.
+  back to a shorter key (AUD-102 only swaps a full separator); and a clone node on which a **second
+  machine has been seen** — two clones sharing a first serial land on ONE clone node, and reconciling
+  there would bring the thrash back. The second case is **sticky**: the first report whose MACs share
+  nothing with the ones the node held stamps `identityConflict.sharedKeySeenAt`, carried across every
+  re-stamp like `detectedAt`, and while it is present the node reconciles no containers. A per-report
+  comparison is not enough — it forgets the second machine as soon as one machine reports twice in a
+  row, and that report would retire the other's children. The mark clears only with the marker: the
+  machine-id is fixed, the node is merged (a merge drops the marker) or discarded (the next report
+  starts a fresh node). A genuine NIC swap on a lone clone therefore also stops its container tracking
+  until then — deliberately: wrongly untracked is recoverable, a cross-retire thrash is not.
 - **A clone's children are not offered to the auto-confirm rules.** They land PENDING, like the
   clone's own node: a host under suspicion is for a human to look at.
 - **Guests are unchanged**: the collision branch still reconciles no `/guest/` children and runs no
