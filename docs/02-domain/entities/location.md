@@ -3,7 +3,7 @@ title: Location
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Location
@@ -64,9 +64,11 @@ employee". Answers half of the core audit question "what do we have and **where 
 
   Without a resolution the delete is a `409` with code `DELETE_RESOLUTION_REQUIRED` and the counts,
   so an older client, a script or the AI never strands rows silently. The resolution and the soft
-  delete run in **one transaction** under the tree lock (30 s timeout). The location's own row is locked
-  `FOR UPDATE` first, then the assets and purchases `FOR UPDATE` in id order, the order every other
-  purchase lock takes. Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
+  delete run in **one transaction** under the tree lock (30 s timeout). Locks, in order: the location's
+  own row `FOR UPDATE`, its live child locations `FOR NO KEY UPDATE`, its open purchases
+  `FOR UPDATE`, then its assets `FOR UPDATE`, each in id order (the order in
+  [[0023-access-management-design]], so the delete never crosses a link, an apply, a model delete, or a
+  write moving a row into one of its children). Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
   (`{ from, to }`, `to: null` on detach), all written in one insert, and each purchase an `UPDATED`
   activity row for `deliveryLocationId`. History keeps its reference: consumable deliveries (an
   append-only ledger), closed purchases, and archived assets and child locations still point at the

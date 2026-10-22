@@ -3,7 +3,7 @@ title: AssetModel
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # AssetModel
@@ -40,9 +40,10 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 
   Without a resolution the delete is a `409` `DELETE_RESOLUTION_REQUIRED` with
   `{ assets, purchaseOrderLines }`. The resolution and the soft delete run in **one transaction**
-  (30 s timeout). Locks, in order: both models and the assets `FOR UPDATE`, the purchases of the mapped
-  lines `FOR SHARE` (purchase before line, like every purchase write, and settled against a status change
-  or archive in flight), then the open lines `FOR UPDATE`. Each moved asset gets a
+  (30 s timeout). Locks, in order: both models `FOR UPDATE`, the purchases of the mapped lines
+  `FOR SHARE` (settled against a status change or archive in flight), the assets `FOR UPDATE`, then the
+  open lines `FOR UPDATE` — purchase, asset, line, the order a link and a location delete take
+  ([[0023-access-management-design]], #1696). Each moved asset gets a
   `MODEL_CHANGED` [[asset-history]] row (`{ from, to }`, `to: null` on detach), all written in one
   insert, and each line a `LINE_UPDATED` [[purchase-order-event]] for `assetModelId`. History keeps its
   reference: archived assets, received lines and the lines of cancelled purchases still point at the

@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -226,11 +226,28 @@ archived parent. Writes and deletes now serialize on the parent row:
   parent still goes through.
 - **Deletes** lock their own row `FOR UPDATE` before they read the rows that point at it. The category
   deletes already did; the location delete now does too, after the tree lock.
-- **Lock order:** the parent first, then the rows that point at it, on both sides. A writer takes its
-  parent rows (custom status, location, category) before its own row; a delete takes its own row, then
-  its dependents in id order. No transaction waits for a parent while it holds a child, so the two cannot
-  deadlock. Where one write names two parents they are different tables, and no delete locks more than
-  one parent table.
+- **Lock order:** parent rows before the rows that point at them, and, among dependents, **purchases
+  before assets before purchase lines** — the order a link and an apply already take (purchase
+  `FOR KEY SHARE`, the assets, then the line through the asset's FK). Every path follows it:
+  - a writer takes the parent rows it names (custom status, location, category) before its own row;
+  - the **location delete** takes the tree lock, its own row `FOR UPDATE`, its live **child locations**
+    `FOR NO KEY UPDATE` in id order, its open purchases `FOR UPDATE` in id order, then its assets
+    `FOR UPDATE` in id order. The children come first because they are parents too: the delete
+    re-parents them, and a write moving an asset or a purchase into a child holds the child `FOR SHARE`
+    before that row (#1604 review). Purchases come before assets so the delete cannot cross a link or an
+    apply on the same purchase and assets (#1696);
+  - the **asset-model delete** takes both model rows, the purchases of the mapped lines `FOR SHARE`, its
+    assets `FOR UPDATE`, then the open lines `FOR UPDATE`, all in id order — so it crosses neither a
+    location delete over the same purchase and assets nor a link of its asset to its line;
+  - a category delete takes its rows, then the rows filed under them.
+
+  No transaction waits for an earlier row in this order while it holds a later one, so none of these
+  pairs can deadlock. Each pair is reproduced against Postgres in `apps/api/test/parent-row-locks.db.spec.ts`.
+- **A lost lock race is a retryable `409`, not a `500` (#1696).** Should a deadlock (`40P01`) or a
+  serialization failure (`40001`) still happen, Prisma reports it as `P2034` (a model call) or `P2010`
+  with the Postgres code (a raw query). The global `PrismaExceptionFilter` and the AI tool error mapper
+  answer `409` with a generic "try again" message (the transaction rolled back, so nothing was saved),
+  and it is logged at `warn`, since it means two writes took locks in different orders.
 - **Cost:** a parent rename or delete waits for in-flight writes that name the parent, and those writes
   wait for it. Concurrent writes never wait on each other, since shared locks do not conflict.
 
