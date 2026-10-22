@@ -1443,6 +1443,30 @@ describe('purchases toolset (#1478)', () => {
       ).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
     });
 
+    it("purchase_pending_lines passes expectedBefore (the user's today) to the route; a datetime is refused", async () => {
+      receiving.findPendingLines.mockClear();
+      ok(
+        await tools.invoke(
+          'purchase_pending_lines',
+          { expectedBefore: '2026-10-21' },
+          chat(actor('MEMBER')),
+        ),
+      );
+      expect(receiving.findPendingLines).toHaveBeenCalledWith(
+        { supplierId: undefined, expectedBefore: '2026-10-21' },
+        expect.objectContaining(PAGE),
+      );
+      receiving.findPendingLines.mockClear();
+      expect(
+        await tools.invoke(
+          'purchase_pending_lines',
+          { expectedBefore: '2026-10-21T00:00:00.000Z' },
+          chat(actor('MEMBER')),
+        ),
+      ).toMatchObject({ ok: false });
+      expect(receiving.findPendingLines).not.toHaveBeenCalled();
+    });
+
     it('supplier_search maps the query; supplier notes appear only in supplier_get, untrusted', async () => {
       const search = ok(
         await tools.invoke(

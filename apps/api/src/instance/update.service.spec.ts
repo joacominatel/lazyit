@@ -190,6 +190,10 @@ describe('UpdateService', () => {
         type: 'update.available',
         dedupeKey: 'update.available:v1.6.0',
       });
+      // #1536: the summary names the settings page by its current label, not the pre-#1533 one.
+      const summary = String(emitPayload().summary);
+      expect(summary).toContain('Review them in Settings → General & version.');
+      expect(summary).not.toContain('Settings → Instance');
     });
 
     it('suppresses the email when current (behindBy 0)', async () => {

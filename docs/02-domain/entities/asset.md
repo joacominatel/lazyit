@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Asset
@@ -189,6 +189,34 @@ concrete instance of a generic [[asset-model]].
 > released — ownership history is preserved (consistent with [[asset-assignment]]'s `onDelete:
 > Restrict` and the auditability principle). The web decides how to display them.
 
+> [!important] Owner emails are part of the inventory record (decided 2026-10-21, #1636)
+> Every `asset:read` holder sees each active owner's **name and email**: on the list row
+> (`activeAssignments[].user.email`), on the detail, and on the assignment reads
+> ([[asset-assignment]]). VIEWER holds `asset:read` by default and **not** `user:read`, and that is
+> deliberate, not a leak waiting for a fix. Do not gate these emails behind `user:read`.
+>
+> - **Why.** The asset is the first-class record ([[asset-centric]]). "Who holds this laptop, and how
+>   do I reach them" is the operational fact the inventory exists to answer: handovers, returns,
+>   check-out acknowledgement, an incident on the device. Names are not unique, so the email is
+>   what tells two holders apart, and it is the person key the importer resolves an owner by
+>   ([[0069-migrator-import]] A.3). `user:read` protects the **directory** — listing and browsing
+>   people. Seeing the holder of one item you may already read does not enumerate the directory.
+> - **Scope.** The decision covers the owner's id, name and email (plus `deletedAt`) only. Today the
+>   detail and assignment reads still return the rest of `PUBLIC_USER_SELECT` (role, `legajo`,
+>   `username`, `directoryAttrs`); the CEO decided on 2026-10-21 that callers without `user:read` will
+>   not get those fields, and that filtering by person (`?userId=`, `?assignedToUserId=`) will require
+>   `user:read` (#1685 — decided, not built yet).
+> - **The CSV export.** Its `owners` column carries live owners' **names** only; there is no email
+>   column today. If one is added, this decision applies to it: it is not `user:read`-gated, and it
+>   is appended at the end, because the columns are an importer contract (ADR-0069).
+> - **The contrast with servers (#1627).** The infra node reads embed the *linked* asset's owners as
+>   borrowed context, and there the email needs `user:read` ([[infra-node]]). Both rules hold. The
+>   owners are authoritative on the asset, behind `asset:read`; an infra surface (the servers table,
+>   the topology graph, the AI infra tools) is a different audience that only projects them, so it
+>   stays minimal. A role with `infra:read` and without `asset:read` sees no owner email anywhere.
+> - **Changing it** is a security-posture change: escalate to the CEO and record it here,
+>   in [[role-permission]] and in [[INVARIANTS]].
+
 ## Conventions
 
 - **ID:** `cuid()` ([[0005-id-strategy]]).
@@ -284,6 +312,12 @@ three stored fields are echoed on create/update.
   param; ADR-0099 §8, D-A). A list without them is never checked. Defense in depth: the list query applies
   only purchase filters minted by `AssetsService.authorizePurchaseFilters`, so no other caller of the query
   (the CSV export included) can apply ones it did not authorize (`403`).
+  **Acquisition window** (#1503; the CSV export takes it too): `acquiredFrom` / `acquiredTo`, ISO
+  datetimes, both inclusive, either optional (`400` when not a datetime, or when `acquiredFrom` is after
+  `acquiredTo`). An asset's acquisition date is its `purchaseDate`, or its `createdAt` when it has none — a
+  back-linked asset is usually dated by its purchase, a received one only by when it was recorded. A
+  plain-column filter: `asset:read` is enough, no purchase permission. It backs the link picker's "created
+  near the order date" chip (±90 days of the order date, computed by the web).
   **Cost on the list row** (#1511): each row carries `purchaseCost` (a JSON number, minor units —
   [[0100-money-as-64-bit-minor-units]]) and its `purchaseCurrency` label, for the list's optional *Cost*
   column — the same `asset:read` values the detail read shows. The self-read `GET /assets/mine` carries no
@@ -334,7 +368,10 @@ three stored fields are echoed on create/update.
   (`fromLabel` / `toLabel`) when either side has one ([[0101-custom-asset-statuses]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
   salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
-  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
+  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382). Re-applying a purchase line's values to
+  an asset already linked to it (`POST /purchase-orders/:id/lines/:lineId/apply-to-linked`, #1502 —
+  [[purchase-order-line]]) writes the same row with the purchase as its source:
+  `UPDATED { fields, source: 'purchase', purchaseOrderId, purchaseOrderLineId }`.
 - `POST /assets/batch/delete` · `POST /assets/batch/restore` · `POST /assets/batch/status` —
   **bulk actions** (`asset:delete`, ADMIN by default; [[0030-list-pagination-contract]] amendment). Body
   `{ ids }` (1–200 cuids); the status action adds `status` and/or `statusLabelId`, checked like a

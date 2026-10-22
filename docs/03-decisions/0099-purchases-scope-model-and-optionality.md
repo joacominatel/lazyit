@@ -216,7 +216,10 @@ assets:
   (2026-10-02, #1489):* a price edit changes no linked asset and proposes nothing; the asset's *Purchase*
   panel marks the line price *Differs from purchase*, and an ordinary asset edit changes the cost
   ([[#Decisions while building (Phase 1 flows web, #1475)]]). The rule that nothing is ever overwritten
-  silently holds either way.
+  silently holds either way. *Built (API), 2026-10-21, #1502:* the proposal's routes —
+  `POST /purchase-orders/:id/lines/:lineId/linked-preview` (pre-checked only where the asset still holds the
+  previous price the caller names) and `…/apply-to-linked` (one transaction, the link's lock order, audited
+  on both sides). Not exposed to the AI. The screens follow in a web unit ([[purchase-order-line]]).
 
 A divergence between an asset's cost and its line is shown ("differs from purchase"); it is never
 corrected silently.
@@ -404,6 +407,13 @@ of the order date, else of when the purchase was recorded; live purchases that a
 each line as (quantity − cancelled) × unit price; grouped per label by the shared rule of §5 — never converted,
 `amount: null` beyond `MONEY_MAX`. No migration; the field is optional in the contract. The rules are on
 [[supplier]]; the supplier page shows them in a follow-up web change.
+
+*Built (API), 2026-10-21 (#1498, #1503, #1502):* `GET /purchase-orders/pending-summary` (the dashboard's
+*Pending deliveries* counts, over exactly the Pending units rows; `/dashboard/summary` unchanged);
+`expectedBefore` (the viewer's today) on the pending lines, their export and the `purchase_pending_lines`
+tool, for *Overdue only*; `acquiredFrom` / `acquiredTo` on the asset list and export, for the link picker's
+*created near the order date* chip; and the line price follow-up of §2. The web half follows in its own
+unit; a later docs unit consolidates this note ([[purchase-order]], [[purchase-order-line]], [[asset]]).
 
 ### 14. Upgrade safety
 

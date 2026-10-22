@@ -3,7 +3,7 @@ title: PurchaseOrderEvent
 tags: [domain, entity, purchases, audit]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # PurchaseOrderEvent
@@ -73,6 +73,7 @@ default ([[0006-soft-delete-and-auditing]]).
 | `EXTRACTION_RUN` | a document of the purchase was sent to the AI provider to draft it (#1477) — on success and on a failure after the request; not when the call failed before any I/O (the document never left) | `{ extractionId, attachmentId, outcome: SUCCEEDED \| FAILED, errorCode, provider, model, inputTokens, outputTokens, lineCount, warningCount }` — **metadata only**: never a value read from the document |
 | `CREATED_FROM_ASSETS` | create a purchase from selected assets (#1477), right after its `CREATED`; each line's links follow as `ASSET_LINKED` | `{ lineCount, linkedAssetIds, failed }` (`failed` is a count) |
 | `SUPPLIER_MERGED` | the purchase's supplier was merged into another one (#1496) — one row per moved purchase, archived purchases included, written in one insert in the merge's transaction | `{ from: { id, name }, to: { id, name }, filledFields }` — the two suppliers as named at the merge, and the fields of the supplier that stays filled from the duplicate |
+| `LINKED_VALUES_APPLIED` | the line's current values were re-applied, explicitly, to assets already linked to it — the follow-up of a unit price edit (#1502, [[purchase-order-line]] § Receiving and linking); written once, in the apply's transaction, only when at least one asset changed | `{ lineId, fields, assetIds, applied }` — the fields asked for, the assets actually changed, and the fields each one received |
 
 Money in a payload is a JSON number of minor units. A receive's units are separate transactions (the
 asset-tag counter, [[0089-bulk-receiving-and-checkout-acknowledgement]]), so `UNITS_RECEIVED` is appended
