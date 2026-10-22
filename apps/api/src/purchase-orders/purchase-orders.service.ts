@@ -28,6 +28,7 @@ import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import { lockLiveParent } from '../common/parent-row-lock';
 import {
   keysetOrderBy,
   keysetWhere,
@@ -475,6 +476,11 @@ export class PurchaseOrdersService {
   async update(id: string, data: UpdatePurchaseOrder, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
     const detail = await this.prisma.$transaction(async (tx) => {
+      // Parent before child (#1604): a location delete locks the location, then the purchases delivering
+      // there, so the named delivery location is locked FOR SHARE before the purchase row, never after.
+      if (data.deliveryLocationId) {
+        await lockLiveParent(tx, 'locations', data.deliveryLocationId);
+      }
       const before = await this.assertLive(tx, id, { lock: true });
       await this.assertReferences(tx, data);
       const supplierId =
@@ -891,7 +897,12 @@ export class PurchaseOrdersService {
     );
   }
 
-  /** The supplier and delivery location a write names must be live (a soft-deleted one passes the FK). */
+  /**
+   * The supplier and delivery location a write names must be live (a soft-deleted one passes the FK). The
+   * location is locked `FOR SHARE` for the rest of the transaction (#1604), so a concurrent location delete —
+   * which locks it `FOR UPDATE` before re-pointing its open purchases — cannot leave this purchase delivering to
+   * an archived location. Call it before locking or writing the purchase row (or lock the location first).
+   */
   async assertReferences(
     tx: Tx,
     data: { supplierId?: string | null; deliveryLocationId?: string | null },
@@ -906,11 +917,7 @@ export class PurchaseOrdersService {
       }
     }
     if (data.deliveryLocationId) {
-      const location = await tx.location.findFirst({
-        where: { id: data.deliveryLocationId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!location) {
+      if (!(await lockLiveParent(tx, 'locations', data.deliveryLocationId))) {
         throw new BadRequestException(
           `Location ${data.deliveryLocationId} not found`,
         );

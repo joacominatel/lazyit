@@ -36,6 +36,10 @@ describe('ApplicationsService', () => {
   let accessGrant: AccessGrantMock;
   let applicationCategory: { findFirst: jest.Mock };
   let search: SearchMock;
+  // The category `FOR SHARE` lock create/update take (#1604): ids in `archivedCategories` come back archived.
+  let queryRaw: jest.Mock;
+  let archivedCategories: Set<string>;
+  let transaction: jest.Mock;
 
   beforeEach(async () => {
     application = {
@@ -51,13 +55,28 @@ describe('ApplicationsService', () => {
     applicationCategory = { findFirst: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
-    // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array.
-    const prisma = {
+    archivedCategories = new Set();
+    queryRaw = jest.fn((strings: TemplateStringsArray, ...values: unknown[]) =>
+      Promise.resolve(
+        strings.join('?').includes('FROM "application_categories"') &&
+          !archivedCategories.has(values[0] as string)
+          ? [{ id: values[0] }]
+          : [],
+      ),
+    );
+    // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array; a write
+    // passes a callback, run here against the same client.
+    const prisma: Record<string, unknown> = {
       application,
       accessGrant,
       applicationCategory,
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      $queryRaw: queryRaw,
     };
+    transaction = jest.fn(
+      (arg: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+    );
+    prisma.$transaction = transaction;
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -316,22 +335,26 @@ describe('ApplicationsService', () => {
     });
   });
 
+  // The category ids create/update locked FOR SHARE (#1604), in call order.
+  const lockedCategories = () =>
+    (queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][])
+      .filter(([strings]) =>
+        strings.join('?').includes('FROM "application_categories"'),
+      )
+      .map(([, id]) => id);
+
   describe('archived category on write (AUD-025, SEC-052)', () => {
     it('create refuses an archived or missing category with 400 and writes nothing', async () => {
-      applicationCategory.findFirst.mockResolvedValue(null);
+      archivedCategories.add('cat1');
 
       await expect(
         service.create({ name: 'Jira', isCritical: false, categoryId: 'cat1' }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(applicationCategory.findFirst).toHaveBeenCalledWith({
-        where: { id: 'cat1', deletedAt: null },
-        select: { id: true },
-      });
+      expect(lockedCategories()).toEqual(['cat1']);
       expect(application.create).not.toHaveBeenCalled();
     });
 
     it('create files under a live category', async () => {
-      applicationCategory.findFirst.mockResolvedValue({ id: 'cat1' });
       application.create.mockResolvedValue({ id: 'app1', categoryId: 'cat1' });
 
       await service.create({
@@ -346,7 +369,7 @@ describe('ApplicationsService', () => {
 
     it('update refuses moving to an archived category with 400 and writes nothing', async () => {
       application.findFirst.mockResolvedValue({ id: 'app1', categoryId: null });
-      applicationCategory.findFirst.mockResolvedValue(null);
+      archivedCategories.add('archived');
 
       await expect(
         service.update('app1', { categoryId: 'archived' }),
@@ -359,12 +382,88 @@ describe('ApplicationsService', () => {
         id: 'app1',
         categoryId: 'legacy',
       });
+      archivedCategories.add('legacy');
       application.update.mockResolvedValue({ id: 'app1' });
 
       await service.update('app1', { categoryId: 'legacy', vendor: 'X' });
 
       expect(applicationCategory.findFirst).not.toHaveBeenCalled();
       expect(application.update).toHaveBeenCalled();
+    });
+  });
+
+  // An application category delete locks the category FOR UPDATE before it moves the applications filed under
+  // it; create and update hold it FOR SHARE until they commit (#1604).
+  describe('the category a write names is locked FOR SHARE (#1604)', () => {
+    it('create locks the category, with its liveness in the locking statement, before inserting — in one transaction', async () => {
+      application.create.mockResolvedValue({ id: 'app1', categoryId: 'c1' });
+
+      await service.create({
+        name: 'Jira',
+        isCritical: false,
+        categoryId: 'c1',
+      });
+
+      expect(transaction).toHaveBeenCalledTimes(1);
+      const [strings] = queryRaw.mock.calls[0] as [TemplateStringsArray];
+      expect(strings.join('?')).toMatch(
+        /FROM "application_categories"[\s\S]*"deletedAt" IS NULL[\s\S]*FOR SHARE/,
+      );
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        application.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create under a category a concurrent delete archived while it waited is a 400 — nothing written', async () => {
+      archivedCategories.add('c1');
+
+      await expect(
+        service.create({ name: 'Jira', isCritical: false, categoryId: 'c1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(application.create).not.toHaveBeenCalled();
+      expect(search.upsert).not.toHaveBeenCalled();
+    });
+
+    it('a re-categorisation locks the target category before reading or writing the application', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: 'c0' });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', { categoryId: 'c1' });
+
+      expect(lockedCategories()).toEqual(['c1']);
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        application.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(application.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('a re-categorisation into a category archived while it waited is a 400 — nothing written', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: 'c0' });
+      archivedCategories.add('c1');
+
+      await expect(
+        service.update('app1', { categoryId: 'c1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(application.update).not.toHaveBeenCalled();
+    });
+
+    it("an update inside a caller's transaction (the license apply) runs on that client and opens none of its own", async () => {
+      const caller = {
+        application: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'app1', categoryId: 'c0' }),
+          update: jest.fn().mockResolvedValue({ id: 'app1' }),
+        },
+        $queryRaw: jest.fn(),
+      };
+
+      await service.update('app1', { seatsPurchased: 10 }, caller as never);
+
+      expect(transaction).not.toHaveBeenCalled();
+      expect(caller.$queryRaw).not.toHaveBeenCalled();
+      expect(caller.application.update).toHaveBeenCalledTimes(1);
+      expect(application.update).not.toHaveBeenCalled();
     });
   });
 

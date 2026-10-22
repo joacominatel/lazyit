@@ -45,7 +45,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   category never deletes its applications.
 - **A write never files under an archived category** — create, or an update that changes `categoryId`, is a
   `400` when the category is missing or soft-deleted. An update that leaves a legacy archived category
-  unchanged is accepted, and reads stay tolerant of it.
+  unchanged is accepted, and reads stay tolerant of it. A write naming a category locks it `FOR SHARE`
+  in its transaction, before the application row, so a concurrent category delete cannot strand it
+  there (#1604).
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)

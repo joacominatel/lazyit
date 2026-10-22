@@ -45,6 +45,22 @@ describe('LocationsService', () => {
   // The location-tree advisory lock, taken on the transaction client.
   let executeRaw: jest.Mock;
   let queryRaw: jest.Mock;
+  // Live location ids, as seedTree leaves them: what the delete's own-row lock (#1604) finds.
+  let liveLocationIds: Set<string>;
+  // The live children the delete locks FOR NO KEY UPDATE (#1604 review), as seedDependents leaves them.
+  let childIds: string[];
+  // The own-row and children locks answer from the seeded rows; any other raw query falls through.
+  const lockedLocationRows = (
+    strings: TemplateStringsArray,
+    values: unknown[],
+  ): { id: string }[] | undefined => {
+    const sql = strings.join('?');
+    if (!sql.includes('FROM "locations"')) return undefined;
+    if (sql.includes('"parentId" =')) return childIds.map((id) => ({ id }));
+    return liveLocationIds.has(values[0] as string)
+      ? [{ id: values[0] as string }]
+      : [];
+  };
   let asset: { count: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
   let purchaseOrder: { updateMany: jest.Mock };
   let purchaseOrderEvent: { createMany: jest.Mock };
@@ -88,7 +104,11 @@ describe('LocationsService', () => {
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     executeRaw = jest.fn().mockResolvedValue(0);
-    queryRaw = jest.fn().mockResolvedValue([]);
+    liveLocationIds = new Set();
+    childIds = [];
+    queryRaw = jest.fn((strings: TemplateStringsArray, ...values: unknown[]) =>
+      Promise.resolve(lockedLocationRows(strings, values) ?? []),
+    );
     const prisma: Record<string, unknown> = {
       location,
       asset,
@@ -226,7 +246,7 @@ describe('LocationsService', () => {
   });
 
   it('soft-deletes by setting deletedAt (never hard delete)', async () => {
-    location.findFirst.mockResolvedValue({ id: 'clh1', deletedAt: null });
+    liveLocationIds.add('clh1');
     location.update.mockResolvedValue({ id: 'clh1', deletedAt: new Date() });
 
     await service.remove('clh1');
@@ -419,6 +439,7 @@ describe('LocationsService', () => {
   };
   const seedTree = (nodes: Node[]) => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
+    liveLocationIds = new Set(nodes.filter((n) => !n.deleted).map((n) => n.id));
     location.findFirst.mockImplementation(
       ({
         where,
@@ -637,7 +658,7 @@ describe('LocationsService', () => {
     location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
 
     await service.remove('hq');
-    expectLockedBefore(location.findFirst);
+    expectLockedBefore(queryRaw);
 
     executeRaw.mockClear();
     location.findFirst.mockClear();
@@ -701,22 +722,27 @@ describe('LocationsService', () => {
     purchases?: string[];
     children?: string[];
   }) => {
-    queryRaw.mockImplementation((strings: TemplateStringsArray) => {
-      const sql = strings.join('?');
-      if (sql.includes('FROM "assets"')) {
-        return Promise.resolve((opts.assets ?? []).map((id) => ({ id })));
-      }
-      if (sql.includes('FROM "purchase_orders"')) {
-        return Promise.resolve(
-          (opts.purchases ?? []).map((id, i) => ({
-            id,
-            reference: `PO-${id}`,
-            createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
-          })),
-        );
-      }
-      return Promise.resolve([]);
-    });
+    childIds = opts.children ?? [];
+    queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings.join('?');
+        const locked = lockedLocationRows(strings, values);
+        if (locked) return Promise.resolve(locked);
+        if (sql.includes('FROM "assets"')) {
+          return Promise.resolve((opts.assets ?? []).map((id) => ({ id })));
+        }
+        if (sql.includes('FROM "purchase_orders"')) {
+          return Promise.resolve(
+            (opts.purchases ?? []).map((id, i) => ({
+              id,
+              reference: `PO-${id}`,
+              createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+            })),
+          );
+        }
+        return Promise.resolve([]);
+      },
+    );
     location.findMany.mockImplementation(
       ({ where }: { where: { parentId?: string } }) =>
         Promise.resolve(
@@ -1006,23 +1032,25 @@ describe('LocationsService', () => {
   it('locks the open purchases in id order, as the model delete and supplier merge do, and still lists them oldest first', async () => {
     seedTree([{ id: 'hq', parentId: null }]);
     seedDependents({});
-    queryRaw.mockImplementation((strings: TemplateStringsArray) =>
-      Promise.resolve(
-        strings.join('?').includes('FROM "purchase_orders"')
-          ? [
-              {
-                id: 'po-a',
-                reference: 'PO-A',
-                createdAt: new Date('2026-10-02'),
-              },
-              {
-                id: 'po-b',
-                reference: 'PO-B',
-                createdAt: new Date('2026-10-01'),
-              },
-            ]
-          : [],
-      ),
+    queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) =>
+        Promise.resolve(
+          lockedLocationRows(strings, values) ??
+            (strings.join('?').includes('FROM "purchase_orders"')
+              ? [
+                  {
+                    id: 'po-a',
+                    reference: 'PO-A',
+                    createdAt: new Date('2026-10-02'),
+                  },
+                  {
+                    id: 'po-b',
+                    reference: 'PO-B',
+                    createdAt: new Date('2026-10-01'),
+                  },
+                ]
+              : []),
+        ),
     );
     location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
 
@@ -1040,5 +1068,73 @@ describe('LocationsService', () => {
       { id: 'po-b', reference: 'PO-B' },
       { id: 'po-a', reference: 'PO-A' },
     ]);
+  });
+
+  // --- concurrent writers (#1604) -------------------------------------------
+
+  it('locks in one order: tree, own row, child locations, open purchases, then assets (#1604, #1696)', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ assets: ['a1'], children: ['room'], purchases: ['po1'] });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+
+    const calls = queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][];
+    const sqls = calls.map(([strings]) => strings.join('?'));
+    const lockOf = (values: unknown[]) =>
+      values
+        .filter(
+          (v): v is { strings: string[] } =>
+            typeof v === 'object' && v !== null && 'strings' in v,
+        )
+        .map((v) => v.strings.join(''))
+        .join('');
+    const own = sqls.findIndex(
+      (q) => q.includes('FROM "locations"') && q.includes('"id" = ?'),
+    );
+    const children = sqls.findIndex((q) => q.includes('"parentId" = ?'));
+    const purchases = sqls.findIndex((q) =>
+      q.includes('FROM "purchase_orders"'),
+    );
+    const assets = sqls.findIndex((q) => q.includes('FROM "assets"'));
+    expect(own).toBe(0);
+    expect(sqls[own]).toMatch(/"deletedAt" IS NULL[\s\S]*FOR UPDATE/);
+    expect(calls[own][1]).toBe('hq');
+    // Live children only, in id order, NO KEY UPDATE (they are re-parented, never re-keyed).
+    expect(sqls[children]).toMatch(
+      /"deletedAt" IS NULL[\s\S]*ORDER BY "id" FOR NO KEY UPDATE/,
+    );
+    expect(lockOf(calls[purchases].slice(1))).toContain('FOR UPDATE OF po');
+    expect(sqls[assets]).toMatch(/ORDER BY "id" FOR UPDATE/);
+    expect(own).toBeLessThan(children);
+    expect(children).toBeLessThan(purchases);
+    expect(purchases).toBeLessThan(assets);
+    // The tree lock comes first of all.
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0],
+    );
+    // The locked children are the ones re-parented.
+    expect(location.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['room'] } },
+      data: { parentId: null },
+    });
+  });
+
+  it('a location archived by a delete that committed while this one waited on the row lock is a 404, and nothing is written', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ assets: ['a1'] });
+    // The row lock re-reads the committed row: the other delete archived it.
+    liveLocationIds.delete('hq');
+
+    await expect(
+      service.remove('hq', { strategy: 'detach' }, ADMIN),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const sqls = (queryRaw.mock.calls as [TemplateStringsArray][]).map(
+      ([strings]) => strings.join('?'),
+    );
+    expect(sqls.some((sql) => sql.includes('FROM "assets"'))).toBe(false);
+    expect(asset.updateMany).not.toHaveBeenCalled();
+    expect(softDeleted()).toBe(false);
   });
 });

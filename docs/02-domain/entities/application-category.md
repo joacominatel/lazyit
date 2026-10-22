@@ -3,7 +3,7 @@ title: ApplicationCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-21
 ---
 
 # ApplicationCategory
@@ -35,7 +35,9 @@ initial, non-special list.
   it is a `409` `DELETE_RESOLUTION_REQUIRED` with the count. The move and the soft delete share one
   transaction; applications have no history table, so nothing else is written. Archived applications
   keep their reference, and restoring the category re-links nothing. The `SetNull` FK only matters
-  for a hard delete, which the API never issues. See [[0023-access-management-design]].
+  for a hard delete, which the API never issues. The delete locks the category `FOR UPDATE` before it
+  reads the applications; an application write naming it holds it `FOR SHARE`, so the two serialize
+  (#1604). See [[0023-access-management-design]].
 - Soft delete ([[0006-soft-delete-and-auditing]]).
 
 ## Conventions

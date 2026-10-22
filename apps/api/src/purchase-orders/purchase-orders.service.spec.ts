@@ -519,6 +519,103 @@ describe('PurchaseOrdersService', () => {
     });
   });
 
+  // A location delete locks the location FOR UPDATE, then re-points the open purchases delivering there; a
+  // purchase write naming a delivery location holds it FOR SHARE until it commits (#1604).
+  describe('the delivery location a write names is locked FOR SHARE (#1604)', () => {
+    const LOCATION = 'cllocation00000000000001';
+    // The delivery location the lock finds live (or not); every other raw query answers nothing.
+    const lockFinds = (live: boolean) =>
+      prisma.$queryRaw.mockImplementation(
+        (strings: TemplateStringsArray, ...values: unknown[]) =>
+          Promise.resolve(
+            strings.join('?').includes('FROM "locations"') && live
+              ? [{ id: values[0] }]
+              : [],
+          ),
+      );
+    const sqls = () =>
+      (prisma.$queryRaw.mock.calls as [TemplateStringsArray][]).map(
+        ([strings]) => strings.join('?'),
+      );
+
+    it('create locks the location, with its liveness in the locking statement, before inserting', async () => {
+      lockFinds(true);
+      prisma.purchaseOrder.create.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ deliveryLocationId: LOCATION }),
+      );
+
+      await service.create(
+        { reference: 'OC-1', deliveryLocationId: LOCATION },
+        human,
+      );
+
+      expect(sqls()[0]).toMatch(
+        /FROM "locations"[\s\S]*"deletedAt" IS NULL[\s\S]*FOR SHARE/,
+      );
+      expect(rawQuery(prisma, 0).values[0]).toBe(LOCATION);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.purchaseOrder.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create delivering to a location archived while it waited on the lock is a 400 — nothing written', async () => {
+      lockFinds(false);
+
+      await expect(
+        service.create(
+          { reference: 'OC-1', deliveryLocationId: LOCATION },
+          human,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+      expect(events(prisma)).toEqual([]);
+    });
+
+    it('update locks the location before the purchase row, the order a location delete takes them in', async () => {
+      lockFinds(true);
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+
+      await service.update(PO, { deliveryLocationId: LOCATION }, human);
+
+      const all = sqls();
+      const location = all.findIndex((q) => q.includes('FROM "locations"'));
+      const purchase = all.findIndex((q) =>
+        /FROM "purchase_orders"[\s\S]*FOR UPDATE/.test(q),
+      );
+      expect(location).toBe(0);
+      expect(purchase).toBeGreaterThan(location);
+      expect(prisma.purchaseOrder.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('update delivering to a location archived while it waited on the lock is a 400 — nothing written', async () => {
+      lockFinds(false);
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+
+      await expect(
+        service.update(PO, { deliveryLocationId: LOCATION }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
+      expect(events(prisma)).toEqual([]);
+    });
+
+    it('update that names no delivery location takes no location lock', async () => {
+      lockFinds(true);
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+
+      await service.update(PO, { notes: 'x' }, human);
+      await service.update(PO, { deliveryLocationId: null }, human);
+
+      expect(sqls().some((q) => q.includes('FROM "locations"'))).toBe(false);
+    });
+  });
+
   describe('soft delete and restore', () => {
     it('soft-deletes (never a hard delete), keeps asset links, and logs DELETED', async () => {
       prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
