@@ -434,8 +434,8 @@ the **exfiltration leg** and the **consequential-action leg**.
   The card's first row, the `action` sentence, is written by the tool, but some of its values come from
   the model's own tool input — the name of an application or supplier it creates, an access level it
   typed, a new purchase line's description. Such a param has the sentence kind `input`: `phrase()` bounds
-  it on the server (wrapper tags removed, one line, no control, bidi or zero-width characters, quote
-  characters turned into `'`, at most 80 characters) so it can never close the quotes every template puts
+  it on the server (invisible and control characters removed first, then wrapper tags removed until none
+  is left, one line, quote characters turned into `'`, at most 80 characters) so it can never close the quotes every template puts
   around it or stretch the sentence into something else, and the web shows it as a distinct chip, apart
   from the names lazyit read from its database. The full value is in the card's structured rows. This
   closes the "known limitation" of the W3-7 review (item 6; [[ai-assistant/frontend|frontend]] §11a).

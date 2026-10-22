@@ -1947,9 +1947,11 @@ sentence as **codes + params**, and the web renders the code's template in the u
   words the model chose: `application_create.action` and `supplier_create.action` (`name`),
   `access_grant_create.action` and `access_request_create.action` (`level`), `purchase_line_add.action`
   (`line`). Those params are kind `input`. `phrase()` applies `boundAiSentenceInput` (`@lazyit/shared`) to
-  every `input` param before it renders the English or stores the params — `<untrusted_content>` tags
-  removed, control characters and whitespace runs collapsed to one space, bidi and zero-width characters
-  removed, quote characters (`"`, `“ ”`, `« »`) turned into `'`, trimmed, at most
+  every `input` param before it renders the English or stores the params — control characters turned
+  into spaces and invisible characters removed (bidi marks and controls, zero-width characters, the Unicode
+  tag block) **first**, then `<untrusted_content>` tags removed until none is left (so neither an invisible
+  character inside a tag nor a nested tag can leave one behind), quote characters (`"`, `“ ”`, `« »`,
+  fullwidth `＂`) turned into `'`, whitespace runs collapsed to one space, trimmed, at most
   `AI_SENTENCE_INPUT_MAX` (80) characters ending in `…` — so no tool can forget it and the English the
   ledger and MCP read matches what the web renders. Every template quotes an `input` param (`"{name}"`,
   checked by the shared test). The full value stays in the preview's structured rows. The web renders it
