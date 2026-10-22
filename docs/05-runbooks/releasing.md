@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Releasing lazyit
@@ -187,6 +187,9 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   servers export show owner names to anyone with `infra:read`, but emails only to roles that can read
 >   the user directory (VIEWER cannot by default), and the servers search no longer matches an owner's
 >   email for them. A VIEWER tab left open across the update errors on the servers list until reloaded.
+> - **Filtering assets or assignments by person needs `user:read`** (#1685): `?assignedToUserId=` and
+>   `/asset-assignments?userId=` now answer 403. Grant `user:read` to scripts and service accounts that
+>   use them. Viewers no longer see owners' role, legajo, username or directory attributes.
 > - **Applications filter by category and criticality on the server** (#1631). The list, its total and
 >   its export now follow both filters; before, they narrowed only the page on screen.
 > - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an
