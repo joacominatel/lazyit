@@ -62,7 +62,9 @@ function optionalStringArray(value: unknown, field: string): string[] | null {
  * the cap a new registration EVICTS the oldest UNUSED one instead of being refused (#1683), so a flood
  * cannot lock every new client out until the sweeper runs. "Unused" is the sweeper's own rule: never
  * exchanged a code (`lastUsedAt` null), no grant row at all, and no authorization code — so a client
- * whose user is mid-consent, or that ever got a grant, is never evicted. Only when nothing is evictable
+ * that ever got a grant, or whose user already approved consent (a code exists), is never evicted. One
+ * whose user has not approved consent yet (no code) can be: under a flood it is displaced, the consent
+ * decision then answers `INVALID_CLIENT`, and the client registers again. Only when nothing is evictable
  * does registration answer 429.
  */
 @Injectable()
