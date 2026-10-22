@@ -353,4 +353,61 @@ describe('crash recovery', () => {
       error: { code: 'FORBIDDEN' },
     });
   });
+
+  describe('a waiting run from before #1675 (epoch in a legacy `lazyit-run-v1` row, column null)', () => {
+    async function legacyWaitingRun(rowEpoch: number | null) {
+      rt.model.push({
+        toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
+      });
+      const { runId, conversationId } = await rt.orchestrator.submit({
+        identity: HUMAN,
+        channel: 'CHAT',
+        text: 'x',
+      });
+      await rt.drain();
+      expect(rt.run(runId).status).toBe('AWAITING_APPROVAL');
+      rt.run(runId).sessionEpoch = null;
+      if (rowEpoch !== null) {
+        rt.prisma.tables.aiMessage.create({
+          data: {
+            conversationId,
+            runId,
+            seq: -1,
+            role: 'system',
+            format: 'lazyit-run-v1',
+            content: { runId, sessionEpoch: rowEpoch },
+          },
+        });
+      }
+      return runId;
+    }
+
+    it('keeps it waiting while the legacy epoch still matches the session', async () => {
+      const runId = await legacyWaitingRun(3);
+      const swept = await rt.sweeper.sweep(new Date(Date.now() + 2 * MIN));
+      expect(swept.cancelled).toBe(0);
+      expect(rt.run(runId).status).toBe('AWAITING_APPROVAL');
+    });
+
+    it('cancels it once the user signed out after the legacy epoch', async () => {
+      const runId = await legacyWaitingRun(3);
+      rt.loader.user.sessionEpoch += 1;
+      const swept = await rt.sweeper.sweep(new Date(Date.now() + 2 * MIN));
+      expect(swept.cancelled).toBe(1);
+      expect(rt.run(runId)).toMatchObject({
+        status: 'CANCELLED',
+        error: { code: 'FORBIDDEN' },
+      });
+    });
+
+    it('cancels it when neither the column nor a legacy row holds an epoch', async () => {
+      const runId = await legacyWaitingRun(null);
+      const swept = await rt.sweeper.sweep(new Date(Date.now() + 2 * MIN));
+      expect(swept.cancelled).toBe(1);
+      expect(rt.run(runId)).toMatchObject({
+        status: 'CANCELLED',
+        error: { code: 'FORBIDDEN' },
+      });
+    });
+  });
 });

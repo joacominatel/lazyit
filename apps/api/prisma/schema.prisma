@@ -3387,6 +3387,10 @@ model AiConversation {
   /// the conversation was started with, or null = no web search (every legacy row). Turning web search
   /// off in Settings → AI makes a conversation that has it read-only (its tool list cannot change).
   webSearchMaxUses Int?
+  /// The frozen system prompt (#1675), built once at creation and sent as `instructions` on every step.
+  /// Null on every conversation created before #1675: the runtime then reads its legacy
+  /// `lazyit-system-prompt-v1` row in ai_messages (never backfilled). Never leaves the API.
+  systemPrompt     String?
   /// CONTEXT_LIMIT | CONFIG_CHANGED | VERSION_CHANGED; null while the conversation is writable.
   closedReason     String?
   lastActivityAt   DateTime        @default(now())
@@ -3457,6 +3461,10 @@ model AiRun {
   /// Redacted `{ code, message }` — never a provider body or credential.
   error             Json?
   idempotencyKey    String?
+  /// The chat session's `sessionEpoch` at submission (#1675), humans only — the epoch the run's tool
+  /// calls are delegated under. Null for service accounts, and on every run created before #1675: the
+  /// runtime then reads its legacy `lazyit-run-v1` row in ai_messages (never backfilled).
+  sessionEpoch      Int?
   cancelRequestedAt DateTime?
   startedAt         DateTime?
   finishedAt        DateTime?
