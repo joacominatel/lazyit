@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Instance SMTP settings — the single source of truth for `api` (config store + validation) and
- * `web` (the Settings → Instance → SMTP form) of the outbound-email connection (issue #615, ADR-0079).
+ * `web` (the Settings → Email form) of the outbound-email connection (issue #615, ADR-0079).
  *
  * SMTP is INSTANCE CONFIGURATION, following the singleton `AssetTagScheme` precedent (ADR-0063): ONE
  * admin-only row, gated by `settings:manage`. It unlocks an EMAIL CHANNEL behind the existing in-app
