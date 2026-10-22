@@ -152,6 +152,15 @@ export const AgentFleetNodeSchema = z.object({
   diagnostics: AgentFleetDiagnosticsSchema.nullable(),
   /** {@link isAgentDegraded} over `diagnostics`, computed once server-side. */
   degraded: z.boolean(),
+  /**
+   * When the host was RETIRED (#1701) — gone, not silent. A retired row stays in the table (with a
+   * badge) because its history is still worth reading, but {@link summarizeAgentFleet} counts it
+   * under `retired` only: a decommissioned server is not an agent that is behind or not reporting.
+   * `.nullish()` for an older API, which reads as active.
+   */
+  retiredAt: z.iso.datetime().nullish(),
+  /** Offline alerts snoozed until this instant (#1701); see `isAlertsSnoozed`. Display only here. */
+  alertsSnoozedUntil: z.iso.datetime().nullish(),
 });
 export type AgentFleetNode = z.infer<typeof AgentFleetNodeSchema>;
 
@@ -179,6 +188,12 @@ export const AgentFleetSummarySchema = z.object({
   notReporting: z.number().int().nonnegative(),
   /** {@link isAgentDegraded} over the rows. Orthogonal to the buckets. */
   degraded: z.number().int().nonnegative(),
+  /**
+   * Retired hosts (#1701). They are rows but NOT in `total`, the buckets, `notReporting` or
+   * `degraded` — none of those questions is meaningful about a host that is gone. Optional on the
+   * wire so a summary from an older API still parses (it simply has none).
+   */
+  retired: z.number().int().nonnegative().optional(),
 });
 export type AgentFleetSummary = z.infer<typeof AgentFleetSummarySchema>;
 
@@ -190,8 +205,9 @@ export type AgentFleetSummary = z.infer<typeof AgentFleetSummarySchema>;
 export function summarizeAgentFleet(
   nodes: readonly AgentFleetNode[],
 ): AgentFleetSummary {
+  const active = nodes.filter((node) => !node.retiredAt);
   const summary: AgentFleetSummary = {
-    total: nodes.length,
+    total: active.length,
     majorBehind: 0,
     behind: 0,
     unknown: 0,
@@ -199,8 +215,9 @@ export function summarizeAgentFleet(
     behindTotal: 0,
     notReporting: 0,
     degraded: 0,
+    retired: nodes.length - active.length,
   };
-  for (const node of nodes) {
+  for (const node of active) {
     summary[node.versionBucket] += 1;
     if (node.status === "OFFLINE" || node.lastReportedAt === null) {
       summary.notReporting += 1;

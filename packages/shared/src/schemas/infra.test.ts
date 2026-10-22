@@ -10,6 +10,8 @@ import {
   AGENT_WARNINGS_MAX,
   AgentReportAckSchema,
   agentReportSkewPaths,
+  isAlertsSnoozed,
+  SnoozeInfraNodeAlertsSchema,
   softwareFingerprint,
   disambiguateExternalId,
   hostIdentityEvidence,
@@ -1975,5 +1977,116 @@ describe("InfraNodeDetailSchema — `assetAutoCreated`, the detach-outcome read 
   test("rejects a non-boolean — it is a provenance FACT, never a free-form string", () => {
     expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse("true").success).toBe(false);
     expect(InfraNodeDetailSchema.shape.assetAutoCreated.safeParse(1).success).toBe(false);
+  });
+});
+
+// ── Retire + snooze (#1701, epic #1146 Q11/Q15) ─────────────────────────────────────────────────────
+
+describe("AgentReportSchema — decommissioning (#1701)", () => {
+  test("is absent on an ordinary report — every agent that predates it", () => {
+    expect(AgentReportSchema.parse(V1_REPORT).decommissioning).toBeUndefined();
+  });
+
+  test("carries `true` from an uninstalling agent", () => {
+    expect(AgentReportSchema.parse({ ...V1_REPORT, decommissioning: true }).decommissioning).toBe(
+      true,
+    );
+  });
+
+  test("a garbage value degrades to an ORDINARY report, never to a retirement", () => {
+    // The safe direction: a value this build cannot read must never retire a host.
+    expect(
+      AgentReportSchema.parse({ ...V1_REPORT, decommissioning: "yes" }).decommissioning,
+    ).toBeUndefined();
+  });
+});
+
+describe("AgentReportAckSchema — retired (#1701)", () => {
+  const ack = { nodeId: CUID, state: "CONFIRMED" as const, accepted: true as const };
+
+  test("is optional, so an ack from a server that predates decommissioning still parses", () => {
+    expect(AgentReportAckSchema.parse(ack).retired).toBeUndefined();
+  });
+
+  test("carries the confirmation the uninstaller looks for", () => {
+    expect(AgentReportAckSchema.parse({ ...ack, retired: true }).retired).toBe(true);
+  });
+});
+
+describe("InfraNodeSchema — retire + snooze columns are read-tolerant (#1701)", () => {
+  const node = {
+    id: CUID,
+    kind: "VM",
+    label: "web-01",
+    status: "OFFLINE",
+    assetId: null,
+    ipAddress: null,
+    shortcuts: null,
+    specs: null,
+    x: null,
+    y: null,
+    source: "AGENT",
+    state: "CONFIRMED",
+    reportingSource: "agent:a",
+    externalId: "abc",
+    lastReportedAt: null,
+    agentVersion: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("an older API that omits the columns still parses, as active and unsnoozed", () => {
+    const parsed = InfraNodeSchema.parse(node);
+    expect(parsed.retiredAt).toBeUndefined();
+    expect(parsed.alertsSnoozedUntil).toBeUndefined();
+  });
+
+  test("a retired, snoozed node round-trips", () => {
+    const parsed = InfraNodeSchema.parse({
+      ...node,
+      retiredAt: "2026-10-20T00:00:00.000Z",
+      retiredById: "8b0c2f9a-0000-4000-8000-000000000000",
+      alertsSnoozedUntil: "2026-10-30T00:00:00.000Z",
+    });
+    expect(parsed.retiredAt).toBe("2026-10-20T00:00:00.000Z");
+    expect(parsed.alertsSnoozedUntil).toBe("2026-10-30T00:00:00.000Z");
+  });
+});
+
+describe("isAlertsSnoozed (#1701)", () => {
+  const now = Date.parse("2026-10-22T12:00:00.000Z");
+
+  test("only an instant strictly in the FUTURE snoozes", () => {
+    expect(isAlertsSnoozed("2026-10-22T12:00:00.001Z", now)).toBe(true);
+    expect(isAlertsSnoozed(new Date("2026-10-23T00:00:00.000Z"), now)).toBe(true);
+    expect(isAlertsSnoozed("2026-10-22T12:00:00.000Z", now)).toBe(false);
+    expect(isAlertsSnoozed("2026-10-01T00:00:00.000Z", now)).toBe(false);
+  });
+
+  test("absent, null and unparseable never snooze — a wrong true would hide an outage", () => {
+    expect(isAlertsSnoozed(null, now)).toBe(false);
+    expect(isAlertsSnoozed(undefined, now)).toBe(false);
+    expect(isAlertsSnoozed("not a date", now)).toBe(false);
+  });
+});
+
+describe("SnoozeInfraNodeAlertsSchema (#1701)", () => {
+  test("takes one ISO instant, with or without an offset", () => {
+    expect(SnoozeInfraNodeAlertsSchema.parse({ until: "2026-10-30T00:00:00.000Z" }).until).toBe(
+      "2026-10-30T00:00:00.000Z",
+    );
+    expect(
+      SnoozeInfraNodeAlertsSchema.safeParse({ until: "2026-10-30T00:00:00-03:00" }).success,
+    ).toBe(true);
+  });
+
+  test("refuses a non-date, a missing value and unknown keys", () => {
+    expect(SnoozeInfraNodeAlertsSchema.safeParse({ until: "tomorrow" }).success).toBe(false);
+    expect(SnoozeInfraNodeAlertsSchema.safeParse({}).success).toBe(false);
+    expect(
+      SnoozeInfraNodeAlertsSchema.safeParse({ until: "2026-10-30T00:00:00Z", forever: true })
+        .success,
+    ).toBe(false);
   });
 });
