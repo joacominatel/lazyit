@@ -49,6 +49,19 @@ export const INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT = 15 * 60 * 1000; // 15 minut
  * default when it has none. That is what makes heterogeneous cadences possible at all — under one
  * global cutoff, a host the operator moved to a daily report sat OFFLINE 23 hours out of 24.
  *
+ * BOOT GRACE (#1674, split from #1146 item 8): for one staleness window after THIS process booted, a
+ * node is not flipped OFFLINE. While the API was down nobody was listening, so every agent's
+ * `lastReportedAt` is old for a reason that says nothing about the host; without the grace the first
+ * sweeps after any restart flip the whole estate OFFLINE and broadcast one `infra.agent_offline` lie per
+ * node, and the next report flips each straight back. The grace is per node and reuses the node's own
+ * window — the sweep measures silence from `max(lastReportedAt, bootedAtMs)` instead of from
+ * `lastReportedAt`, so every node gets one full window of ITS threshold, counted from boot, to check in.
+ * An agent retries on its next tick after a failed report (its due-ness keys on its last SUCCESS), so a
+ * live host lands well inside that window. Nothing else is suppressed: reports are ingested normally
+ * during the grace, and a node already OFFLINE stays OFFLINE until it reports. Per process, which is the
+ * right scope: one API container per instance (single-host Compose, ADR-0015), and any replica that
+ * stayed up while another restarted was still receiving reports, so its own sweep is not fooled.
+ *
  * ponytail: the bulk flip is ONE `updateMany`; it does NOT re-index each flipped node into search (that
  * would be an N-query fan-out). The search `status` is cosmetic drift that the node's next report
  * self-heals — add per-row search sync only if a stale-but-searchable OFFLINE ever actually misleads.
@@ -69,6 +82,15 @@ export class InfraAgentStalenessSweeper
     'INFRA_AGENT_SWEEP_INTERVAL_MS',
     INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT,
   );
+
+  /** The clock (tests move it). */
+  now: () => number = Date.now;
+  /**
+   * When this process booted, for the boot grace (tests move it). Captured when Nest constructs the
+   * provider during `NestFactory.create` — seconds before the HTTP listener opens, which is noise against
+   * a window of at least five minutes.
+   */
+  bootedAtMs: number = this.now();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -105,7 +127,7 @@ export class InfraAgentStalenessSweeper
     }
     this.running = true;
     try {
-      const now = Date.now();
+      const now = this.now();
       // The WIDEST cutoff any node could use: the env default or the policy floor, whichever admits
       // more rows. It is only a cheap pre-filter — the per-node decision happens below — so it must
       // never exclude a node that its OWN threshold would have caught.
@@ -141,6 +163,12 @@ export class InfraAgentStalenessSweeper
       // few-dozen-host product, the candidate set is only the agent nodes that are already past the
       // SHORTEST possible threshold, and the alternative is hand-written SQL with an interval
       // expression that Prisma cannot type. Revisit it if an estate ever makes this the slow part.
+      //
+      // The boot grace (#1674) lives here too: silence is measured from the later of the node's last
+      // report and this process's boot, so for one window of the node's OWN threshold after a restart
+      // nothing it could not have reported to is held against it. Same strict `<` as before: a node
+      // exactly one window past boot is still inside, one millisecond later it is not.
+      let heldByBootGrace = 0;
       const transitioning = candidates.filter((node) => {
         const perNodeMs =
           node.policyStaleAfterSeconds !== null &&
@@ -149,8 +177,20 @@ export class InfraAgentStalenessSweeper
             : this.staleAfterMs;
         // `lastReportedAt` is never null here: the query's `lt` comparison already excludes NULLs,
         // exactly as it did before this change. The `?? 0` is a type narrowing, not a policy.
-        return (node.lastReportedAt?.getTime() ?? 0) < now - perNodeMs;
+        const lastMs = node.lastReportedAt?.getTime() ?? 0;
+        const cutoffMs = now - perNodeMs;
+        if (lastMs >= cutoffMs) return false;
+        if (this.bootedAtMs >= cutoffMs) {
+          heldByBootGrace += 1;
+          return false;
+        }
+        return true;
       });
+      if (heldByBootGrace > 0) {
+        this.logger.log(
+          `Boot grace: ${heldByBootGrace} silent agent node(s) not flipped OFFLINE — the API booted less than one staleness window ago.`,
+        );
+      }
       if (transitioning.length === 0) return 0;
       // Conditional on the snapshot's own report instant (AUD-058): a node that checked in after the
       // read carries a newer `lastReportedAt` and is neither flipped nor announced.

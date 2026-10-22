@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -27,6 +27,13 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 `settings:manage` no longer edits the matrix. See *Amendment — the matrix is edited by an ADMIN only* below.
 **Amended** — 2026-10-16 (SEC-088, CEO decision): a delegated `settings:manage` no longer saves SMTP, and
 mints service-account verbs only within its own role. See *Amendment — SMTP and service accounts* below.
+
+> **Superseded in part** by [[0104-custom-roles]] (2026-10-21, CEO decision on #1560): **§1** (the three
+> roles stay fixed) and the deferral of Option B. Custom roles are the accepted direction: a `roles`
+> table with ADMIN, MEMBER and VIEWER as protected system rows. **The build is deferred**, so until
+> ADR-0104's U1 ships the code still runs exactly what §1 describes. The catalog (§2), the DB-first
+> role-to-permission map (§3), the read tiers (§4), ADMIN as the immutable full set (§5) and the
+> amendments below still stand.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -88,7 +95,8 @@ Constant constraints carried from the auth arc:
   operators define their own roles and assign permissions freely. Rejected for now: it breaks the
   fixed-role invariants the whole auth stack leans on (last-admin, first-user-ADMIN, the IdP role
   mirror of exactly three project roles), adds a role-management UI + lifecycle, and over-serves a
-  5–20-person single-org team. **Deferred to a future ADR**, not discarded.
+  5–20-person single-org team. **Deferred to a future ADR**, not discarded. *(Accepted 2026-10-21 in
+  [[0104-custom-roles]], build deferred.)*
 - **Option C — Keep ADR-0040 as-is (coarse `@Roles` only).** Zero new surface. Rejected: it leaves the
   role→capability mapping uneditable-without-code and the sensitive reads wide open — the two gaps
   this ADR exists to close.
@@ -98,6 +106,10 @@ Constant constraints carried from the auth arc:
 Adopt **Option A**. The shape:
 
 ### 1. Roles stay fixed; permissions become the unit of authorization
+
+> **Superseded** by [[0104-custom-roles]] (2026-10-21). Permissions stay the unit of authorization; the
+> fixed set of roles does not. The build is deferred, so this section still describes the code as it runs
+> today.
 
 `enum Role { ADMIN MEMBER VIEWER }` is **unchanged** (schema, `RoleSchema` in `@lazyit/shared`, the IdP
 mirror of exactly three project roles — all untouched). What changes is that a privilege decision will
@@ -306,7 +318,8 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   `isAdmin` because the API's `assertCanListDeleted` keeps the `deleted=only` slice role-based, not a
   permission.
 - **Fast-follow — service accounts** reuse this same catalog.
-- **Future ADR — dynamic custom roles** (Option B), if ever needed.
+- **Future ADR — dynamic custom roles** (Option B): written as [[0104-custom-roles]] (accepted 2026-10-21,
+  build deferred).
 
 ### Single-instance assumption + resolver cache TTL (issue #592, 2026-06-20)
 
@@ -437,9 +450,9 @@ domain permission already implies the need to read one non-sensitive projection 
     land and be reviewed before any enforcement behavior changes.
 
 - **Follow-ups (separate PRs / ADRs):** P2–P5 above; the service-account fast-follow; the
-  dynamic-custom-roles future ADR (Option B).
+  dynamic-custom-roles future ADR (Option B), now [[0104-custom-roles]].
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] ·
 [[INVARIANTS]] · [[user]] · [[shared-package]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[authorization]]
+[[authorization]] · [[0104-custom-roles]]

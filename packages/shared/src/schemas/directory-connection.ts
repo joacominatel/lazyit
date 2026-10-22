@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * On-prem AD/LDAP directory-source configuration — the single source of truth for `api` (config store +
- * validation + the reconcile job) and `web` (the Settings → Instance → Directory form) of a READ-ONLY
+ * validation + the reconcile job) and `web` (the Settings → Directory form) of a READ-ONLY
  * LDAP directory that UPSERTS login-less `directoryOnly` persons into lazyit (issue #839, ADR-0091).
  *
  * DIRECTION IS ONE-WAY (read only): lazyit binds read-only, subtree-searches, and creates/refreshes

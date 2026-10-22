@@ -20,7 +20,7 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
 
 - **[[git-workflow]]** — how every change reaches the codebase: `master`/`dev`/issue-branch
   strategy, branch naming, the hybrid issue model, the step-by-step agent loop (issue → branch
-  → PR to `dev` → user merges), labels, the `Closes #n` auto-close caveat, and pending setup.
+  → PR to `dev` → user merges), labels, how `Closes #n` closes issues when `dev` is promoted (#1666), and pending setup.
 - **[[prisma-migrations]]** — evolve the schema: the normal `migrate dev` flow, the non-TTY
   workaround (hand-written SQL + `migrate deploy`), partial indexes, drift checks, and the
   one-commit-per-migration convention.

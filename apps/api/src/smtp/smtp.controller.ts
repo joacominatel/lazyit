@@ -30,7 +30,7 @@ class SendTestEmailDto extends createZodDto(SendTestEmailSchema) {}
 class SendTestEmailResultDto extends createZodDto(SendTestEmailResultSchema) {}
 
 /**
- * SmtpController — the Settings → Instance → SMTP surface (issue #615, ADR-0079). Lives under
+ * SmtpController — the Settings → Email surface (issue #615, ADR-0079). Lives under
  * `/config/smtp` alongside the rest of the config surface (mirrors `/config/asset-tag-scheme`).
  *
  * All three handlers are gated by `settings:manage` (the instance-config admin permission) and forbidden
