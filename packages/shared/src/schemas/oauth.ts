@@ -101,6 +101,12 @@ export const OAUTH_AUDIT_ACTIONS = [
    * grant it produced is revoked with reason `code_replay` (#1683).
    */
   "CODE_REUSE_DETECTED",
+  /**
+   * The user chose "Sign out everywhere and disconnect AI apps" (#1699): both `sessionEpoch` and
+   * `mcpCredentialEpoch` were bumped, so every OAuth grant and personal token of theirs stopped at once.
+   * `userId` = `actorId` = that user; `detail.authMode` is the instance mode.
+   */
+  "SIGNED_OUT_EVERYWHERE",
 ] as const;
 export const OAuthAuditActionSchema = z.enum(OAUTH_AUDIT_ACTIONS);
 export type OAuthAuditAction = z.infer<typeof OAuthAuditActionSchema>;
