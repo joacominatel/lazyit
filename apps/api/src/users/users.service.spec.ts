@@ -2502,6 +2502,71 @@ describe('UsersService', () => {
       });
     });
 
+    // Issue #1659: an explicit id lookup resolves offboarded people too, so history shows their name.
+    it('an id lookup in resolver mode includes soft-deleted users (no deletedAt clause + escape hatch)', async () => {
+      const ids = ['11111111-1111-4111-8111-111111111111'];
+      user.findMany.mockResolvedValue([
+        { id: ids[0], deletedAt: new Date('2026-10-01T00:00:00Z') },
+      ]);
+      user.count.mockResolvedValue(1);
+
+      const page = await service.findPage(
+        { ids, includeOffboarded: true },
+        { limit: 1, offset: 0, deleted: 'active' },
+      );
+
+      expect(user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ids } },
+          includeSoftDeleted: true,
+        }),
+      );
+      expect(user.count).toHaveBeenCalledWith({
+        where: { id: { in: ids } },
+        includeSoftDeleted: true,
+      });
+      // The offboarded row keeps its deletedAt: that is the marker the web reads.
+      expect(page.items[0]).toEqual(
+        expect.objectContaining({
+          id: ids[0],
+          deletedAt: new Date('2026-10-01T00:00:00Z'),
+        }),
+      );
+    });
+
+    it('resolver mode never widens the open list (no ids → live-only)', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { includeOffboarded: true },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[Record<string, unknown>]>
+      )[0][0];
+      expect(call.where).toEqual({ deletedAt: null });
+      expect(call).not.toHaveProperty('includeSoftDeleted');
+    });
+
+    it('an id lookup without resolver mode stays live-only', async () => {
+      const ids = ['11111111-1111-4111-8111-111111111111'];
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { ids },
+        { limit: 1, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[Record<string, unknown>]>
+      )[0][0];
+      expect(call.where).toEqual({ id: { in: ids }, deletedAt: null });
+      expect(call).not.toHaveProperty('includeSoftDeleted');
+    });
+
     it('honors an allowlisted sort and rejects an unknown one (400)', async () => {
       user.findMany.mockResolvedValue([]);
       user.count.mockResolvedValue(0);

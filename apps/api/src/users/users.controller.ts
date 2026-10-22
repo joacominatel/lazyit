@@ -185,7 +185,8 @@ export class UsersController {
     required: false,
     description:
       'Batch id→name resolver (issue #961). Comma-separated user UUIDs to scope the list to (`id IN (…)`) — the read-only name-resolution path. De-duplicated, each must be a UUID (garbage → 400) and capped at ' +
-      `${MAX_RESOLVE_USER_IDS} (over-cap → 400). Pair with limit ≥ the id count so one page returns all; unknown ids are ignored (match nothing).`,
+      `${MAX_RESOLVE_USER_IDS} (over-cap → 400). Pair with limit ≥ the id count so one page returns all; unknown ids are ignored (match nothing). ` +
+      'Without an explicit `deleted`, the lookup also returns offboarded (soft-deleted) users, marked by a non-null `deletedAt` (issue #1659); `deleted=active` keeps it live-only.',
   })
   @ApiOkResponse({ type: UserListPageDto })
   findAll(
@@ -236,6 +237,10 @@ export class UsersController {
         role: roleFilter,
         ids: idsFilter,
         isActive: isActiveFilter,
+        // Issue #1659: an id lookup with no explicit `deleted` slice resolves offboarded people as well
+        // (same public row, marked by `deletedAt`), so history renders their name. `deleted=active` keeps
+        // it live-only and `deleted=only` stays the ADMIN-gated archived slice.
+        includeOffboarded: idsFilter !== undefined && deleted === undefined,
       },
       pageQuery,
     );

@@ -65,7 +65,7 @@ function build() {
   const applicationWorkflow = { findFirst: jest.fn().mockResolvedValue(null) };
   const user = {
     findFirst: jest.fn((a: { where: { id: string } }) =>
-      Promise.resolve({ id: a.where.id }),
+      Promise.resolve({ id: a.where.id, isActive: true, directoryOnly: false }),
     ),
   };
   const application = { findFirst: jest.fn().mockResolvedValue({ id: APP }) };

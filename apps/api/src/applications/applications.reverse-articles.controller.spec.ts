@@ -15,6 +15,7 @@ import type { AccessGrantsService } from '../access-grants/access-grants.service
 import type { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import type { ArticlesService } from '../articles/articles.service';
 import type { ExportService } from '../common/export';
+import type { PermissionResolverService } from '../auth/permission-resolver.service';
 
 /**
  * Reverse KB lookup on the application detail surface (`GET /applications/:id/articles`, #220): the
@@ -38,6 +39,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
     { findArticlesForApplication } as unknown as ArticlesService,
     {} as unknown as AccessGrantsExportService,
     {} as unknown as ExportService,
+    {} as unknown as PermissionResolverService,
   );
 
   beforeEach(() => {

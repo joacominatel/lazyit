@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  ApplicationGrantStatus,
+  ApplicationGrantSummary,
   BatchResult,
   CreateAccessGrant,
   PageQuery,
@@ -12,7 +14,7 @@ import type {
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import { GRANT_EXPIRING_WITHIN_DAYS, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
@@ -21,6 +23,7 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
 import type { TriggerPlan } from '../workflow-engine/run/workflow-trigger.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { multiTokenWhere } from '../common/multi-token-where';
 import {
   keysetOrderBy,
   keysetWhere,
@@ -48,6 +51,67 @@ export interface FindAccessGrantsFilters {
   applicationId?: string;
   activeOnly?: boolean;
   includeExpired?: boolean;
+  /**
+   * The status view of an application's grant list (#1660). When set it REPLACES `activeOnly` /
+   * `includeExpired` (the controller refuses a request that sends both families).
+   */
+  status?: ApplicationGrantStatus;
+  /** Exact `accessLevel` match (#1660); `null` = grants with no level; absent = any level. */
+  accessLevel?: string | null;
+  /** Person search (#1660): each whitespace token must match the grantee's first/last name or email. */
+  q?: string;
+}
+
+const MS_PER_DAY = 86_400_000;
+
+/** The instant up to which a grant's expiry counts as "expiring" (#1660). */
+function expiringCutoff(now: Date): Date {
+  return new Date(now.getTime() + GRANT_EXPIRING_WITHIN_DAYS * MS_PER_DAY);
+}
+
+/**
+ * The `where` of one status view (#1660). `expiring` includes grants already past their expiry: they
+ * stay active until the expiry sweep revokes them, so they are the most urgent of the view.
+ */
+function statusWhere(
+  status: ApplicationGrantStatus,
+  now: Date,
+): Prisma.AccessGrantWhereInput {
+  switch (status) {
+    case 'active':
+      return { revokedAt: null };
+    case 'expiring':
+      return { revokedAt: null, expiresAt: { lte: expiringCutoff(now) } };
+    case 'revoked':
+      return { revokedAt: { not: null } };
+    case 'all':
+      return {};
+  }
+}
+
+/**
+ * The order of one status view (#1660), with the unique `id` last so a page boundary is stable
+ * (ADR-0030 §9). `active` / `all` read by person (active before revoked, then newest grant first);
+ * `expiring` soonest expiry first; `revoked` newest revocation first.
+ */
+function statusOrderBy(
+  status: ApplicationGrantStatus,
+): Prisma.AccessGrantOrderByWithRelationInput[] {
+  switch (status) {
+    case 'expiring':
+      return [{ expiresAt: 'asc' }, { id: 'asc' }];
+    case 'revoked':
+      return [{ revokedAt: 'desc' }, { id: 'asc' }];
+    case 'active':
+    case 'all':
+      return [
+        { user: { firstName: 'asc' } },
+        { user: { lastName: 'asc' } },
+        { revokedAt: { sort: 'asc', nulls: 'first' } },
+        { grantedAt: 'desc' },
+        { id: 'asc' },
+      ];
+  }
 }
 
 /**
@@ -103,6 +167,92 @@ export class AccessGrantsService {
     return pageOf(items, total, page);
   }
 
+  /**
+   * One page of an application's grants (`GET /applications/:id/access-grants/page`, #1660): the
+   * status view, access level and person search all run server-side, so the Access tab no longer
+   * reads every grant of the application. Page and count share one `where` in one transaction.
+   */
+  async findApplicationPage(
+    filters: FindAccessGrantsFilters & {
+      applicationId: string;
+      status: ApplicationGrantStatus;
+    },
+    page: PageQuery,
+  ) {
+    const where = this.buildWhere(filters);
+    const { take, skip } = offsetOf(page);
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.accessGrant.findMany({
+        where,
+        orderBy: statusOrderBy(filters.status),
+        take,
+        skip,
+      }),
+      this.prisma.accessGrant.count({ where }),
+    ]);
+    return pageOf(items, total, page);
+  }
+
+  /**
+   * The headline numbers of an application's grants (`GET /applications/:id/access-grants/summary`,
+   * #1660), over ALL its grants: one count per status view plus `expired`, the access levels in use,
+   * and how many offboarded people still hold an active grant. `offboardedHolders` is `null` unless
+   * the caller may read the user directory, since it tells who has left.
+   */
+  async applicationSummary(
+    applicationId: string,
+    { canReadUsers }: { canReadUsers: boolean },
+  ): Promise<ApplicationGrantSummary> {
+    const now = new Date();
+    const base = { applicationId };
+    const [active, expiring, expired, revoked, levelGroups, offboarded] =
+      await Promise.all([
+        this.prisma.accessGrant.count({ where: { ...base, revokedAt: null } }),
+        this.prisma.accessGrant.count({
+          where: { ...base, ...statusWhere('expiring', now) },
+        }),
+        this.prisma.accessGrant.count({
+          where: { ...base, revokedAt: null, expiresAt: { lte: now } },
+        }),
+        this.prisma.accessGrant.count({
+          where: { ...base, revokedAt: { not: null } },
+        }),
+        this.prisma.accessGrant.groupBy({
+          by: ['accessLevel'],
+          where: base,
+          _count: { _all: true },
+        }),
+        canReadUsers
+          ? this.prisma.accessGrant.groupBy({
+              by: ['userId'],
+              // The soft-delete extension never scopes a relation filter (ADR-0032), so an offboarded
+              // grantee is matched here by its own `deletedAt`.
+              where: {
+                ...base,
+                revokedAt: null,
+                user: { is: { deletedAt: { not: null } } },
+              },
+            })
+          : Promise.resolve(null),
+      ]);
+    const levels = levelGroups
+      .map((group) => ({
+        accessLevel: group.accessLevel,
+        count: group._count._all,
+      }))
+      .sort((a, b) => {
+        if (a.accessLevel === null) return b.accessLevel === null ? 0 : 1;
+        if (b.accessLevel === null) return -1;
+        return a.accessLevel.localeCompare(b.accessLevel);
+      });
+    return {
+      counts: { active, expiring, expired, revoked, all: active + revoked },
+      levels,
+      offboardedHolders: offboarded === null ? null : offboarded.length,
+      expiringWithinDays: GRANT_EXPIRING_WITHIN_DAYS,
+    };
+  }
+
   /** The lists' own `where` for the grant exports, walked by keyset with names joined (ADR-0103). */
   exportSource(filters: FindAccessGrantsFilters) {
     const where = this.buildWhere(filters);
@@ -127,14 +277,26 @@ export class AccessGrantsService {
     applicationId,
     activeOnly = true,
     includeExpired = true,
+    status,
+    accessLevel,
+    q,
   }: FindAccessGrantsFilters): Prisma.AccessGrantWhereInput {
+    const now = new Date();
+    const person = multiTokenWhere(q, ['firstName', 'lastName', 'email']);
     return {
       ...(userId ? { userId } : {}),
       ...(applicationId ? { applicationId } : {}),
-      ...(activeOnly ? { revokedAt: null } : {}),
-      ...(includeExpired
-        ? {}
-        : { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }),
+      ...(status
+        ? statusWhere(status, now)
+        : {
+            ...(activeOnly ? { revokedAt: null } : {}),
+            ...(includeExpired
+              ? {}
+              : { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }),
+          }),
+      ...(accessLevel !== undefined ? { accessLevel } : {}),
+      // An offboarded grantee stays searchable: a relation filter is never soft-delete scoped (ADR-0032).
+      ...(Object.keys(person).length > 0 ? { user: { is: person } } : {}),
     };
   }
 
@@ -150,8 +312,9 @@ export class AccessGrantsService {
   /**
    * Open a grant (give a user access to an application). `userId` and `applicationId` must reference
    * **live** (non-soft-deleted) rows → 400 otherwise (don't grant access to a decommissioned app or
-   * a departed user). Multi-grant is allowed: no uniqueness check. `grantedById` is set from the
-   * authenticated User when present (null = system/unknown).
+   * a departed user), and the user must be active (issue #1661). Multi-grant is allowed: no
+   * uniqueness check. `grantedById` is set from the authenticated User when present (null =
+   * system/unknown).
    */
   async create(data: CreateAccessGrant, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
@@ -631,12 +794,22 @@ export class AccessGrantsService {
   private async assertUserUsable(userId: string): Promise<void> {
     const user = await this.prisma.user.findFirst({
       where: { id: userId },
-      select: { id: true, directoryOnly: true },
+      select: { id: true, directoryOnly: true, isActive: true },
     });
     if (!user) {
       throw new BadRequestException(
         `userId ${userId} does not reference a live user`,
       );
+    }
+    // A deactivated person cannot sign in, so access granted to them is access nobody should hold.
+    // Covers POST /access-grants and every request approval, whoever filed it (issue #1661).
+    if (!user.isActive) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'ACCESS_GRANT_PERSON_INACTIVE',
+        message:
+          'This person is deactivated. Reactivate them before granting access.',
+      });
     }
     if (user.directoryOnly) {
       throw new BadRequestException(
