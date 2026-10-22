@@ -5,7 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
-import { PrismaExceptionFilter } from './prisma-exception.filter';
+import {
+  PrismaExceptionFilter,
+  isRetryableConflict,
+} from './prisma-exception.filter';
 
 // Avoid loading the real generated client; the filter only reads `exception.code` at runtime.
 jest.mock('../../generated/prisma/client', () => ({
@@ -34,7 +37,7 @@ describe('PrismaExceptionFilter', () => {
   const mapAndGet = (code: string): unknown => {
     superCatch.mockClear();
     filter.catch({ code } as never, host);
-    return superCatch.mock.calls[0][0];
+    return (superCatch.mock.calls as unknown[][])[0][0];
   };
 
   it('maps P2023 (malformed value for a typed column) to 400', () => {
@@ -60,5 +63,44 @@ describe('PrismaExceptionFilter', () => {
     superCatch.mockClear();
     filter.catch(original as never, host);
     expect(superCatch).toHaveBeenCalledWith(original, host);
+  });
+
+  // #1696: a transaction aborted only because it lost a lock race rolled back and is safe to send again.
+  describe('retryable lock conflicts (Postgres 40P01 / 40001)', () => {
+    const raw = (originalCode: string) => ({
+      code: 'P2010',
+      meta: { driverAdapterError: { cause: { originalCode } } },
+    });
+    const mapped = (exception: unknown): unknown => {
+      superCatch.mockClear();
+      filter.catch(exception as never, host);
+      return (superCatch.mock.calls as unknown[][])[0][0];
+    };
+
+    it('maps P2034 (a model call aborted by a deadlock or write conflict) to a retryable 409', () => {
+      const ex = mapped({ code: 'P2034' });
+      expect(ex).toBeInstanceOf(ConflictException);
+      expect((ex as ConflictException).message).toMatch(/Try again/);
+    });
+
+    it.each(['40P01', '40001'])(
+      'maps a raw query aborted with %s to a retryable 409',
+      (pg) => {
+        expect(mapped(raw(pg))).toBeInstanceOf(ConflictException);
+      },
+    );
+
+    it('leaves any other raw query failure to the base handler (500)', () => {
+      const original = raw('42601');
+      expect(mapped(original)).toBe(original);
+    });
+
+    it('isRetryableConflict tells them apart', () => {
+      expect(isRetryableConflict({ code: 'P2034' } as never)).toBe(true);
+      expect(isRetryableConflict(raw('40P01') as never)).toBe(true);
+      expect(isRetryableConflict(raw('23505') as never)).toBe(false);
+      expect(isRetryableConflict({ code: 'P2010' } as never)).toBe(false);
+      expect(isRetryableConflict({ code: 'P2002' } as never)).toBe(false);
+    });
   });
 });

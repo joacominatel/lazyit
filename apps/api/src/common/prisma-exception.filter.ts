@@ -17,16 +17,58 @@ import { Prisma } from '../../generated/prisma/client';
  *   P2025  record not found         -> 404 Not Found
  *   P2023  inconsistent column data -> 400 Bad Request (e.g. a malformed value for a uuid column)
  *   P2020  value out of range       -> 400 Bad Request (e.g. an int4 overflow that slipped past zod)
+ *   P2034  write conflict/deadlock  -> 409 Conflict, retryable (Postgres 40P01 / 40001 from a model call)
+ *   P2010  raw query failed         -> 409 Conflict, retryable, when the driver code is 40P01 or 40001 (a
+ *                                      lock taken with $queryRaw); any other raw failure stays a 500
  *
  * Anything else is delegated to Nest's default handler (500). Only Prisma known errors are
  * caught, so validation (pipe) and our own HttpExceptions are untouched.
  */
+/** Postgres codes for a transaction aborted only because of a concurrent one: a deadlock, a serialization failure. */
+const RETRYABLE_PG_CODES: ReadonlySet<string> = new Set(['40P01', '40001']);
+
+/** The Postgres SQLSTATE the driver adapter reported under a Prisma error, when it carries one. */
+function driverCode(
+  exception: Prisma.PrismaClientKnownRequestError,
+): string | undefined {
+  const adapter = exception.meta?.driverAdapterError as
+    { cause?: { originalCode?: unknown } } | undefined;
+  const code = adapter?.cause?.originalCode;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Whether the request lost a lock race (#1696): nothing was written (the transaction rolled back), and the same
+ * request is expected to succeed when sent again. Lock orders are kept consistent (ADR-0023), so this is a
+ * safety net, not a path any known pair of writes takes.
+ */
+export function isRetryableConflict(
+  exception: Prisma.PrismaClientKnownRequestError,
+): boolean {
+  if (exception.code === 'P2034') return true;
+  const code = driverCode(exception);
+  return (
+    exception.code === 'P2010' &&
+    code !== undefined &&
+    RETRYABLE_PG_CODES.has(code)
+  );
+}
+
 @Catch(Prisma.PrismaClientKnownRequestError)
 export class PrismaExceptionFilter extends BaseExceptionFilter {
   catch(
     exception: Prisma.PrismaClientKnownRequestError,
     host: ArgumentsHost,
   ): void {
+    if (isRetryableConflict(exception)) {
+      // Generic on purpose: it must not echo the statement, the rows or the lock that crossed.
+      return super.catch(
+        new ConflictException(
+          'This change ran into another one at the same moment and was not saved. Try again.',
+        ),
+        host,
+      );
+    }
     switch (exception.code) {
       case 'P2002': {
         const target = exception.meta?.target;
@@ -52,7 +94,9 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
         // transversal safety net for unvalidated uuid inputs (SEC-004); request edges should still
         // validate uuids up front (ParseUUIDPipe on path params, parseUuidQuery on query filters).
         return super.catch(
-          new BadRequestException('Invalid input format for one or more fields'),
+          new BadRequestException(
+            'Invalid input format for one or more fields',
+          ),
           host,
         );
       case 'P2020':

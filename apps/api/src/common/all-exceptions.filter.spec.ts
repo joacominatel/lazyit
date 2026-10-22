@@ -12,16 +12,21 @@ jest.mock('../../generated/prisma/client', () => ({
   Prisma: {
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code: string;
-      constructor(message: string, opts: { code: string }) {
+      meta?: Record<string, unknown>;
+      constructor(
+        message: string,
+        opts: { code: string; meta?: Record<string, unknown> },
+      ) {
         super(message);
         this.code = opts.code;
+        this.meta = opts.meta;
       }
     },
   },
 }));
 
 describe('AllExceptionsFilter', () => {
-  let logger: { error: jest.Mock; setContext: jest.Mock };
+  let logger: { error: jest.Mock; warn: jest.Mock; setContext: jest.Mock };
   let prismaFilter: { catch: jest.Mock };
   let filter: AllExceptionsFilter;
   let superCatch: jest.SpyInstance;
@@ -34,7 +39,7 @@ describe('AllExceptionsFilter', () => {
     });
 
   beforeEach(() => {
-    logger = { error: jest.fn(), setContext: jest.fn() };
+    logger = { error: jest.fn(), warn: jest.fn(), setContext: jest.fn() };
     prismaFilter = { catch: jest.fn() };
     filter = new AllExceptionsFilter(
       logger as unknown as PinoLogger,
@@ -76,6 +81,23 @@ describe('AllExceptionsFilter', () => {
     filter.catch(err, host);
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(prismaFilter.catch).toHaveBeenCalledWith(err, host);
+  });
+
+  it('warn-logs a lost lock race (a retryable 409, #1696) instead of error-logging it as a 500', () => {
+    const deadlock = new Prisma.PrismaClientKnownRequestError('x', {
+      code: 'P2010',
+      clientVersion: 'test',
+      meta: { driverAdapterError: { cause: { originalCode: '40P01' } } },
+    });
+    filter.catch(deadlock, host);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(prismaFilter.catch).toHaveBeenCalledWith(deadlock, host);
+
+    logger.warn.mockClear();
+    filter.catch(prismaError('P2034'), host);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
   it('sets the logger context on construction', () => {

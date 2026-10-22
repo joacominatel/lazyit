@@ -2,7 +2,10 @@ import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '../../generated/prisma/client';
-import { PrismaExceptionFilter } from './prisma-exception.filter';
+import {
+  PrismaExceptionFilter,
+  isRetryableConflict,
+} from './prisma-exception.filter';
 
 /**
  * The single global exception filter (ADR-0031).
@@ -32,6 +35,12 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     if (this.httpStatusOf(exception) >= 500) {
       this.logger.error({ err: exception }, 'Unhandled server error');
+    } else if (
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      isRetryableConflict(exception)
+    ) {
+      // A 409 the client retries, but a deadlock means two writes took locks in different orders: keep it visible.
+      this.logger.warn({ err: exception }, 'Transaction lost a lock race');
     }
 
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -49,6 +58,7 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
   private httpStatusOf(exception: unknown): number {
     if (exception instanceof HttpException) return exception.getStatus();
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      if (isRetryableConflict(exception)) return 409;
       switch (exception.code) {
         case 'P2002':
           return 409;
