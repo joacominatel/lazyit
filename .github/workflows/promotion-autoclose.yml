@@ -73,13 +73,15 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         with:
           script: |
-            const { run } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/promotion-autoclose.mjs`);
+            // Everything, the module import included, sits inside the try: a failure anywhere is a
+            // warning annotation, never a red check on the promotion.
             const promotion = Number(process.env.PROMOTION_PR);
             const dryRun = process.env.DRY_RUN !== 'false';
-            const git = async (args) => (await exec.getExecOutput('git', args, { silent: true })).stdout;
-            const log = { info: (m) => core.info(m), warning: (m) => core.warning(m) };
-            core.info(`Promotion #${promotion} — ${dryRun ? 'DRY RUN, nothing will change' : 'closing'}.`);
             try {
+              const { run } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/promotion-autoclose.mjs`);
+              const git = async (args) => (await exec.getExecOutput('git', args, { silent: true })).stdout;
+              const log = { info: (m) => core.info(m), warning: (m) => core.warning(m) };
+              core.info(`Promotion #${promotion} — ${dryRun ? 'DRY RUN, nothing will change' : 'closing'}.`);
               const out = await run({ github, repo: context.repo, promotion, dryRun, git, log });
               const rows = out.decisions.map((d) => [`#${d.issue ?? d.pr}`, d.action, d.reason]);
               await core.summary
@@ -88,6 +90,5 @@ jobs:
                 .addTable([[{ data: 'Ref', header: true }, { data: 'Decision', header: true }, { data: 'Why', header: true }], ...rows])
                 .write();
             } catch (err) {
-              // Never a red check on the promotion: surface it as an annotation and stop.
               core.warning(`Promotion auto-close did not run: ${err.message}`);
             }

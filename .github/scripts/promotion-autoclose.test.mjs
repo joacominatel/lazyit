@@ -294,3 +294,56 @@ describe('run', () => {
     expect(out.wouldClose).toEqual([1, 4, 5]);
   });
 });
+
+// ── the workflow's github-script body ───────────────────────────────────────────────────────────
+// Runs the exact `script:` from promotion-autoclose.yml with github-script's injected names stubbed,
+// to pin the "never a red check" contract: a failure anywhere, the module import included, becomes a
+// warning and the script resolves.
+
+describe('promotion-autoclose.yml script', () => {
+  const workflow = Bun.YAML.parse(
+    require('node:fs').readFileSync(new URL('../workflows/promotion-autoclose.yml', import.meta.url), 'utf8'),
+  );
+  const step = workflow.jobs.close.steps.find((s) => String(s.uses).startsWith('actions/github-script@'));
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+  const script = new AsyncFunction('github', 'context', 'core', 'exec', step.with.script);
+
+  const env = (workspace) => {
+    const saved = { ...process.env };
+    Object.assign(process.env, { GITHUB_WORKSPACE: workspace, PROMOTION_PR: '99', DRY_RUN: 'true' });
+    return () => {
+      for (const k of ['GITHUB_WORKSPACE', 'PROMOTION_PR', 'DRY_RUN']) {
+        if (k in saved) process.env[k] = saved[k];
+        else delete process.env[k];
+      }
+    };
+  };
+  const coreStub = () => {
+    const warnings = [];
+    return { warnings, core: { info: () => {}, warning: (m) => warnings.push(m), summary: {} } };
+  };
+
+  test('a module that fails to import is a warning, not a thrown error', async () => {
+    const restore = env('/nonexistent-workspace-for-test');
+    const { warnings, core } = coreStub();
+    try {
+      await expect(script({}, { repo: { owner: 'o', repo: 'r' } }, core, {})).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toStartWith('Promotion auto-close did not run:');
+  });
+
+  test('an API failure inside run() is a warning, not a thrown error', async () => {
+    const restore = env(new URL('../..', import.meta.url).pathname.replace(/\/$/, ''));
+    const { warnings, core } = coreStub();
+    const github = { rest: { pulls: { get: async () => { throw new Error('Bad credentials'); } } } };
+    try {
+      await expect(script(github, { repo: { owner: 'o', repo: 'r' } }, core, {})).resolves.toBeUndefined();
+    } finally {
+      restore();
+    }
+    expect(warnings).toEqual(['Promotion auto-close did not run: Bad credentials']);
+  });
+});
