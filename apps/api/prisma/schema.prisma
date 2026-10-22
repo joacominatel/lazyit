@@ -215,6 +215,10 @@ model User {
   // author leaves it in place and visibly unattributed.
   softwareWatches SoftwareWatch[] @relation("SoftwareWatchAuthor")
 
+  // Infra nodes this user retired (#1701, epic #1146 Q11). SetNull: losing the operator who retired a
+  // node must not un-retire it; the node stays retired and visibly unattributed.
+  infraNodesRetired InfraNode[] @relation("InfraNodeRetiredBy")
+
   // Permission-matrix edits this user performed (PermissionAuditLog.actorId). SetNull keeps the
   // append-only audit row when the actor is deleted (ADR-0046 P5). null = system/unknown actor.
   permissionAuditEntries PermissionAuditLog[] @relation("PermissionAuditActor")
@@ -3001,6 +3005,23 @@ model InfraNode {
   // policy channel is not running a served threshold, so it keeps the env var and this stays null —
   // and rewritten on every such report, so it self-heals after any policy change.
   policyStaleAfterSeconds Int?
+
+  // ── Retire lifecycle (#1701, epic #1146 Q11; ADR-0074 §4 amendment) ───────────────────────────────
+  // "Gone", as distinct from OFFLINE ("silent"). A retired node keeps its history, edges and Asset
+  // link; the staleness sweeper skips it, so it is never flipped OFFLINE or announced again. Set by
+  // `POST /infra/nodes/:id/retire` (human, `retiredById` = that user) or by the host's own agent
+  // uninstalling (`decommissioning: true` on its last report — `retiredById` stays null). A retired
+  // node that REPORTS AGAIN is un-retired automatically and the ingest path records that in the fact
+  // history. Both nullable, no backfill: every existing row reads as not retired.
+  retiredAt   DateTime?
+  retiredById String?   @db.Uuid
+  retiredBy   User?     @relation("InfraNodeRetiredBy", fields: [retiredById], references: [id], onDelete: SetNull)
+
+  // ── Offline-alert snooze (#1701, epic #1146 Q15; ADR-0074 §4 amendment) ───────────────────────────
+  // While this instant is in the FUTURE the sweeper still flips the node OFFLINE but sends no
+  // `infra.agent_offline` nudge for it. A past value is inert, so expiry needs no job. Null = never
+  // snoozed, which is every existing row.
+  alertsSnoozedUntil DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
