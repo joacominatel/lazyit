@@ -9,6 +9,7 @@ import type {
   ApplicationGrantSummary,
   BatchResult,
   CreateAccessGrant,
+  GrantProvisioning,
   PageQuery,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
@@ -29,6 +30,7 @@ import {
   keysetWhere,
   type KeysetCursor,
 } from '../common/export';
+import { provisioningByGrant } from './grant-provisioning';
 import {
   ACCESS_GRANT_EXPORT_SELECT,
   type AccessGrantExportRow,
@@ -165,6 +167,54 @@ export class AccessGrantsService {
     // The Prisma rows carry `Date`s; the API serializes them to the ISO-string wire shape at the
     // HTTP boundary (same as findAll/findOne) — the AccessGrantListPage DTO documents that shape.
     return pageOf(items, total, page);
+  }
+
+  /**
+   * The caller's OWN grants (`GET /access-grants/mine`, #947) — {@link findPage} scoped to `userId`,
+   * with each grant carrying the coarse `provisioning` status (#1700). Two reads in total, whatever the
+   * page size: the page itself and ONE batched read of the linked runs ({@link provisioningFor}).
+   */
+  async findMine(
+    userId: string,
+    filters: Pick<FindAccessGrantsFilters, 'activeOnly' | 'includeExpired'>,
+    page: PageQuery,
+  ) {
+    const result = await this.findPage({ ...filters, userId }, page);
+    const provisioning = await this.provisioningFor(
+      result.items.map((grant) => grant.id),
+    );
+    return {
+      ...result,
+      items: result.items.map((grant) => ({
+        ...grant,
+        provisioning: provisioning.get(grant.id) ?? 'NONE',
+      })),
+    };
+  }
+
+  /**
+   * The coarse provisioning status of each grant (#1700, CEO decision Q2 on #1344), from the LATEST
+   * `ACCESS_GRANTED` run linked by `accessGrantId` — ONE query for the whole batch (no N+1), served by
+   * the `workflow_runs(accessGrantId)` index. A deprovision (`ACCESS_REVOKED`) run is not provisioning
+   * and is ignored. "Latest" is the highest `replaySeq` (a replay-latest clones to seq + 1, ADR-0057),
+   * then the newest. Selects only the grant id and the status: no workflow name, step or error leaves
+   * this method. Only the requester's own `/mine` reads call it — run history stays `workflow:read`.
+   */
+  async provisioningFor(
+    grantIds: readonly string[],
+  ): Promise<Map<string, GrantProvisioning>> {
+    if (grantIds.length === 0) {
+      return new Map();
+    }
+    const runs = await this.prisma.workflowRun.findMany({
+      where: {
+        accessGrantId: { in: [...grantIds] },
+        trigger: 'ACCESS_GRANTED',
+      },
+      select: { accessGrantId: true, status: true },
+      orderBy: [{ replaySeq: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+    });
+    return provisioningByGrant(grantIds, runs);
   }
 
   /**
