@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -196,6 +196,13 @@ users, locations, kb). This supersedes the "Frontend pagination UI" bullet above
   > `GET /users?ids=a,b,c` filter (bounded by `MAX_RESOLVE_USER_IDS` = the page cap) — so names
   > resolve past the 200-row window the truncated directory silently dropped. The interactive user
   > pickers were already server-searched (#937). `useAssetModels` still uses the flat-directory pattern.
+  > **Amendment (#1659, 2026-10-21).** An id lookup sent **without** an explicit `deleted` slice also
+  > returns **offboarded** (soft-deleted) people, through the ADR-0032 escape hatch, so a history row
+  > or a grantee chip shows the name of someone who has left instead of "Unknown person". The row is
+  > the same allowlisted public shape a live row has and carries its non-null `deletedAt` as the
+  > offboarded marker; nothing new is exposed beyond what the same caller saw while the person was
+  > live. `deleted=active` keeps the lookup live-only, `deleted=only` stays the ADMIN-only archived
+  > slice, and the open list (no `ids`) is live-only as before.
 - **Server sort is wired to the UI.** Sortable column headers (`SortableHeader` →
   `toggleSort(field)`) only expose the per-resource allowlist (§1); the order is recomputed by the
   API over the **full** result set, not the page. Non-allowlisted columns (model/owners/category,
@@ -586,3 +593,24 @@ rule.
 - [[0070-infra-topology-graph]] (the node list + the canvas that got its own read, §§9/12) ·
   [[0095-hypervisor-guest-inventory]] (`AGENT_GUESTS_MAX` = 500, the ceiling that sizes both caps) ·
   [[0074-server-reporting-agent]] (the PENDING review tray that renders `total`) · [[infra-node]].
+
+## Amendment (2026-10-21) — the per-application grant page (#1660)
+
+`GET /applications/:id/access-grants` stays the unpaged `AccessGrant[]` compatibility read, like §9's
+historical node route, so a web client that predates the change keeps working. Its first-party
+successor is `GET /applications/:id/access-grants/page`, returning the house `Page<AccessGrant>`
+envelope (`AccessGrantListPageSchema`) with `status`, `accessLevel` / `noAccessLevel` and a person `q`
+filter run server-side — the browser no longer filters a whole application's grants. The headline
+numbers the tab needs without reading every row come from
+`GET /applications/:id/access-grants/summary`.
+
+The route takes **no `sort`**: its order is derived from `status` (by person for `active` / `all`,
+soonest expiry for `expiring`, newest revocation for `revoked`), always ending on the unique `id` (§9).
+A person is a joined relation, which the scalar sort allowlist cannot express, and the three orders
+are the ones the tab already used. A `sort` value is a `400`, not ignored (§11's posture).
+
+`q` searches the grantee's name and email, so it also needs `user:read`; without it the request is a
+`403` rather than an oracle on directory data. No deprecation header is set on the old route yet —
+that is for when the web has moved. Accent folding is not applied (`ILIKE` only), unlike the old
+in-browser search: "jose" no longer finds "José".
+

@@ -23,7 +23,11 @@ import {
   type Harness,
 } from '../../test/oauth/oauth-harness';
 import { OAuthSweeper } from './oauth.sweeper';
-import { REFRESH_REUSE_GRACE_MS } from './oauth.constants';
+import {
+  AUTHORIZATION_CODE_RETENTION_MS,
+  AUTHORIZATION_CODE_TTL_MS,
+  REFRESH_REUSE_GRACE_MS,
+} from './oauth.constants';
 
 /**
  * The authorization server end to end over an in-memory database: registration → consent → code →
@@ -1122,9 +1126,20 @@ describe('the sweeper', () => {
     const sweeper = new OAuthSweeper(h.prisma as never);
 
     let result = await sweeper.sweep(new Date());
-    expect(result.codes).toBe(1); // the used code
+    // The used code is kept past its expiry, so a replay is still recognized (#1683).
+    expect(result.codes).toBe(0);
     expect(result.tokens).toBe(0);
     expect(result.clients).toBe(0);
+
+    result = await sweeper.sweep(
+      new Date(
+        Date.now() +
+          AUTHORIZATION_CODE_TTL_MS +
+          AUTHORIZATION_CODE_RETENTION_MS +
+          1000,
+      ),
+    );
+    expect(result.codes).toBe(1); // the used code, once its retention lapsed
 
     result = await sweeper.sweep(new Date(Date.now() + 2 * 24 * 3600_000));
     expect(result.tokens).toBe(1); // the access token; the refresh token lives 30 days

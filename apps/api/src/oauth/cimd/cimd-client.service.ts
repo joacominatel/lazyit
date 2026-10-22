@@ -25,6 +25,17 @@ import { KNOWN_CLIENT_DOCUMENTS } from './known-clients';
 /** Where the cached registration came from. */
 export type CimdSource = 'network' | 'bundled';
 
+/**
+ * The outcome of a resolution. `unreachable` (#1683): the document could not be fetched for a NETWORK
+ * reason (see {@link CimdRefusal.networkFailure}) or the per-user fetch limit, and no bundled copy exists —
+ * the consent page says so instead of calling the client unknown. A definitive answer from the host (404,
+ * an invalid document) or an unacceptable `client_id` URL is `unreachable: false`.
+ */
+export type CimdResolution =
+  { ok: true; client: OAuthClient } | { ok: false; unreachable: boolean };
+
+const UNKNOWN: CimdResolution = { ok: false, unreachable: false };
+
 /** Who triggered the resolution — recorded in the audit trail. */
 export interface CimdResolveContext {
   userId: string;
@@ -94,8 +105,17 @@ export class CimdClientService {
     clientId: string,
     ctx: CimdResolveContext,
   ): Promise<OAuthClient | null> {
+    const outcome = await this.resolveOutcome(clientId, ctx);
+    return outcome.ok ? outcome.client : null;
+  }
+
+  /** {@link resolve}, telling an unreachable document apart from an unknown or refused client. */
+  async resolveOutcome(
+    clientId: string,
+    ctx: CimdResolveContext,
+  ): Promise<CimdResolution> {
     const url = parseClientIdUrl(clientId);
-    if (!url) return null;
+    if (!url) return UNKNOWN;
     const now = Date.now();
 
     const existing = await this.prisma.oAuthClient.findUnique({
@@ -103,7 +123,7 @@ export class CimdClientService {
     });
     // A row under an https id is only ever a CIMD or bundled one; anything else is not ours to serve.
     if (existing && existing.kind !== 'cimd' && existing.kind !== 'known') {
-      return null;
+      return UNKNOWN;
     }
     if (existing) {
       const expiresAt = cacheExpiresAt(existing);
@@ -112,7 +132,7 @@ export class CimdClientService {
         expiresAt > now &&
         expiresAt <= now + CIMD_CACHE_MAX_TTL_MS
       ) {
-        return existing;
+        return { ok: true, client: existing };
       }
     }
 
@@ -157,7 +177,7 @@ export class CimdClientService {
           : false,
       },
     });
-    return row;
+    return { ok: true, client: row };
   }
 
   /**
@@ -173,7 +193,7 @@ export class CimdClientService {
     refusal: CimdRefusal,
     ctx: CimdResolveContext,
     now: number,
-  ): Promise<OAuthClient | null> {
+  ): Promise<CimdResolution> {
     const bundled = refusal.networkFailure
       ? KNOWN_CLIENT_DOCUMENTS.get(clientId)
       : undefined;
@@ -202,14 +222,14 @@ export class CimdClientService {
             : false,
         },
       });
-      return row;
+      return { ok: true, client: row };
     }
     if (refusal.reason === 'rate_limited') {
       // Not audited: the refusal exists to bound work, and a row per refused attempt would defeat it.
       this.logger.warn(
         `CIMD fetch rate limit reached for user ${ctx.userId} (${url.host}).`,
       );
-      return null;
+      return { ok: false, unreachable: true };
     }
     await this.audit.record({
       action: 'CLIENT_METADATA_REFUSED',
@@ -219,7 +239,7 @@ export class CimdClientService {
       ip: ctx.ip,
       detail: { host: url.host, reason: refusal.reason },
     });
-    return null;
+    return { ok: false, unreachable: refusal.networkFailure };
   }
 
   /** Create or refresh the row for a validated document. */

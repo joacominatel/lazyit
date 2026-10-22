@@ -132,8 +132,11 @@ Indexes: `@@index([categoryId])`.
 - `GET /applications/:id` — one by id (`404` if missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
-- `GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` — the same grants as CSV
-  (see [[access-grant]] § Export).
+- `GET /applications/:id/access-grants/page?status=&accessLevel=&noAccessLevel=&q=` — one page of this
+  app's grants, filtered server-side, and `GET /applications/:id/access-grants/summary` — its headline
+  counts and levels (#1660; see [[access-grant]] § Endpoints).
+- `GET /applications/:id/access-grants/export` — the same grants as CSV, with either the old
+  `activeOnly`/`includeExpired` filters or the paged route's filters (see [[access-grant]] § Export).
 - `POST /applications` — create.
 - `PATCH /applications/:id` — partial update. `null` clears an optional field (`description`, `url`,
   `vendor`, `notes`, `metadata`, the seat fields); `categoryId: null` detaches the category.

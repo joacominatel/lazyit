@@ -180,6 +180,7 @@ never auto-approved. **Fix:** approve it on its card. See [Auto-approve](/help/a
 | --- | --- | --- |
 | **This app isn't allowed** | The app isn't registered, or isn't on the allowed list: an app-scheme or loopback callback not on the list, **Accept any client with an https:// callback** turned off, or a built-in client an administrator removed. | Start the connection again from the app; otherwise an administrator [adds the client](/help/ai-assistant-setup#allowed-clients) by its client-metadata URL or callback address. |
 | **This request can't be trusted** | The app asked to send you to an address it didn't register. | Start again from the app. If it persists, the app's callback isn't the one on the list. |
+| **lazyit couldn't reach this app's description** | The app identifies itself by a web address, and the server couldn't fetch it right now: no internet access, the app's site is down, or too many attempts in a short time. | Wait a few minutes and start again from the app. If it keeps happening, an administrator checks the server's outbound internet access. |
 | **App sign-in isn't available here** | The instance has no HTTPS `WEB_ORIGIN`. | Use a personal token instead. |
 | **Connections for AI apps are off** | MCP is off. | An administrator turns it on. |
 | **Your account can't connect AI apps** | Your role lacks **Connect external AI agents (MCP)**. | Ask an administrator. |
@@ -190,8 +191,9 @@ callback added by an administrator.
 
 **An app that identifies itself by an HTTPS address** needs lazyit to fetch that address. With no internet
 access on the server, only Claude Code still connects (lazyit ships a copy of its description); other such
-apps are refused until the server can reach them. lazyit also limits how many of these fetches one person
-can trigger in a short time.
+apps are refused — with **lazyit couldn't reach this app's description** — until the server can reach
+them. lazyit also limits how many of these fetches one person can trigger in a short time. If the address
+answers that the app doesn't exist, the screen says **This app isn't allowed** instead.
 
 ### "Too many attempts" on the consent screen
 
@@ -202,6 +204,14 @@ chat. **Fix:** wait and try again, or untick **Admin actions** and allow the res
 
 **Cause:** your account signs in without a lazyit password, so admin actions can't be granted. **Fix:**
 allow the rest; make admin-level changes in the app yourself.
+
+### An agent reports "Too many tool calls" or "Too many changes"
+
+**Cause:** lazyit limits how fast AI agents can work for you: per connection (300 tool calls and 60
+changes a minute), and for **all your connections together** (600 tool calls and 120 changes a minute).
+The message says *"through this connection"* or *"across all your AI connections"*. A burst of requests
+can also be answered with HTTP 429. **Fix:** wait a minute — the agent can retry by itself. If several
+agents work for you at once, they share the overall budget; run fewer of them in parallel.
 
 ### A connected app stopped working
 

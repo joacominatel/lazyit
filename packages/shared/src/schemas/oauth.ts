@@ -62,6 +62,8 @@ export type OAuthTokenKind = z.infer<typeof OAuthTokenKindSchema>;
 /**
  * Why a grant was revoked (`OAuthGrant.revokeReason`). `token_exposed`: one of its tokens was presented in
  * a URL query string at `/mcp` — treated as compromised and revoked on sight (#1315 G3 review F1).
+ * `code_replay`: the authorization code that produced it was redeemed again by an otherwise valid token
+ * request (OAuth 2.1 "Reuse of Authorization Codes"; #1683).
  */
 export const OAUTH_GRANT_REVOKE_REASONS = [
   "user",
@@ -70,6 +72,7 @@ export const OAUTH_GRANT_REVOKE_REASONS = [
   "revocation_endpoint",
   "client_deleted",
   "token_exposed",
+  "code_replay",
 ] as const;
 export const OAuthGrantRevokeReasonSchema = z.enum(OAUTH_GRANT_REVOKE_REASONS);
 export type OAuthGrantRevokeReason = z.infer<typeof OAuthGrantRevokeReasonSchema>;
@@ -93,6 +96,11 @@ export const OAUTH_AUDIT_ACTIONS = [
    * the password.
    */
   "CONSENT_STEP_UP_FAILED",
+  /**
+   * An already-redeemed authorization code was presented again in an otherwise valid token request; the
+   * grant it produced is revoked with reason `code_replay` (#1683).
+   */
+  "CODE_REUSE_DETECTED",
 ] as const;
 export const OAuthAuditActionSchema = z.enum(OAUTH_AUDIT_ACTIONS);
 export type OAuthAuditAction = z.infer<typeof OAuthAuditActionSchema>;
@@ -190,13 +198,17 @@ export type OAuthAuthorizeParams = z.infer<typeof OAuthAuthorizeParamsSchema>;
 
 /**
  * Why the consent page cannot proceed. An invalid client or redirect renders an error page and NEVER
- * redirects (RFC 6749 §4.1.2.1).
+ * redirects (RFC 6749 §4.1.2.1). `CLIENT_METADATA_UNREACHABLE`: the client identifies itself by an https
+ * URL (CIMD) and lazyit could not fetch its metadata document right now — the host was unreachable,
+ * answered with a transient error, or the per-user fetch limit was reached — and no bundled copy exists.
+ * A definitive answer from the host (404, an invalid document) stays `INVALID_CLIENT` (#1683).
  */
 export const OAUTH_AUTHORIZE_REFUSALS = [
   "AI_DISABLED",
   "FORBIDDEN",
   "INVALID_CLIENT",
   "INVALID_REDIRECT",
+  "CLIENT_METADATA_UNREACHABLE",
 ] as const;
 export const OAuthAuthorizeRefusalSchema = z.enum(OAUTH_AUTHORIZE_REFUSALS);
 export type OAuthAuthorizeRefusal = z.infer<typeof OAuthAuthorizeRefusalSchema>;

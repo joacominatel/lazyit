@@ -23,6 +23,7 @@ import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { ArticlesService } from '../articles/articles.service';
 import { ExportService } from '../common/export';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 
@@ -122,6 +123,7 @@ describe('Application costPerSeat over HTTP — 64-bit minor units (ADR-0100)', 
         { provide: AccessGrantsExportService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: ExportService, useValue: {} },
+        { provide: PermissionResolverService, useValue: {} },
         { provide: APP_GUARD, useClass: SignedInGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],

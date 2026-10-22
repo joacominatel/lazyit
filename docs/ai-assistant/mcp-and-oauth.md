@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -503,8 +503,9 @@ opaque tokens are checked DB-first on every request, so revocation is already im
 > token is read; a withdrawn `ai:connect` answers 403 `access_denied`. A tool outside the scope is not
 > listed, and calling it is refused before any handler — no per-call `scopeChallenge` is emitted.
 
-- **Rate limits**: per grant (indicative 300 calls/min, 60 writes/min); `/oauth/register` per IP (10/h) with a cap
-  on unused registrations; `/oauth/token` per IP; the decision endpoint per user. Pattern:
+- **Rate limits**: per grant (indicative 300 calls/min, 60 writes/min), and per user across all their connections
+  (§16); `/oauth/register` per IP — per IPv6 /64 — (10/h) with a cap on unused registrations; `/oauth/token` per IP;
+  the decision endpoint per user. Pattern:
   `SetupRateLimitGuard` / `login-rate-limit.guard.ts`.
 - **`Origin` check** (spec MUST): reject a present cross-origin `Origin` with 403; native clients send none.
 - **Response mode**: prefer JSON responses over SSE for tool calls (no long-lived streams through Caddy's
@@ -727,7 +728,8 @@ Threats worth naming:
   consent option, per-grant write rate limits, and per-invocation audit. The rest is client-side.
 - **Consent phishing** through a DCR client named "Claude Code": the "self-declared, unverified" badge,
   prominent redirect host, loopback warning, and always-prompt consent.
-- **DCR abuse**: per-IP rate limit, cap on unused registrations, 24 h GC, 404 when MCP is off.
+- **DCR abuse**: per-IP (per IPv6 /64) rate limit, cap on unused registrations that evicts the oldest unused one
+  (§16), 24 h GC, 404 when MCP is off.
 - **SSRF via CIMD `client_id`**: egress guard (the fetch runs with a logged-in victim's request, so treat it as
   hostile input); response size cap; `client_id` must be `https` with a path; cached with bounded TTL.
 - **Host-header-derived origin** in `lan`: the issuer is pinned configuration, and the anonymous routes
@@ -897,7 +899,7 @@ server must not depend on the provider configuration.
 | --- | --- |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414 document: the §5.1 fields plus `response_modes_supported: ["query"]` and `revocation_endpoint_auth_methods_supported: ["none"]`, and — since W3-3 — `client_id_metadata_document_supported: true` (§15). |
 | `GET /.well-known/oauth-protected-resource[/mcp]` | RFC 9728 document for `{issuer}/mcp` |
-| `POST /oauth/register` | 201 RFC 7591 response, public client (`token_endpoint_auth_method: "none"`, no secret); `invalid_redirect_uri` / `invalid_client_metadata`; 429 per IP (10/h) or past 500 pending registrations |
+| `POST /oauth/register` | 201 RFC 7591 response, public client (`token_endpoint_auth_method: "none"`, no secret); `invalid_redirect_uri` / `invalid_client_metadata`; 429 past 10/h per IPv4 address or IPv6 /64; at 500 pending registrations the oldest unused one is evicted, and 429 only when none is evictable (§16) |
 | `POST /oauth/token` | form-encoded (JSON tolerated); `authorization_code` and `refresh_token` only; `Cache-Control: no-store` on every answer; errors are exactly `{ error, error_description? }`; a repeated parameter is `invalid_request`; 429 past 60/min per IP |
 | `POST /oauth/revoke` | 200, empty, whether or not the token was known; revoking either token revokes the grant |
 | `POST /oauth/authorize/validate` | 200 `OAuthAuthorizeValidation`; **400 `{ error, redirectTo }`** for a request error that belongs to the client (the page sends the browser to `redirectTo`, which carries `error`, `state`, `iss`) |
@@ -905,7 +907,9 @@ server must not depend on the provider configuration.
 | `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `mine`: no permission, so a user who lost `ai:connect` still sees what they hold (AUD-083) / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
 
 `validate` refuses (never redirects) in this order: no human session or no `ai:connect` → `FORBIDDEN`; MCP
-off → `AI_DISABLED`; unknown client or a client the allowlist no longer admits → `INVALID_CLIENT`; a
+off → `AI_DISABLED`; a CIMD client whose metadata document cannot be fetched right now (network failure, no
+bundled copy — §15, §16) → `CLIENT_METADATA_UNREACHABLE`; unknown client or a client the allowlist no longer
+admits → `INVALID_CLIENT`; a
 `redirect_uri` not registered exactly, or not admitted → `INVALID_REDIRECT`. Only then do
 `unsupported_response_type`, `invalid_request` (PKCE missing, `plain`, malformed challenge),
 `invalid_scope` and `invalid_target` redirect. A request without `scope` asks for `lazyit.read
@@ -982,10 +986,10 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
   (`invalid_scope`): tokens carry no scope of their own, and RFC 6749 §6 keeps the rotated refresh token's
   scope identical to the presented one's. A client re-authorizes to change scope.
 - **Code replay.** A code is consumed atomically before any other check, so a wrong verifier burns it.
-  A replayed code is refused, but the grant already issued from it is not revoked: codes carry no link to
-  the grant they produced (the schema is fixed for this wave).
-- **Epoch at exchange.** The grant snapshots the user's `mcpCredentialEpoch` at code exchange, not at consent;
-  the window between the two is the code's 60 s.
+  ~~A replayed code is refused, but the grant already issued from it is not revoked~~ — since #1683 the
+  code is linked to the grant it produced and a valid replay revokes that grant (§16).
+- **Epoch at exchange.** The grant snapshots the user's `mcpCredentialEpoch` at code exchange; since #1683
+  the code also carries the epoch seen at consent and the exchange is refused when it moved (§16).
 - **Grants while off.** See the §5.1 note: connected apps stay manageable while MCP is off and on `lan`.
 - **Soft delete.** `OAuthGrant` joined `SOFT_DELETABLE_MODELS`; relation reads (a token's `grant`) check
   `deletedAt` explicitly.
@@ -996,14 +1000,13 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 
 1. ~~**"New client connected" notification**~~ — **done in W3-2** (§14): the `mcp.client_connected`
    notification, sent on a connection's first use at `/mcp`.
-2. **`mcpCredentialEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
-   password change between consent and exchange also kills the grant (today the snapshot is taken at
-   exchange, ≤ 60 s later).
-3. **Code → grant link:** record which grant a code produced, so a replayed code revokes that grant
-   (OAuth 2.1 §4.1.3 "SHOULD revoke"). Today a replay is only refused.
-4. **DCR pending-cap DoS:** the global cap of 500 pending registrations can be filled from many
+2. ~~**`mcpCredentialEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
+   password change between consent and exchange also kills the grant~~ — **done in #1683** (§16).
+3. ~~**Code → grant link:** record which grant a code produced, so a replayed code revokes that grant
+   (OAuth 2.1 §4.1.3 "SHOULD revoke")~~ — **done in #1683** (§16).
+4. ~~**DCR pending-cap DoS:** the global cap of 500 pending registrations can be filled from many
    addresses. Key the register rate limit on the IPv6 /64 instead of the full address, and evict the
-   oldest unused registration instead of refusing new ones.
+   oldest unused registration instead of refusing new ones~~ — **done in #1683** (§16).
 5. ~~**Consent page (W3-9):** never auto-redirect for an unverified (DCR) client — the approve action is
    always an explicit click — and never present `client_uri` as trusted~~ — **done in W3-9**
    (`app/(auth)/oauth/authorize/_components/consent-form.tsx`): nothing redirects without a click, an
@@ -1215,7 +1218,8 @@ action succeeded and must not be repeated.
 
 **Rate limits** (`mcp-rate-limit.ts`; in memory, per replica, fixed one-minute windows, keyed on the
 grant or the SA): 600 authenticated HTTP requests → HTTP 429; 300 `tools/call` and, of those, 60 writes
-→ `isError` `RATE_LIMITED`; 30 refused authentications per IP → HTTP 429.
+→ `isError` `RATE_LIMITED`; 30 refused authentications per IP → HTTP 429. A human caller is also counted
+**per user** across every connection they own — 1,200 requests, 600 calls, 120 writes (§16, #1683).
 
 **The per-SA write cap over MCP** (CTO decision, G3 review F2). A Service Account's
 `maxMutationsPerRun` (Settings → AI, per SA) must hold on `/mcp` too, but MCP has no runs: there it caps
@@ -1288,7 +1292,8 @@ lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_p
   `Host`, which a rebinding attacker controls. Accepted: `/mcp` authenticates only by a bearer token the
   page cannot read (no cookie, no ambient credential), so a rebound page gains nothing.
 - **F6 — per-connection rate limits and their prune cost.** The limits are per grant or SA, not per user
-  (one user with several connections gets several budgets). The counters are the OAuth endpoints'
+  (one user with several connections gets several budgets) — **closed by #1683**: a per-user overall cap
+  now sits on top (§16). The counters are the OAuth endpoints'
   `FixedWindowRateLimiter`: constant work per hit (expired windows are dropped from the front of the
   map) and at most 10,000 keys, past which the oldest window is evicted (AUD-005 / AUD-039).
 - **F9** — accepted as recorded in the review.
@@ -1373,7 +1378,8 @@ A **definitive answer from the host** is refused and audited, even for Claude Co
 410, 403…), or a JSON document that fails validation (mismatched `client_id`, bad redirects, secrets or a
 non-`none` auth method, oversize, malformed JSON). The host's word wins over the image's copy. The
 row is then `kind: "known"`, `fetchedAt: null`, cached for 5 minutes, after which the network is tried
-again and wins once reachable. Any other client without a reachable document is refused.
+again and wins once reachable. Any other client without a reachable document is refused — with
+`CLIENT_METADATA_UNREACHABLE` since #1683 (§16), while a definitive answer stays `INVALID_CLIENT`.
 
 **Trust.** CIMD does not bypass the client allowlist (ADR-0097 decision 13): the resolved row goes
 through `isClientAllowed` / `isRedirectAdmitted` exactly like a DCR row — at consent, at code exchange and
@@ -1392,7 +1398,8 @@ admin listing) apply the same rule and carry the same optional `client.verifiedD
 
 **Abuse bounds.** Only a signed-in user holding `ai:connect` on an instance with MCP on reaches the fetch
 (the checks run first). Network fetches — cache misses — are limited to **20 per user per 10 minutes**
-(in memory, per replica); past it the client is refused (or served from its bundled copy). The sweeper
+(in memory, per replica); past it the client is refused (`CLIENT_METADATA_UNREACHABLE`, §16) or served
+from its bundled copy. The sweeper
 hard-deletes unused CIMD and bundled rows (never used, no grant) whose **last refresh** (`updatedAt`) is
 more than 24 h old; they are a cache and are re-fetched on demand. No client row with a pending
 authorization code is collected (DCR included), because the code would cascade and break a sign-in in
@@ -1426,9 +1433,83 @@ end to end with Claude Code's URL, online and offline).
 1. ~~**Web:** the consent page and the connected-apps list render `client.verifiedDomain` next to the
    client name for every CIMD client~~ — **done in #1426** (2026-09-25): both show the domain set apart
    from the self-declared name ([[ai-assistant/frontend|frontend]] §5.8, `lib/ai/client-domain.ts`).
-2. A distinct refusal for "the client's metadata document could not be fetched" (today `INVALID_CLIENT`)
-   would let the consent page explain an offline instance; it needs a new refusal value and its labels.
+2. ~~A distinct refusal for "the client's metadata document could not be fetched" (today `INVALID_CLIENT`)
+   would let the consent page explain an offline instance~~ — **done in #1683**: `CLIENT_METADATA_UNREACHABLE`
+   (§16).
 3. W4-3 re-verifies Claude Code's document against the bundled copy and exercises the offline path.
    **Still open:** the W4-3 run (2026-09-25) predates CIMD on its test instance, so Claude Code registered
    through DCR ([[ai-mcp-client-matrix]] F4); re-run its §4.3 step 4.
 
+## 16. As built — OAuth/MCP limits and the OAuth trio (#1683, from #1344)
+
+The W2-4 G3 follow-ups (§12 items 2–4, §14 F6, §15 item 2), decided by the CEO on #1344 (Q8, Q10).
+
+**DCR registration keying** (`oauth-rate-limit.ts`, `registrationRateKey`). `POST /oauth/register` keeps
+10 registrations per hour, now per **IPv4 address or IPv6 /64**: one IPv6 host normally holds a whole /64
+and could pick a fresh address per request. An IPv4-mapped address (`::ffff:192.0.2.1`, what a dual-stack
+socket reports) counts as its IPv4; a zone index is ignored. The trade-off: an office whose clients share
+one /64 shares the 10/h budget — a client registers once per install, so it is ample for 5–20 people. The
+other per-IP limiters (`/oauth/token`, `/oauth/revoke`, `/mcp` refused authentications) keep the full
+address.
+
+**Evict, don't refuse, at the pending cap** (`client-registration.service.ts`). At 500 pending
+registrations (DCR rows of the last 24 h that never obtained a grant), a new registration **hard-deletes
+the oldest unused** one — the sweeper's own rule, re-checked in the delete: `lastUsedAt` null, **no grant
+row** and **no authorization code** — and goes through. A client that ever got a grant, or whose user is
+mid-consent (a code exists), is never evicted. 429 only when nothing is evictable; a concurrent registration
+that took the same row retries (3 attempts). The cost: under a flood, a registration whose user has not
+yet approved consent can be displaced; the client registers again. An approval that races the eviction —
+the row deleted between the decision's checks and its code insert — hits the code's FK (P2003) and answers
+the `INVALID_CLIENT` refusal, never a 500, with no code issued. Evictions are logged (warn), not
+audited, like the sweeper's collection of the same rows.
+
+**Per-user `/mcp` cap** (`mcp-rate-limit.ts`, `mcp.constants.ts`; CEO Q8). On top of the per-grant / per-SA
+limits, a human caller (OAuth grant or personal token) is counted under `user:<id>` across every connection
+they own: **1,200 requests, 600 tool calls and 120 writes per minute** — twice one connection's budget, the
+same windows. Two busy agents run side by side at full speed; ten connections no longer give ten budgets.
+Past the request cap → HTTP 429; past the call or write cap → `isError` `RATE_LIMITED` ("across all your AI
+connections"). Service Accounts are not users and keep their `sa:<id>` keying only. In memory, per replica,
+as the rest.
+
+**The OAuth trio** (CEO Q10; `oauth_authorization_codes`, two additive nullable columns):
+
+- **Epoch at consent.** The decision stores the user's `mcpCredentialEpoch` on the code
+  (`mcpCredentialEpoch`); the exchange answers `invalid_grant` when it moved — a password change or reset,
+  "revoke sessions", deactivation or offboarding inside the code's 60 s kills the code, not only grants
+  issued before it. A plain web logout still does not (it moves `sessionEpoch` only, decision 8 amended).
+- **Code → grant link and replay revocation.** The exchange writes the grant id on the code, in the
+  transaction that creates the grant (`grantId`, unique, FK `SET NULL`). An already-redeemed code presented
+  again is refused, and when the replayed request is **otherwise valid** — same client, the exact redirect,
+  the correct PKCE verifier — the grant it produced is revoked (`revokeReason: "code_replay"`, audited
+  `CODE_REUSE_DETECTED` then `GRANT_REVOKED`). This follows RFC 6749 §4.1.2 and the OAuth 2.1 draft
+  (§4.1.3 "SHOULD revoke … all access tokens and refresh tokens previously issued based on that
+  authorization code" and its "Reuse of Authorization Codes" section, editor's copy checked 2026-10-21),
+  which also says **not** to revoke on a replay with invalid parameters: whoever holds a leaked code without
+  its verifier must not be able to disconnect the legitimate client. A replay racing the very first
+  redemption (before its transaction commits) is refused without revocation — the link does not exist yet.
+- **Retention for detection.** The sweeper now collects a code **15 minutes past its expiry**, used or not
+  (`AUTHORIZATION_CODE_RETENTION_MS`), instead of at the first pass after use, so a replay is still
+  recognized. An expired code is never redeemable either way.
+- **Unreachable CIMD document.** A CIMD client whose document cannot be fetched for a network reason
+  (`CimdRefusal.networkFailure`: unreachable host, timeout, transient status, redirect, non-JSON page, an
+  egress-guard refusal) or because of the per-user fetch limit, with no bundled copy, is refused with
+  `CLIENT_METADATA_UNREACHABLE` (`CimdClientService.resolveOutcome`) instead of `INVALID_CLIENT`; the consent
+  page says the app's description could not be reached and to try again later. A definitive answer from the
+  host (404, 410, an invalid document) stays `INVALID_CLIENT`. The egress refusal reads exactly like a host
+  that is down, so the refusal is no oracle for which names resolve to private addresses.
+
+**Contract** (`packages/shared`, additive): `OAUTH_AUTHORIZE_REFUSALS` gains `CLIENT_METADATA_UNREACHABLE`
+(the web catalogs carry its copy), `OAUTH_GRANT_REVOKE_REASONS` gains `code_replay`, `OAUTH_AUDIT_ACTIONS`
+gains `CODE_REUSE_DETECTED`.
+
+**Data.** Migration `20261021230000_oauth_code_epoch_and_grant_link`: `mcpCredentialEpoch INTEGER` and
+`grantId TEXT` (unique, FK → `oauth_grants` `ON DELETE SET NULL`), both nullable, no backfill. Codes issued
+before the update read null in both: they skip the epoch check and, once redeemed, a replay is only refused —
+until they expire (60 s). Grants and tokens are untouched.
+
+**Tests.** `oauth-rate-limit.spec.ts` (the /64 key, IPv4-mapped and zone forms, the guard), `oauth-hardening.spec.ts`
+(eviction order and the grant / pending-code exemptions, 429 when nothing is evictable; the epoch stored,
+moved and legacy-null; the link, a valid replay revoking with its audit, invalid replays revoking nothing,
+a replay after expiry, a legacy code, the retention window), `cimd/cimd-flow.spec.ts` (the new refusal on
+validate and decision, transient vs definitive status), `mcp-server.factory.spec.ts` and
+`mcp-auth.guard.spec.ts` (the per-user budget across connections, other users and SAs unaffected).

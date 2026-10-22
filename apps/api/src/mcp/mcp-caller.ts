@@ -25,6 +25,11 @@ export interface McpCaller {
   /** The rate-limit key: the grant, or the Service Account. */
   rateKey: string;
   /**
+   * Human callers only: the per-user rate-limit key (`user:<id>`), counted on top of {@link rateKey}
+   * across every connection the user owns (CEO decision Q8 on #1344). Absent for a Service Account.
+   */
+  userRateKey?: string;
+  /**
    * Service Accounts only: the per-SA `maxMutationsPerRun` cap, applied over MCP (which has no runs) as the
    * maximum number of writes per rolling hour (CTO decision, #1315 G3 review F2). Null or absent = no cap.
    */

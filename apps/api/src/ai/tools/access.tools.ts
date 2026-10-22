@@ -1810,6 +1810,11 @@ export const accessToolset: AiToolset = {
       'A bulk CSV file export (@Res stream); use search and list tools instead.',
     ),
     unexposed(
+      ApplicationsController,
+      ['findGrantsPage', 'grantsSummary'],
+      "The web Access tab's paged grant read and its headline counts (#1660); the application tool already reads the grants through findGrants.",
+    ),
+    unexposed(
       AccessGrantsController,
       ['batchRevoke', 'updateNotes', 'updateExpiry'],
       'Deferred to v1.1: grant batch revoke (blast radius), notes and expiry edits (tools-and-execution.md §3, §7).',

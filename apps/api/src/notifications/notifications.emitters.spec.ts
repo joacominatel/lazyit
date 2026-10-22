@@ -55,7 +55,7 @@ describe('AccessGrant.create emitters (critical_app_access + admin_granted)', ()
     };
     prisma = {
       user: {
-        findFirst: jest.fn().mockResolvedValue({ id: USER_ID }),
+        findFirst: jest.fn().mockResolvedValue({ id: USER_ID, isActive: true }),
         findUnique: jest
           .fn()
           .mockResolvedValue({ firstName: 'Ada', lastName: 'Lovelace' }),
