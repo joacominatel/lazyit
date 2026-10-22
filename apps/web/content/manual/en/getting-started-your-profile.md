@@ -57,7 +57,7 @@ apps** lets you move between them without going back to the menu.
 Getting access in lazyit and having a working account in the application are two steps. Some
 applications are set up automatically by lazyit when you get access; others are set up by IT by hand.
 Each application under **My application access**, and each approved request under
-**My access requests**, shows one of four statuses:
+**My access requests** whose access is still active, shows one of four statuses:
 
 - **No automation** — lazyit does not set up this application on its own. IT creates your account by
   hand; ask them if you still can't sign in.

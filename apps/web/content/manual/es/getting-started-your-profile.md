@@ -59,7 +59,7 @@ conectadas** te permite pasar de una a otra sin volver al menú.
 Recibir acceso en lazyit y tener una cuenta que funcione en la aplicación son dos pasos. Algunas
 aplicaciones las configura lazyit automáticamente cuando recibís el acceso; otras las configura IT a
 mano. Cada aplicación de **Mi acceso a aplicaciones**, y cada solicitud aprobada de
-**Mis solicitudes de acceso**, muestra uno de cuatro estados:
+**Mis solicitudes de acceso** cuyo acceso sigue vigente, muestra uno de cuatro estados:
 
 - **Sin automatización** — lazyit no configura esta aplicación por su cuenta. IT crea tu cuenta a mano;
   consultales si todavía no podés entrar.

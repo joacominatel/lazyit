@@ -297,7 +297,7 @@ convention:
 
 > **Requester-facing projection (#1700, CEO decision Q2 on #1344).** `workflow:read` still gates every
 > run read. The one thing a grantee learns about runs is a coarse `provisioning` value on their OWN
-> grants and approved requests (`GET /access-grants/mine`, `GET /access-requests/mine`): no automation,
+> grants and on approved requests whose grant is still active (`GET /access-grants/mine`, `GET /access-requests/mine`): no automation,
 > in progress, done, or waiting on IT. It is computed from the run status alone — no workflow name,
 > step, error or payload is read — so it does not reveal who-gets-provisioned-where beyond the caller's
 > own access. Mapping: [[access-grant#Provisioning status]].

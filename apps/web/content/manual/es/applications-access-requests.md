@@ -89,9 +89,10 @@ su **Exportar CSV** descarga las solicitudes del estado seleccionado.
 
 Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado
 actual (**Pendiente**, **Aprobada** o **Rechazada**)—. Una solicitud rechazada muestra el motivo que
-dio quien aprobó, y una que cargó un aprobador para vos lo indica. Una solicitud aprobada muestra
-además si tu cuenta en la aplicación ya está configurada —**Sin automatización**,
+dio quien aprobó, y una que cargó un aprobador para vos lo indica. Una solicitud aprobada cuyo acceso
+sigue vigente muestra además si tu cuenta en la aplicación ya está configurada —**Sin automatización**,
 **Configuración en curso**, **Configurada** o **Esperando a IT**— (ver
-[Estado de configuración de tu cuenta](/help/getting-started-your-profile#estado-de-configuración-de-tu-cuenta)). lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
+[Estado de configuración de tu cuenta](/help/getting-started-your-profile#estado-de-configuración-de-tu-cuenta)).
+Cuando ese acceso se revoca o vence, la solicitud deja de mostrar un estado. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
 salvo que lo desactives—, así que esta lista es el historial completo, no la única forma de enterarte
 del resultado.

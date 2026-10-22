@@ -228,15 +228,18 @@ grantee cannot read it; instead the self-scope reads carry one of four values
   trigger lookup failed (the grant path swallows it, [[0054-applications-workflow-engine]]), and a
   cloned grant the clone did not run the engine for ([[0058-user-manager-and-clone-actions]]).
 - **`COMPENSATED`** reads as waiting on IT: it is a failure whose external effects were rolled back, so
-  the account does not exist. `AWAITING_INPUT` is only a manual step today (no inbound-callback step
+  the account does not exist. Retry and replay-latest accept only `FAILED`, so this one clears only
+  with a new grant (a new organic run). `AWAITING_INPUT` is only a manual step today (no inbound-callback step
   ships yet).
 - **One batched query per page** (`AccessGrantsService.provisioningFor`, on the
   `workflow_runs(accessGrantId)` index): it selects only the grant id and the run status — no workflow
   name, step, error or payload is read, so none can leak.
 - **Where it appears:** `GET /access-grants/mine` (every grant) and `GET /access-requests/mine` (the grant
-  an approved request created; `null` otherwise — [[access-request]]). The field is optional in the
-  contract, so a client that predates it ignores it, and an older API simply omits it. The web shows it
-  on the active grants and approved requests of `/profile`; revoked history shows none.
+  an approved request created, **while that grant is still active**; `null` otherwise, including after a
+  manual revoke or the expiry sweep — [[access-request]]). The field is optional in the contract and
+  tolerant on read (an unknown value parses as absent), so a client that predates it ignores it, and an
+  older API simply omits it. The web shows it on the active grants of `/profile` and on an approved
+  request whose access is still active; revoked history shows none.
 - The mapping lives in `apps/api/src/access-grants/grant-provisioning.ts`; a run state added later
   reads `WAITING_ON_IT` until it is mapped there.
 
