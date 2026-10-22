@@ -46,3 +46,7 @@ infra/.local-ca/
 
 # project-local git worktrees (.worktrees/<branch-slug>/)
 .worktrees/
+
+# backup sidecar + infra/update.sh output: app-*.dump and attachments-*.tar.gz (secrets, invoices —
+# never commit). docs/05-runbooks/backups.md
+/backups/
