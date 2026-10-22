@@ -270,7 +270,11 @@ The key forks only; each links its analysis.
    >
    > - **Three tools reach MCP.** `workflow_create` (always created disabled), `workflow_update` and
    >   `workflow_author_version` declare `channels: ['CHAT', 'MCP']`. They are `elevated`, so they are listed
-   >   only under `lazyit.admin` (the scope whose consent re-proves the password), with the class-derived
+   >   only under `lazyit.admin` (the scope whose consent re-proves the password), and **to human callers
+   >   only**: every authoring tool carries the new descriptor flag `humanOnly`, so core never lists,
+   >   invokes, proposes or approves it for a Service Account on any channel — an SA token connected over
+   >   MCP can carry an `elevated` ceiling and the workflow routes admit a Service Account, so the channel
+   >   alone would not exclude it — and refuses before anything is recorded. They keep the class-derived
    >   annotations unchanged (`destructiveHint` and `openWorldHint` true — conservative: the client keeps
    >   asking). Enabling or disabling, archiving, and every connection tool (create, update, test, archive)
    >   stay chat-only.
@@ -284,8 +288,9 @@ The key forks only; each links its analysis.
    >   optional precondition `expectedEnabled` (`PATCH /workflows/:id`, `POST /workflows/:id/versions`),
    >   checked under the workflow row lock that already serializes authoring and enabling (SEC-077) — a 409
    >   when the workflow was enabled in between. The AI tools send it on every channel.
-   > - **Headless unchanged.** No authoring tool lists `HEADLESS`; a Service Account never authors, connects
-   >   or enables a workflow (INV-AI-17). INV-AI-15 is restated: no **live** outbound integration without a
+   > - **Headless unchanged, and no Service Account over MCP either.** No authoring tool lists `HEADLESS`,
+   >   and `humanOnly` excludes Service Accounts on MCP too; a Service Account never authors, connects or
+   >   enables a workflow (INV-AI-17). INV-AI-15 is restated: no **live** outbound integration without a
    >   human's in-app approval.
    >
    > → [[ai-assistant/security|security]] §6.9, T-40, T-42; [[ai-assistant/tools-and-execution|tools]] §7

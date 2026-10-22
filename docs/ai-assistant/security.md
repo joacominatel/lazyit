@@ -350,7 +350,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-39 | CH | I | Secret Manager plaintext decrypted in the browser leaks into chat context (e.g. "current page" context). | INV-AI-5: the client never sends decrypted vault content or DOM snapshots | v1 |
 | T-40 | CH, MCP | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is `elevated`; everything that makes an integration live (a connection created or re-pointed, a version on an enabled workflow, enabling) is **chat only**, behind the `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring. Over MCP (`lazyit.admin`) only a **disabled** workflow and its versions can be created or edited — inert until a person enables it in the chat (ADR-0097 decision 3, amended 2026-09-24 and 2026-10-21) | v1 |
 | T-41 | CH | I | Credential exfiltration by re-pointing a secret-bearing connection to another host. | CSEC-1 (`workflow:secrets` to re-point or attach) runs through the route; the preview shows old → new host; secrets are reference-only, never read (§6.9) | v1 |
-| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | No authoring tool lists `HEADLESS` (INV-AI-17, for good). Over MCP only `workflow_create`, `workflow_update` and `workflow_author_version` run, and only on a **disabled** workflow: `OUTBOUND_INTEGRATION` is refused over MCP and headless (`AI_CHANNEL_REFUSED_WARNINGS`), a header change on an enabled workflow is refused by the tool, and the routes re-check `expectedEnabled` under the workflow row lock, so a workflow enabled between the check and the write is refused at execute (#1688). Enabling, connections and the connection test stay chat-only. MCP and headless refuse writes on critical applications | v1 |
+| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | No authoring tool lists `HEADLESS` (INV-AI-17, for good), and every authoring tool is `humanOnly`, so a Service Account is refused on MCP too, before anything is recorded. Over MCP only `workflow_create`, `workflow_update` and `workflow_author_version` run, and only on a **disabled** workflow: `OUTBOUND_INTEGRATION` is refused over MCP and headless (`AI_CHANNEL_REFUSED_WARNINGS`), a header change on an enabled workflow is refused by the tool, and the routes re-check `expectedEnabled` under the workflow row lock, so a workflow enabled between the check and the write is refused at execute (#1688). Enabling, connections and the connection test stay chat-only. MCP and headless refuse writes on critical applications | v1 |
 
 ---
 
@@ -736,8 +736,12 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
   default focus. No Service Account authors, connects or enables (T-42; headless authoring excluded for
   good, INV-AI-17), and no MCP client connects or enables.
 - **MCP: disabled workflows only (#1688; ADR-0097 decision 3 as amended 2026-10-21).** Under
-  `lazyit.admin`, `workflow_create` (always disabled), `workflow_update` and `workflow_author_version`
-  declare `channels: ['CHAT', 'MCP']`; every other authoring tool stays `['CHAT']`. A disabled workflow
+  `lazyit.admin`, and for **human callers only**, `workflow_create` (always disabled), `workflow_update`
+  and `workflow_author_version` declare `channels: ['CHAT', 'MCP']`; every other authoring tool stays
+  `['CHAT']`. Every authoring tool is `humanOnly`: an SA token connected over MCP can carry an `elevated`
+  ceiling and the workflow routes admit a Service Account, so core itself (`list`, `invoke`,
+  `writeDenial`) excludes Service Accounts on every channel, refusing before an invocation row or ledger
+  event is written. A disabled workflow
   never runs, so what MCP can write is inert until a person enables it on the chat's dry-run card.
   Enforced server-side at execute, because over MCP the client's own prompt is the only review:
   `OUTBOUND_INTEGRATION` is in `AI_CHANNEL_REFUSED_WARNINGS` for MCP and headless, so
@@ -820,7 +824,7 @@ Open items recorded by the G2 review of #1354 (W2-14):
 - **INV-AI-15 — No unattended outbound integration.** No outbound integration becomes or stays live
   through the AI without a chat approval by a human: a workflow connection is created or changed, a
   workflow is enabled or disabled, and a version is authored on an ENABLED workflow only through the
-  chat. No Service Account does any of it. An MCP client (`lazyit.admin`) may create a workflow and
+  chat. No Service Account does any of it, on any channel. A person's MCP client (`lazyit.admin`) may create a workflow and
   change it or author its versions only while it is DISABLED, checked at execute under the workflow row
   lock (amended 2026-10-21, #1688).
 - **INV-AI-16 — Workflow secrets are reference-only.** The AI never reads, sets or rotates a workflow
