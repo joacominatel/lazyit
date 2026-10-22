@@ -1095,6 +1095,10 @@ that ever raises a colour is the *major version behind* tier, exactly as the bad
 The view is read-only in the strongest sense: **lazyit never sends anything to a host.** It tells you
 what it knows and gives you a command to run yourself.
 
+The view has a second section, **Software watchlist**, in the switch at its top: the same hosts,
+counted by the packages they run instead of by agent version. It has a section of its own below —
+[Software watchlist](#software-watchlist).
+
 ### The update command
 
 Click **Update** on a row that is behind and lazyit shows the exact command for that machine, built
@@ -1287,6 +1291,72 @@ disappear from your inventory and look like an outage, while a stale field never
 this version onwards": instances older than this release still refuse a report that mentions anything
 they don't recognise, so if you plan to run agents that update on their own schedule, upgrade the
 instance first.
+
+## Software watchlist
+
+Every agent sends the list of packages installed on its host, and each host's **Software** tab shows
+that list. The **software watchlist** answers the question one host at a time can't: *across the whole
+estate, which versions of `openssl` are out there, and where is it missing?*
+
+Open **Assets › Topology › Agents** and switch to **Software watchlist** at the top of the view. Add the
+packages your team keeps an eye on — typically the 10 to 30 you check every Patch Tuesday — and each one
+gets a card:
+
+> **openssl** — across 17 agent-reported hosts: 11 on `3.0.13`, 2 on `1.1.1w`, 1 missing, 3 unknown.
+
+- **The versions**, each with how many hosts carry it. A host with two versions installed (two
+  kernels, two runtimes side by side) counts in both, so the versions can add up to more than the hosts
+  that have the package. A package the agent listed without a version has its own line, *No version
+  reported*.
+- **Missing** — hosts whose last package list does **not** name the package.
+- **Unknown** — hosts lazyit can't speak for. They are counted apart from *missing* on purpose (see
+  below).
+
+Every number opens the hosts behind it, a page at a time, each linking to its node on the map. A host's
+row also says how old the package list it is judged on is — an offline host still counts, by its last
+list.
+
+**It is a distribution, nothing more.** lazyit counts versions; it does not judge them. There is no
+"outdated", no end-of-life flag and no vulnerability matching — lazyit has no feed to check against, and
+works fully offline. The versions are listed by **how many hosts carry each one**, not in version order:
+the top line is the most common version, not the newest.
+
+**Names are matched exactly.** Type the package name as the agent reports it. Spacing and capitals
+don't matter (`OpenSSL` and `openssl` are the same watch), but nothing else is folded together: there
+are no wildcards, and `libssl3` and `libssl3:amd64`, or a Windows program whose name includes its
+version, are different names. Copy the name from a host's **Software** tab when in doubt.
+
+### Missing is not the same as unknown
+
+**Missing** is only ever said about a host whose agent actually listed its packages and left this one
+out. A host lazyit can't speak for is **unknown**, with the reason on its row:
+
+- **No package list** — the host stores no list at all. That is what **turning software collection
+  off** leaves: in **Settings → Reporting agents**, or on the host itself
+  (`LAZYIT_COLLECT_SOFTWARE=false`). It is also the state of a host that has not sent a list yet.
+- **Excluded by the agent settings** — the name matches a package exclusion pattern in the agent
+  settings, so the agent was told not to report it.
+
+So switching software collection off for a group of hosts never makes every watched package look
+missing on them — they simply move to unknown.
+
+Things that can still make a host read **missing** without the package being gone: a **package limit**
+low enough to cut it off the list, or an exclusion set only in a host's own config file or for one
+service account — lazyit can't see those. If a missing host surprises you, open its **Software** tab.
+
+### Who can see and change it
+
+- **Seeing it** needs the same permission as seeing the topology — the watchlist only adds up what
+  each host's **Software** tab already shows to the same people.
+- **Adding and removing** a package needs permission to manage the topology, and must be done by a
+  person signed in to lazyit: a service account's token can't change the list. Removing a package only
+  takes it off the list — nothing about any host changes, and you can add it back at any time. The list
+  holds up to 100 packages.
+
+> **Treat this view as sensitive.** A list of which versions run on which machines is exactly the map
+> an attacker would want. Everyone who can see the topology can see it. If a group of hosts must stay
+> out of it, turn software collection off for them in the agent settings: their packages are no longer
+> collected or stored, and here they show as unknown.
 
 ## What's next
 
