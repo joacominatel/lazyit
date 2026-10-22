@@ -376,10 +376,11 @@ aquí y en cada activo vinculado; cambiarlo queda en el registro de actividad.
 Los documentos se **comparten, no se copian**: cada activo vinculado a la compra lista los mismos
 archivos en su panel **Compra**.
 
-> **Copias de seguridad.** Los archivos subidos se guardan en el volumen de archivos del servidor, que
-> **todavía no está cubierto por la copia de seguridad de la base de datos** — la sección Documentos
-> también lo dice. Hasta que llegue esa copia, guarda tu propia copia de cada factura, orden o remito que
-> necesites conservar.
+> **Copias de seguridad.** Los archivos subidos se guardan en el volumen de archivos del servidor. La copia
+> de seguridad de lazyit archiva ese volumen junto con cada copia de la base de datos (salvo que tu
+> administrador haya desactivado ese archivo), así que una
+> restauración recupera las facturas, órdenes y remitos con sus compras — consulta
+> [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Leer un documento con IA
 

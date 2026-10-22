@@ -24,7 +24,6 @@ import { INPUT_EXPIRED } from './input.service';
 import { AiRunPrincipals } from './principal-context';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiRunQueue } from './run-queue';
-import { AI_MESSAGE_FORMAT_RUN, readRunRecord } from './run-records';
 import {
   AI_AWAITING_SWEEP_AFTER_MS,
   AI_EXECUTING_STALE_AFTER_MS,
@@ -343,20 +342,13 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
     conversationId: string | null;
     userId: string | null;
     serviceAccountId: string | null;
+    sessionEpoch: number | null;
   }): Promise<{ code: string; message: string } | null> {
     let identity: DelegatedIdentity;
     if (run.userId) {
-      const record = run.conversationId
-        ? await this.prisma.aiMessage.findFirst({
-            where: {
-              conversationId: run.conversationId,
-              runId: run.id,
-              format: AI_MESSAGE_FORMAT_RUN,
-            },
-          })
-        : null;
-      const epoch = record ? readRunRecord(record.content)?.sessionEpoch : null;
-      if (epoch === null || epoch === undefined) {
+      // The run's column, else its legacy `lazyit-run-v1` row (#1675).
+      const epoch = await this.lifecycle.runSessionEpoch(run);
+      if (epoch === null) {
         return { code: 'FORBIDDEN', message: 'The run has no valid session.' };
       }
       identity = { kind: 'human', userId: run.userId, sessionEpoch: epoch };

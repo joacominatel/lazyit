@@ -113,3 +113,17 @@ export function costApplyActionOf(
     ? "SAME"
     : "REPLACE";
 }
+
+/**
+ * Whether an asset's cost is still `previous` — the purchase value before a line edit (#1502): the same
+ * amount AND label (labels trimmed and case-insensitive, as {@link costApplyActionOf}). A previous price of
+ * `null` (the line had none) is held by an asset with no cost. This is "follow unless overridden": an asset
+ * that holds the old purchase value follows the new one; one changed by hand does not.
+ */
+export function holdsPurchaseCost(current: PurchaseCostValue, previous: PurchaseCostValue): boolean {
+  if (previous.amount === null) return current.amount === null;
+  return (
+    current.amount === previous.amount &&
+    currencyGroupKey(current.currency) === currencyGroupKey(previous.currency)
+  );
+}

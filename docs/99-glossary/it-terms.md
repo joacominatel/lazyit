@@ -3,7 +3,7 @@ title: IT Terms
 tags: [glossary]
 status: draft
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-21
 ---
 
 # IT Terms
@@ -110,7 +110,7 @@ in the role-config UI that bundles permissions, and never grants or denies anyth
 
 | Term | Meaning in lazyit's context |
 | --- | --- |
-| **Role** | The assignable authorization bundle a [[user]] *has* — `enum Role { ADMIN MEMBER VIEWER }`, fixed (not dynamic custom roles). What a role *grants* is its permission set, resolved DB-first from [[role-permission]] rows ([[0040-rbac-roles]]). |
+| **Role** | The assignable authorization bundle a [[user]] *has* — `enum Role { ADMIN MEMBER VIEWER }`, fixed today. Custom roles are accepted in [[0104-custom-roles]] with the build deferred. What a role *grants* is its permission set, resolved DB-first from [[role-permission]] rows ([[0040-rbac-roles]]). |
 | **Permission** | The **atomic unit of authorization** — a frozen `domain:action` literal (e.g. `asset:write`, `accessGrant:grant`) from a closed catalog-as-code in `@lazyit/shared`. DB-first via [[role-permission]], resolved **server-side**; never read from a token claim (INV-1). The thing `@RequirePermission(...)` actually checks ([[0046-roles-permissions-v2]]). |
 | **Capability** | The operator-facing **toggle** in the role-config UI that bundles one or more permissions under a plain-language label ("Add & edit inventory"). **Presentation only** — it never grants or denies anything (INV-1); the wire `PUT` is still a flat `Permission[]`. The fine-tune view still exposes the raw permissions. |
 | **Permission tier** | The privilege level of a single permission, independent of its domain — `view` / `edit` / `delete` / `coarse`. Drives the "above-default" escalation warning: a role's seed default never includes `delete` or a `coarse` verb, so granting those to MEMBER/VIEWER is flagged as admin-level (allowed with a strong warning, never client-blocked). |
