@@ -949,25 +949,41 @@ const UNTRUSTED_TAG = /<\/?untrusted_content\b[^>]*>/gi;
 /** C0 and C1 control characters (line breaks and tabs included): they become a space. */
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/g;
 /**
- * Invisible format characters that can reorder or hide text: bidi embeddings, overrides and isolates,
- * zero-width characters, word joiners and the BOM. They are removed.
+ * Invisible format characters that can reorder or hide text: the Arabic letter mark, bidi embeddings,
+ * overrides and isolates, zero-width characters, word joiners, the BOM and the Unicode tag block
+ * (U+E0000–E007F, invisible "ASCII smuggling"). They are removed.
  */
-const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
-/** Quote characters a template could be closed with (`"…"`, `“…”`, `«…»`): they become `'`. */
-const QUOTES = /["\u201C\u201D\u201E\u201F\u00AB\u00BB\u2033]/g;
+const INVISIBLE = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
+/** Quote characters a template could be closed with (`"…"`, `“…”`, `«…»`, fullwidth `＂`): they become `'`. */
+const QUOTES = /["\u201C\u201D\u201E\u201F\u00AB\u00BB\u2033\uFF02]/g;
 
 /**
- * A model-supplied value as an `input` param carries it (#1687): wrapper tags removed, control
- * characters and every run of whitespace collapsed to one space (one line), invisible format characters
- * removed, quote characters turned into `'` (so the value can never close the quotes the template puts
- * around it), trimmed, and cut to {@link AI_SENTENCE_INPUT_MAX} characters with `…`. Pure and
- * idempotent: the API applies it on write, the web again on read (a row stored before the kind existed).
+ * Wrapper tags removed until none is left. Invisible characters go FIRST, so `</untrusted_\u200Bcontent>`
+ * cannot survive as a tag, and the removal repeats, so a nested `<untrusted_<untrusted_content>content>`
+ * cannot reassemble one.
+ */
+function stripWrapperTags(text: string): string {
+  let current = text;
+  for (;;) {
+    const next = current.replace(UNTRUSTED_TAG, "");
+    if (next === current) return current;
+    current = next;
+  }
+}
+
+/**
+ * A model-supplied value as an `input` param carries it (#1687): control characters turned into spaces and
+ * invisible format characters removed, THEN wrapper tags removed until none is left, quote characters
+ * turned into `'` (so the value can never close the quotes the template puts around it), every run of
+ * whitespace collapsed to one space (one line), trimmed, and cut to {@link AI_SENTENCE_INPUT_MAX}
+ * characters with `…`. Pure and idempotent: the API applies it on write, the web again on read (a row
+ * stored before the kind existed).
  */
 export function boundAiSentenceInput(value: unknown, max: number = AI_SENTENCE_INPUT_MAX): string {
-  const text = String(value ?? "")
-    .replace(UNTRUSTED_TAG, "")
+  const visible = String(value ?? "")
     .replace(CONTROL, " ")
-    .replace(INVISIBLE, "")
+    .replace(INVISIBLE, "");
+  const text = stripWrapperTags(visible)
     .replace(QUOTES, "'")
     .replace(/\s+/g, " ")
     .trim();
