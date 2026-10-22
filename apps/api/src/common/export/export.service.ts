@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { Injectable, Logger, StreamableFile } from '@nestjs/common';
-import type { DataExportResource } from '@lazyit/shared';
+import type { DataExportFormat, DataExportResource } from '@lazyit/shared';
 import type { Response } from 'express';
 import type { Principal } from '../../auth/principal';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -11,6 +11,7 @@ import type { ExportColumn } from './export-column';
 import { ExportLimiter, exportLimiterKey } from './export-limiter';
 import { keysetBatches, type KeysetCursor } from './keyset';
 import { streamCsv } from './stream-csv';
+import { streamXlsx, XLSX_CONTENT_TYPE } from './stream-xlsx';
 
 export type ExportFilters = Record<string, unknown>;
 
@@ -37,10 +38,15 @@ export interface CsvExportSpec<T extends KeysetCursor> {
   ) => Promise<T[]>;
   /** Already gated for this principal. */
   columns: readonly ExportColumn<T>[];
-  /** `lazyit-<name>-YYYY-MM-DD.csv`. */
+  /** `lazyit-<name>-YYYY-MM-DD.<csv|xlsx>`; also the XLSX sheet name. */
   filename: string;
-  /** The `# lazyit` provenance line, only for a file an importer reads back (assets). */
+  /** The `# lazyit` provenance line, only for a CSV an importer reads back (assets). Never in XLSX. */
   stamp?: boolean;
+}
+
+/** A {@link CsvExportSpec} plus the file format; `xlsx` only on a route that opted in (ADR-0103 §11). */
+export interface ExportFileSpec<T extends KeysetCursor> extends CsvExportSpec<T> {
+  format: DataExportFormat;
 }
 
 const MAX_FILTER_STRING = 200;
@@ -82,7 +88,7 @@ export function sanitizeExportFilters(
   return out;
 }
 
-/** The one server-side export path (ADR-0103): limiter, cap, audit row, then a keyset CSV stream. */
+/** The one server-side export path (ADR-0103): limiter, cap, audit row, then a keyset CSV or XLSX stream. */
 @Injectable()
 export class ExportService {
   private readonly logger = new Logger(ExportService.name);
@@ -110,6 +116,14 @@ export class ExportService {
   async exportCsv<T extends KeysetCursor>(
     spec: CsvExportSpec<T>,
   ): Promise<StreamableFile> {
+    return this.exportFile({ ...spec, format: 'csv' });
+  }
+
+  /** Limiter, cap, audit row, then the keyset stream as a CSV or a one-sheet XLSX workbook. */
+  async exportFile<T extends KeysetCursor>(
+    spec: ExportFileSpec<T>,
+  ): Promise<StreamableFile> {
+    const xlsx = spec.format === 'xlsx';
     const release = this.limiter.acquire(exportLimiterKey(spec.principal));
     try {
       const rowCount = await spec.count();
@@ -117,7 +131,8 @@ export class ExportService {
       await this.recordExport({
         principal: spec.principal,
         resource: spec.resource,
-        filters: spec.filters,
+        // No migration: the format rides in the filters JSON, and its absence means CSV.
+        filters: xlsx ? { ...spec.filters, format: 'xlsx' } : spec.filters,
         rowCount,
       });
     } catch (err) {
@@ -125,24 +140,32 @@ export class ExportService {
       throw err;
     }
 
-    const body = Readable.from(
-      streamCsv({
-        columns: spec.columns,
-        batches: keysetBatches(spec.fetchBatch),
-        stamp: spec.stamp ? provenanceStampLine() : undefined,
-      }),
-      { objectMode: false },
-    );
+    const batches = keysetBatches(spec.fetchBatch);
+    const body = xlsx
+      ? streamXlsx({
+          columns: spec.columns,
+          batches,
+          sheetName: spec.filename,
+        })
+      : Readable.from(
+          streamCsv({
+            columns: spec.columns,
+            batches,
+            stamp: spec.stamp ? provenanceStampLine() : undefined,
+          }),
+          { objectMode: false },
+        );
     body.once('close', release);
     // A client gone during the count already fired its close.
     if (spec.response.destroyed) body.destroy();
     else spec.response.once('close', () => body.destroy());
 
     const date = new Date().toISOString().slice(0, 10);
+    const name = `lazyit-${spec.filename}-${date}.${xlsx ? 'xlsx' : 'csv'}`;
     // Nest's default ends a started response cleanly: a truncated file would look complete.
     return new StreamableFile(body, {
-      type: 'text/csv; charset=utf-8',
-      disposition: `attachment; filename="lazyit-${spec.filename}-${date}.csv"`,
+      type: xlsx ? XLSX_CONTENT_TYPE : 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${name}"`,
     }).setErrorHandler((err) => {
       this.logger.error(
         `${spec.resource} export failed mid-stream: ${err.message}`,
