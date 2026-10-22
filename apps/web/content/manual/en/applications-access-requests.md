@@ -87,6 +87,8 @@ requests in the selected status.
 
 Open your **Profile** to see **My access requests** — every request you've raised and its current
 status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave,
-and a request an approver filed for you says so.
+and a request an approver filed for you says so. An approved request also shows whether your account in
+the application has been set up yet — **No automation**, **Setup in progress**, **Set up** or
+**Waiting on IT** (see [Account setup status](/help/getting-started-your-profile#account-setup-status)).
 lazyit also notifies you the moment a decision is made — in your bell, and by email unless you opt out —
 so this list is the full history, not the only way to learn the outcome.

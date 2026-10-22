@@ -49,9 +49,28 @@ conectadas** te permite pasar de una a otra sin volver al menú.
   completa del activo.
 - **Mi acceso a aplicaciones** — las aplicaciones a las que podés acceder ahora, cada una con su nivel
   de acceso y, cuando corresponde, su fecha de vencimiento. Si una concesión venció, se marca como
-  **Vencido**.
+  **Vencido**. Cada una muestra además si tu cuenta en esa aplicación ya está configurada (ver
+  [Estado de configuración de tu cuenta](#estado-de-configuración-de-tu-cuenta)).
 - **Accesos anteriores** — un historial de las aplicaciones a las que *tenías* acceso, con cuándo
   empezó cada concesión y cuándo se revocó. Esta sección aparece solo si tenés accesos pasados.
+
+## Estado de configuración de tu cuenta
+
+Recibir acceso en lazyit y tener una cuenta que funcione en la aplicación son dos pasos. Algunas
+aplicaciones las configura lazyit automáticamente cuando recibís el acceso; otras las configura IT a
+mano. Cada aplicación de **Mi acceso a aplicaciones**, y cada solicitud aprobada de
+**Mis solicitudes de acceso**, muestra uno de cuatro estados:
+
+- **Sin automatización** — lazyit no configura esta aplicación por su cuenta. IT crea tu cuenta a mano;
+  consultales si todavía no podés entrar.
+- **Configuración en curso** — lazyit está creando tu cuenta en este momento. Suele tardar segundos.
+- **Configurada** — tu cuenta se creó automáticamente.
+- **Esperando a IT** — configurar tu cuenta necesita que IT termine un paso, o la configuración
+  automática tuvo un problema. IT lo ve y lo termina; no tenés que hacer nada.
+
+Pasá el puntero sobre un estado para leer qué significa. Solo ves este estado general: los detalles de
+cómo se configura tu cuenta quedan para los administradores. Recargá la página para ver un estado más
+reciente.
 
 ## Editar tu nombre
 
