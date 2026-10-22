@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Releasing lazyit
@@ -30,7 +30,10 @@ Once `v1.0.0` exists on `master`, releases are cut by CI — you do not tag by h
 3. Merge the promotion. The `release` job creates the **annotated tag** (unsigned — CI holds no
    signing key; see *Tag trust* in [[0083-versioning-and-releases]]) + a **GitHub Release** with
    generated notes. CI is otherwise push-free — there is **no external cron or
-   tagging script**; the Action is the automation.
+   tagging script**; the Action is the automation. In parallel,
+   `.github/workflows/promotion-autoclose.yml` closes the issues the promoted PRs reference with
+   `Closes #N` (#1666) — preview it before merging with a dry run; see *Issue auto-close* in
+   [[git-workflow]].
 4. **Rebuild the production images on the host** (`docker compose ... up -d --build`). The
    version an instance reports comes from the tag: `git describe --tags` → build-arg
    `APP_VERSION`/`GIT_SHA` (baked by `infra/start.sh`/compose) → `GET /instance/version` →

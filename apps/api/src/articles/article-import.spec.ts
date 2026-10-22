@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { BadRequestException } from '@nestjs/common';
+import mammoth from 'mammoth';
 import multer from 'multer';
 import {
   extensionOf,
@@ -134,6 +135,29 @@ describe('article-import helpers', () => {
       });
       expect(md).toContain('Datacenter Runbook');
       expect(md).toContain('core switch');
+    });
+
+    // #1290: the .docx path rides mammoth's DEPRECATED markdown writer through a local cast
+    // (article-import.ts), so a mammoth bump that drops it leaves `tsc` green. These two tests are the
+    // guard. Without the first, the removal surfaces only as the misleading 400 "Could not parse the
+    // .docx file" above. mammoth is pinned exactly in package.json — see the bump procedure in
+    // docs/02-domain/entities/article.md before changing it.
+    it('mammoth still exposes the deprecated convertToMarkdown the .docx path depends on (#1290)', () => {
+      const api = mammoth as unknown as Record<string, unknown>;
+      expect(typeof api.convertToMarkdown).toBe('function');
+    });
+
+    it('extracts MARKDOWN, not HTML or raw text, from the real .docx fixture (#1290)', async () => {
+      const md = await parseImportFile({
+        originalname: 'sample.docx',
+        buffer: fixture('sample.docx'),
+      });
+      // The escaped `\.` is the markdown writer's signature: `convertToHtml` would wrap each paragraph
+      // in `<p>`, and `extractRawText` would leave the full stop bare. Paragraphs end in a blank line.
+      expect(md).toBe(
+        'Datacenter Runbook\n\nSteps to restart the core switch safely\\.\n\n',
+      );
+      expect(md).not.toContain('<p>');
     });
 
     it('reads the .md and .txt fixtures', async () => {

@@ -8,7 +8,7 @@ import {
 } from "./smtp";
 
 // Instance SMTP settings (issue #615, ADR-0079). These guard the WIRE shapes `api` (config store) and
-// `web` (the Settings → Instance → SMTP form) agree on — most importantly the WRITE-ONLY password.
+// `web` (the Settings → Email form) agree on — most importantly the WRITE-ONLY password.
 
 describe("SMTP security modes (closed set)", () => {
   test("the enum mirrors SMTP_SECURITY_MODES exactly", () => {

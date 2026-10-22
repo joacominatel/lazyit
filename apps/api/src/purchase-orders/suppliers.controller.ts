@@ -25,6 +25,7 @@ import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateSupplierSchema,
+  SupplierDetailSchema,
   SupplierListPageSchema,
   SupplierMergePreviewSchema,
   SupplierMergeResultSchema,
@@ -45,6 +46,7 @@ import type { User } from '../../generated/prisma/client';
 import type { Principal } from '../auth/principal';
 
 class SupplierDto extends createZodDto(SupplierSchema) {}
+class SupplierDetailDto extends createZodDto(SupplierDetailSchema) {}
 class SupplierListPageDto extends createZodDto(SupplierListPageSchema) {}
 class CreateSupplierDto extends createZodDto(CreateSupplierSchema) {}
 class UpdateSupplierDto extends createZodDto(UpdateSupplierSchema) {}
@@ -150,10 +152,14 @@ export class SuppliersController {
 
   @Get(':id')
   @RequirePermission('purchaseOrder:read')
-  @ApiOperation({ summary: 'Get a supplier by id' })
-  @ApiOkResponse({ type: SupplierDto })
+  @ApiOperation({
+    summary:
+      'Get a supplier by id, with its yearly totals: per year (order date, else recorded date) and per currency ' +
+      'label, over its live purchases that are neither draft nor cancelled — never converted or summed across labels.',
+  })
+  @ApiOkResponse({ type: SupplierDetailDto })
   findOne(@Param('id') id: string) {
-    return this.suppliers.findOne(id);
+    return this.suppliers.findDetail(id);
   }
 
   @Post()

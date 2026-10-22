@@ -51,12 +51,7 @@ import {
 import { AiRunPrincipals, type AiRunPrincipal } from './principal-context';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiRunQueue } from './run-queue';
-import {
-  AI_MESSAGE_FORMAT_RUN,
-  AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
-  AI_RUNTIME_RECORD_ROLE,
-  roleOf,
-} from './run-records';
+import { roleOf } from './run-records';
 import {
   AI_MAX_ACTIVE_RUNS_PER_PRINCIPAL,
   describeError,
@@ -303,20 +298,15 @@ export class AgentRunOrchestrator {
             provider: pinned.provider,
             model: pinned.model,
             idempotencyKey: input.idempotencyKey ?? null,
+            // The chat session epoch the run's tool calls are delegated under (#1675: a column, no
+            // longer a `lazyit-run-v1` row; runs from before it keep their row and are read from it).
+            sessionEpoch:
+              input.identity.kind === 'human'
+                ? input.identity.sessionEpoch
+                : null,
           },
         });
         await this.lifecycle.append(tx, conversation.id, created.id, [
-          {
-            role: AI_RUNTIME_RECORD_ROLE,
-            format: AI_MESSAGE_FORMAT_RUN,
-            content: {
-              runId: created.id,
-              sessionEpoch:
-                input.identity.kind === 'human'
-                  ? input.identity.sessionEpoch
-                  : null,
-            },
-          },
           { role: roleOf(message), content: message },
         ]);
         return created;
@@ -471,6 +461,9 @@ export class AgentRunOrchestrator {
           toolsetHash: toolsetHashOf(tools),
           toolNames: tools.map((tool) => tool.descriptor.name).sort(),
           webSearchMaxUses,
+          // Frozen here, sent as `instructions` on every step (#1675: a column, no longer a
+          // `lazyit-system-prompt-v1` row; conversations from before it keep their row).
+          systemPrompt: prompt.text,
         },
       });
       if (conversation.autoApprove && who.owner.userId) {
@@ -487,13 +480,6 @@ export class AgentRunOrchestrator {
           },
         });
       }
-      await this.lifecycle.append(tx, conversation.id, null, [
-        {
-          role: AI_RUNTIME_RECORD_ROLE,
-          format: AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
-          content: { text: prompt.text },
-        },
-      ]);
       return conversation;
     });
   }

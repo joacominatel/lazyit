@@ -69,8 +69,9 @@ import { pageSchema } from "./pagination";
  *     lazyit ships no agent for get the action with no command rather than an invented one).
  *   - `update.available`     — the weekly update-awareness nudge (ADR-0084 §2, issue #904): the opt-in
  *     GitHub-releases check observed a NEWER release than the running version. Broadcast to the admin
- *     feed (the audience that can act); deep-links to Settings → Instance. De-duped per newly-observed
- *     latest version (one email per version, never a weekly re-nag) and suppressed when current.
+ *     feed (the audience that can act); deep-links to Settings → General & version. De-duped per
+ *     newly-observed latest version (one email per version, never a weekly re-nag) and suppressed when
+ *     current.
  *     INV-6-safe — carries only the version strings + count, no host-identifying data.
  *   - `access_request.created` — a self-service access request was raised (ADR-0085, issue #948): a
  *     user asked to be granted access to an application. Broadcast to the admin feed (the audience that

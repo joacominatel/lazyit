@@ -85,7 +85,10 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
   };
   const receiving = {
     findPendingLines: ok,
+    pendingSummary: ok,
     linkPreview: ok,
+    linkedPreview: ok,
+    applyToLinked: ok,
     linkAssets: ok,
     unlinkAssets: ok,
     receiveFromLine: ok,
@@ -377,6 +380,124 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       await http()
         .get(`/purchase-orders/pending-lines${as('role=VIEWER')}`)
         .expect(403);
+    });
+
+    it('pending-lines takes expectedBefore as a calendar date (#1503); anything else is a 400', async () => {
+      await http()
+        .get(
+          `/purchase-orders/pending-lines${as('role=MEMBER')}&expectedBefore=2026-10-21`,
+        )
+        .expect(200);
+      expect(ok).toHaveBeenCalledWith(
+        { supplierId: undefined, expectedBefore: '2026-10-21' },
+        expect.objectContaining({ limit: 50 }),
+      );
+      ok.mockClear();
+      for (const bad of ['2026-10-21T00:00:00.000Z', '21/10/2026', 'today']) {
+        await http()
+          .get(
+            `/purchase-orders/pending-lines${as('role=MEMBER')}&expectedBefore=${encodeURIComponent(bad)}`,
+          )
+          .expect(400);
+      }
+      expect(ok).not.toHaveBeenCalled();
+    });
+
+    it('pending-summary (#1498) is its own route under purchaseOrder:read, never read as an id', async () => {
+      await http()
+        .get(
+          `/purchase-orders/pending-summary${as('role=MEMBER')}&expectedBefore=2026-10-21`,
+        )
+        .expect(200);
+      expect(receiving.pendingSummary).toHaveBeenCalledWith('2026-10-21');
+      expect(ok).not.toHaveBeenCalledWith('pending-summary');
+      await http()
+        .get(`/purchase-orders/pending-summary${as('role=MEMBER')}`)
+        .expect(200);
+      expect(receiving.pendingSummary).toHaveBeenLastCalledWith(undefined);
+      await http()
+        .get(`/purchase-orders/pending-summary${as('role=VIEWER')}`)
+        .expect(403);
+      await http()
+        .get(`/purchase-orders/pending-summary${as('sa=asset:read')}`)
+        .expect(403);
+      await http()
+        .get(`/purchase-orders/pending-summary${as('sa=purchaseOrder:read')}`)
+        .expect(200);
+      await http()
+        .get(
+          `/purchase-orders/pending-summary${as('role=MEMBER')}&expectedBefore=nope`,
+        )
+        .expect(400);
+    });
+
+    it('the linked preview (#1502) is a read: purchaseOrder:read AND asset:read; the body is validated', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/linked-preview`;
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:read,asset:read')}`)
+        .send({ previousUnitPrice: 138000000 })
+        .expect(201);
+      expect(receiving.linkedPreview).toHaveBeenLastCalledWith(PO, LINE, {
+        previousUnitPrice: 138000000,
+      });
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:read')}`)
+        .send({})
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=asset:read')}`)
+        .send({})
+        .expect(403);
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send({})
+        .expect(403);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send({ previousUnitPrice: -5 })
+        .expect(400);
+    });
+
+    it('apply-to-linked (#1502) needs purchaseOrder:write AND asset:write; fields are required and known', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/apply-to-linked`;
+      const body = { assetIds: [ASSET], fields: ['purchaseCost'] };
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=asset:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write,asset:write')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send(body)
+        .expect(201);
+      expect(receiving.applyToLinked).toHaveBeenLastCalledWith(
+        PO,
+        LINE,
+        body,
+        expect.objectContaining({ kind: 'human' }),
+      );
+      for (const bad of [
+        { assetIds: [ASSET] },
+        { assetIds: [ASSET], fields: [] },
+        { assetIds: [ASSET], fields: ['serial'] },
+        { assetIds: [ASSET, ASSET], fields: ['purchaseCost'] },
+      ]) {
+        await http()
+          .post(`${path}${as('role=ADMIN')}`)
+          .send(bad)
+          .expect(400);
+      }
     });
 
     it('linking, unlinking and receiving need purchaseOrder:write AND asset:write', async () => {

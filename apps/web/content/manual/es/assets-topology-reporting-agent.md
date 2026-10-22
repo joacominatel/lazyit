@@ -700,6 +700,16 @@ Cuando se detectan dos máquinas:
 - Recibís **una sola notificación** en la campana (no una por cada reporte). El título nombra a los dos
   hosts; el resumen arranca con el comando que lo soluciona (la campana recorta los resúmenes largos a
   una línea: pasá el mouse por encima para leerlo completo). La fila enlaza al mapa de topología.
+- Los **contenedores del host nuevo se registran bajo su propia entrada**. Llegan a Revisión pendiente
+  como cualquier contenedor, agrupados bajo el host nuevo, y **nunca tocan los contenedores del
+  servidor que ya estaba**. Tus reglas **no** los confirman automáticamente, aunque alguna coincida:
+  un host que lazyit sospecha que es un clon es para que lo mires vos. Una excepción: si dos clones
+  además comparten el **número de serie**, terminan en una sola entrada, y una vez que lazyit vio una
+  segunda máquina ahí deja de registrar los contenedores de esa entrada hasta que se corrija la
+  identidad, en lugar de dejar que las dos máquinas se marquen por turnos los contenedores como fuera
+  de línea.
+- Un host **hipervisor** en esta situación **no** reporta sus máquinas virtuales ni sus invitados LXC
+  hasta que se corrija su identidad.
 
 La solución está en las máquinas, no en lazyit, y **el comando cambia según la plataforma**: por eso
 la notificación nombra el que corresponde al host que reportó.
@@ -712,7 +722,9 @@ la notificación nombra el que corresponde al host que reportó.
 
 Corregí también la plantilla, o cada clon futuro repite el problema. Una vez que el clon tiene un ID
 propio, simplemente reporta como un host nuevo: confirmalo, o usá **Unificar con…** para plegarlo
-sobre la entrada que lazyit le creó mientras tanto.
+sobre la entrada que lazyit le creó mientras tanto. Sus contenedores también vuelven a reportarse bajo
+el host nuevo. La entrada que lazyit creó para el clon, y los contenedores que cuelgan de ella, dejan
+de reportar y quedan **fuera de línea**; descartalos una vez que confirmaste o unificaste el host nuevo.
 
 Todo esto necesita los datos de hardware que envía un agente **actual**, y necesita que ese agente
 efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas son silenciosas:
@@ -967,7 +979,10 @@ Lo que podés configurar ahí, en tres grupos:
   máquina), el segundo cuánto espera lazyit antes de marcarlo fuera de línea. El segundo valor tiene que
   ser mayor que el primero, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
   propios reportes — el editor no te deja guardar un valor que provoque eso, y lo aclara debajo de la
-  frase en lugar de después de que presiones Guardar.
+  frase en lugar de después de que presiones Guardar. Esa espera también se cuenta desde la última vez
+  que arrancó lazyit: después de una actualización, un reinicio o una caída de lazyit, ningún host se
+  marca fuera de línea hasta que tuvo ese tiempo para volver a informar, así que la vuelta no deja todo
+  el mapa fuera de línea ni llena la campana de falsas alarmas.
 - **Qué recolectan los agentes** — una grilla de casillas, una por recolector: hardware, discos,
   interfaces de red, software instalado, contenedores e invitados del hipervisor, más un tope estricto
   de cuántos paquetes puede informar un host. **Un recolector

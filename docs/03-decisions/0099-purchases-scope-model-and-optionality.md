@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-05
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -216,7 +216,10 @@ assets:
   (2026-10-02, #1489):* a price edit changes no linked asset and proposes nothing; the asset's *Purchase*
   panel marks the line price *Differs from purchase*, and an ordinary asset edit changes the cost
   ([[#Decisions while building (Phase 1 flows web, #1475)]]). The rule that nothing is ever overwritten
-  silently holds either way.
+  silently holds either way. *Built (API), 2026-10-21, #1502:* the proposal's routes —
+  `POST /purchase-orders/:id/lines/:lineId/linked-preview` (pre-checked only where the asset still holds the
+  previous price the caller names) and `…/apply-to-linked` (one transaction, the link's lock order, audited
+  on both sides). Not exposed to the AI. The screens follow in a web unit ([[purchase-order-line]]).
 
 A divergence between an asset's cost and its line is shown ("differs from purchase"); it is never
 corrected silently.
@@ -371,6 +374,13 @@ Until it does, the purchase's documents panel says plainly that files are not in
 deferred by the CEO; the purchase's documents panel warns that the files are not in the backup, and
 [[backups]] item 7 carries the manual workaround.
 
+*Delivered (2026-10-21, #1467):* the backup sidecar archives the attachments volume on every run, right
+after the app DB dump and under the same timestamp, with the dump's schedule and offsite hook and its own
+7-day retention
+([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
+backup from the first run after an update. The documents panel's "not in the backup" notice is updated in the
+web app separately (#1690).
+
 ### 13. Phasing
 
 | Phase | Scope |
@@ -397,6 +407,20 @@ palette (a purchase also by its line descriptions) only by a principal holding `
 applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
 The design, the projections and the upgrade path are in [[0035-search-architecture]]'s 2026-10-03
 amendment.
+
+*Built since (2026-10-21, #1500, API):* the **supplier's yearly totals**, as the CEO scoped them on #1495 the same
+day. `GET /suppliers/:id` adds `yearlyTotals: [{ year, currency, amount, unpricedLines, purchaseCount }]`: the year
+of the order date, else of when the purchase was recorded; live purchases that are neither draft nor cancelled,
+each line as (quantity − cancelled) × unit price; grouped per label by the shared rule of §5 — never converted,
+`amount: null` beyond `MONEY_MAX`. No migration; the field is optional in the contract. The rules are on
+[[supplier]]; the supplier page shows them in a follow-up web change.
+
+*Built (API), 2026-10-21 (#1498, #1503, #1502):* `GET /purchase-orders/pending-summary` (the dashboard's
+*Pending deliveries* counts, over exactly the Pending units rows; `/dashboard/summary` unchanged);
+`expectedBefore` (the viewer's today) on the pending lines, their export and the `purchase_pending_lines`
+tool, for *Overdue only*; `acquiredFrom` / `acquiredTo` on the asset list and export, for the link picker's
+*created near the order date* chip; and the line price follow-up of §2. The web half follows in its own
+unit; a later docs unit consolidates this note ([[purchase-order]], [[purchase-order-line]], [[asset]]).
 
 ### 14. Upgrade safety
 
@@ -440,11 +464,12 @@ amendment.
   - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
   - Viewers keep seeing asset cost while purchases and an asset's purchase provenance are hidden from
     them; there is no field-level authorization.
-  - Purchase documents raise the stakes of the attachments backup gap until §12 ships (#1467, deferred).
+  - Purchase documents raised the stakes of the attachments backup gap until §12 shipped (#1467, delivered
+    2026-10-21).
   - A supplier's PDF goes to the configured AI provider when extraction is on; the disclosure and the
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
-  - The attachments backup sidecar (§12, #1467 — deferred by the CEO).
+  - ~~The attachments backup sidecar (§12, #1467 — deferred by the CEO).~~ Delivered 2026-10-21 (#1467).
   - The items §13 lists as not built (#1495).
   - The four questions left open at acceptance are settled below; none remains open before Phase 1.
 

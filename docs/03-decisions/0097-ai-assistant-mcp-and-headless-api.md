@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -675,8 +675,10 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 - A route-level expected version on writes (assets, consumables, users, KB, access) to close the
   approve→execute window rather than narrow it.
 - Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.
-- Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
-  `lazyit-*` system rows in `ai_messages`.
+- ~~Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
+  `lazyit-*` system rows in `ai_messages`.~~ **Done (#1675):** `AiConversation.systemPrompt` and
+  `AiRun.sessionEpoch`; the legacy rows are read as a fallback, never backfilled or deleted
+  ([[ai-assistant/provider-and-runtime|provider]] §8.1 *Runtime state columns*).
 - A per-host plugin name (two instances installed side by side share the `lazyit` namespace).
 - From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
   the authorization code, record the code → grant link so a replayed code revokes its grant, and a

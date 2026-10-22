@@ -216,6 +216,8 @@ export class AiConversationsService {
     const [rows, total] = await Promise.all([
       this.prisma.aiConversation.findMany({
         where,
+        // The frozen system prompt (#1675) is runtime state the list never shows: not loaded per row.
+        omit: { systemPrompt: true },
         orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
         ...offsetOf(query),
       }),
@@ -336,7 +338,7 @@ export class AiConversationsService {
   }
 
   private summary(
-    row: AiConversation,
+    row: ListedConversation,
     status: AiConversationState,
     config: ResolvedAiProviderConfig | null,
   ): AiConversationSummary {
@@ -349,6 +351,9 @@ export class AiConversationsService {
     };
   }
 }
+
+/** A conversation row as the list loads it: everything but the frozen system prompt (#1675). */
+type ListedConversation = Omit<AiConversation, 'systemPrompt'>;
 
 function stateOf(status: string | undefined): AiConversationState {
   if (status === 'AWAITING_APPROVAL') return 'awaiting-approval';
@@ -363,7 +368,7 @@ function stateOf(status: string | undefined): AiConversationState {
  * now). The toolset pin is checked only by the runtime. AI switched off does not make it read-only.
  */
 function readOnly(
-  row: AiConversation,
+  row: ListedConversation,
   config: ResolvedAiProviderConfig | null,
 ): boolean {
   if (row.closedReason !== null) return true;

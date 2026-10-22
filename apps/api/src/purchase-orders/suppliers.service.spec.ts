@@ -14,7 +14,12 @@ import type { Principal } from '../auth/principal';
 import { ActorService } from '../common/actor.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { PurchaseSearchSync } from '../search/purchase-search.sync';
-import { planSupplierMerge, SuppliersService } from './suppliers.service';
+import {
+  foldSupplierYearlyTotals,
+  planSupplierMerge,
+  SuppliersService,
+  type SupplierYearRow,
+} from './suppliers.service';
 
 const ID = 'clsupplier00000000000001';
 
@@ -589,5 +594,239 @@ describe('SuppliersService.mergePreview (#1496)', () => {
     await expect(service.mergePreview(KEPT, DUP)).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+});
+
+describe('foldSupplierYearlyTotals — per year, per currency label (#1500, ADR-0099 §5)', () => {
+  const row = (over: Partial<SupplierYearRow>): SupplierYearRow => ({
+    year: 2026,
+    currency: 'USD',
+    amount: '0',
+    unpricedLines: 0,
+    purchaseCount: 1,
+    ...over,
+  });
+
+  it('keeps each year apart, newest first as the rows come', () => {
+    expect(
+      foldSupplierYearlyTotals([
+        row({ year: 2026, amount: '1000' }),
+        row({ year: 2025, amount: '500', purchaseCount: 2 }),
+      ]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: 1000,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+      {
+        year: 2025,
+        currency: 'USD',
+        amount: 500,
+        unpricedLines: 0,
+        purchaseCount: 2,
+      },
+    ]);
+  });
+
+  it('never sums across labels: one entry per label in a year (multi-currency)', () => {
+    expect(
+      foldSupplierYearlyTotals([
+        row({ currency: 'USD', amount: '1000' }),
+        row({ currency: 'ARS', amount: '250000' }),
+      ]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: 1000,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+      {
+        year: 2026,
+        currency: 'ARS',
+        amount: 250000,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+    ]);
+  });
+
+  it('groups spellings trimmed and case-insensitively, showing the first one, and adds their counts', () => {
+    expect(
+      foldSupplierYearlyTotals([
+        row({
+          currency: 'usd ',
+          amount: '100',
+          unpricedLines: 1,
+          purchaseCount: 1,
+        }),
+        row({
+          currency: 'USD',
+          amount: '200',
+          unpricedLines: 2,
+          purchaseCount: 3,
+        }),
+      ]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: 'usd',
+        amount: 300,
+        unpricedLines: 3,
+        purchaseCount: 4,
+      },
+    ]);
+  });
+
+  it('a blank or missing label is its own "No currency" group (currency: null)', () => {
+    expect(
+      foldSupplierYearlyTotals([
+        row({ currency: null, amount: '100', purchaseCount: 1 }),
+        row({
+          currency: '  ',
+          amount: '50',
+          unpricedLines: 1,
+          purchaseCount: 1,
+        }),
+        row({ currency: 'EUR', amount: '7' }),
+      ]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: null,
+        amount: 150,
+        unpricedLines: 1,
+        purchaseCount: 2,
+      },
+      {
+        year: 2026,
+        currency: 'EUR',
+        amount: 7,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+    ]);
+  });
+
+  it('a sum above MONEY_MAX reads as null, never an inexact number — also across spellings', () => {
+    const max = BigInt(Number.MAX_SAFE_INTEGER);
+    expect(
+      foldSupplierYearlyTotals([
+        row({ amount: (max * 1000n).toString() }),
+        row({ currency: 'ARS', amount: max.toString() }),
+        row({ currency: 'ars', amount: '1' }),
+      ]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: null,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+      {
+        year: 2026,
+        currency: 'ARS',
+        amount: null,
+        unpricedLines: 0,
+        purchaseCount: 2,
+      },
+    ]);
+  });
+
+  it('a group of only unpriced lines totals 0 and says how many lines were unpriced', () => {
+    expect(
+      foldSupplierYearlyTotals([row({ amount: '0', unpricedLines: 4 })]),
+    ).toEqual([
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: 0,
+        unpricedLines: 4,
+        purchaseCount: 1,
+      },
+    ]);
+  });
+
+  it('no counted purchases → no totals', () => {
+    expect(foldSupplierYearlyTotals([])).toEqual([]);
+  });
+});
+
+describe('SuppliersService.findDetail / yearlyTotals (#1500)', () => {
+  const findFirst = jest.fn();
+  const $queryRaw = jest.fn();
+  const prisma = { supplier: { findFirst }, $queryRaw };
+  const service = new SuppliersService(
+    prisma as unknown as PrismaService,
+    new ActorService(),
+  );
+
+  beforeEach(() => jest.clearAllMocks());
+
+  const sqlOf = () => {
+    const [strings, ...values] = ($queryRaw.mock.calls as unknown[][])[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    return { sql: strings.join('?').replace(/\s+/g, ' '), values };
+  };
+
+  it('answers the supplier plus its folded yearly totals', async () => {
+    findFirst.mockResolvedValue({ id: ID, name: 'Compumundo' });
+    $queryRaw.mockResolvedValue([
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: '1500',
+        unpricedLines: 1,
+        purchaseCount: 2,
+      },
+    ]);
+    await expect(service.findDetail(ID)).resolves.toEqual({
+      id: ID,
+      name: 'Compumundo',
+      yearlyTotals: [
+        {
+          year: 2026,
+          currency: 'USD',
+          amount: 1500,
+          unpricedLines: 1,
+          purchaseCount: 2,
+        },
+      ],
+    });
+  });
+
+  it('404s an unknown or archived supplier before aggregating anything', async () => {
+    findFirst.mockResolvedValue(null);
+    await expect(service.findDetail(ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect($queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('aggregates in one parameterized query: live, non-draft, non-cancelled purchases by year and label', async () => {
+    $queryRaw.mockResolvedValue([]);
+    await service.yearlyTotals(ID);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    const { sql, values } = sqlOf();
+    // The supplier id is a bound parameter, never interpolated text.
+    expect(values).toEqual([ID]);
+    expect(sql).toContain('po."supplierId" = ?');
+    expect(sql).toContain('po."deletedAt" IS NULL');
+    expect(sql).toContain('l."deletedAt" IS NULL');
+    expect(sql).toContain(`po."status" NOT IN ('DRAFT', 'CANCELLED')`);
+    // Year: the order date, else when the purchase was recorded.
+    expect(sql).toContain('COALESCE(po."orderDate", po."createdAt")');
+    // Each line adds (quantity − cancelled) × price, in numeric so nothing overflows.
+    expect(sql).toContain(
+      'GREATEST(l."quantity" - l."cancelledQuantity", 0)::numeric * l."unitPrice"::numeric',
+    );
+    expect(sql).toContain('GROUP BY 1, 2');
   });
 });
