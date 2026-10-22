@@ -415,7 +415,38 @@
     "notesPlaceholder": "Opcional — p. ej. laptop principal de trabajo",
     "assign": "Asignar",
     "assignedToast": "Usuario asignado",
-    "assignError": "No se pudo asignar al usuario"
+    "assignError": "No se pudo asignar al usuario",
+    "assignedAndReleasedToast": "{count, plural, one {Usuario asignado y # activo liberado} other {Usuario asignado y # activos liberados}}",
+    "held": {
+      "title": "Tiene actualmente",
+      "description": "Marca lo que esta persona devuelve. Las liberaciones se aplican al pulsar Asignar; Cancelar deja todo como está.",
+      "descriptionOnCreate": "Marca lo que esta persona devuelve. Las liberaciones se aplican después de crear y asignar el activo; Cancelar deja todo como está.",
+      "readOnlyDescription": "Lo que esta persona tiene ahora. Tu rol no puede liberar activos.",
+      "loading": "Cargando lo que tiene esta persona",
+      "error": "No se pudo cargar lo que tiene esta persona.",
+      "retry": "Reintentar",
+      "empty": "Esta persona no tiene ningún otro activo asignado ahora.",
+      "assetFallback": "Activo",
+      "opensInNewTab": "(se abre en una pestaña nueva)",
+      "since": "Desde el {date}",
+      "release": "Liberar",
+      "releaseAria": "Liberar {name}",
+      "willRelease": "Se libera al pulsar Asignar",
+      "willReleaseOnCreate": "Se libera al crear el activo",
+      "markedCount": "{count, plural, one {Se liberará # activo} other {Se liberarán # activos}}",
+      "noteLabel": "Nota de liberación",
+      "notePlaceholder": "Opcional — p. ej. devolvió la laptop anterior",
+      "noteHelp": "Se guarda en cada activo que liberes aquí."
+    },
+    "report": {
+      "title": "Asignado, pero algunas liberaciones fallaron",
+      "description": "La nueva asignación se guardó. Los activos que no se liberaron siguen asignados a esta persona; libéralos desde la página del activo.",
+      "released": "liberado",
+      "failed": "no liberado",
+      "failedFallback": "no se pudo liberar",
+      "done": "Listo",
+      "skipped": "{count, plural, one {El activo marcado para liberar quedó como estaba.} other {Los # activos marcados para liberar quedaron como estaban.}}"
+    }
   },
   "acknowledge": {
     "title": "Confirmar recepción",
