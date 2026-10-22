@@ -622,6 +622,18 @@ const extraction = {
   ),
 };
 
+const supplierRead = (id: string) => {
+  if (id !== SUPPLIER) throw new NotFoundException('Supplier not found');
+  return Promise.resolve({
+    id: SUPPLIER,
+    name: 'Compumundo',
+    taxId: null,
+    notes: INJECTION,
+    createdAt: T0,
+    updatedAt: T0,
+  });
+};
+
 const suppliers = {
   findPage: jest.fn(() =>
     Promise.resolve(
@@ -632,17 +644,20 @@ const suppliers = {
       ),
     ),
   ),
-  findOne: jest.fn((id: string) => {
-    if (id !== SUPPLIER) throw new NotFoundException('Supplier not found');
-    return Promise.resolve({
-      id: SUPPLIER,
-      name: 'Compumundo',
-      taxId: null,
-      notes: INJECTION,
-      createdAt: T0,
-      updatedAt: T0,
-    });
-  }),
+  findOne: jest.fn(supplierRead),
+  // `GET /suppliers/:id` answers the supplier plus its yearly totals (#1500).
+  findDetail: jest.fn(async (id: string) => ({
+    ...(await supplierRead(id)),
+    yearlyTotals: [
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: 150_000,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+    ],
+  })),
   create: jest.fn((dto: Row) =>
     Promise.resolve({ ...dto, id: cid('knewsupplier'), notes: null }),
   ),
@@ -1428,6 +1443,30 @@ describe('purchases toolset (#1478)', () => {
       ).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
     });
 
+    it("purchase_pending_lines passes expectedBefore (the user's today) to the route; a datetime is refused", async () => {
+      receiving.findPendingLines.mockClear();
+      ok(
+        await tools.invoke(
+          'purchase_pending_lines',
+          { expectedBefore: '2026-10-21' },
+          chat(actor('MEMBER')),
+        ),
+      );
+      expect(receiving.findPendingLines).toHaveBeenCalledWith(
+        { supplierId: undefined, expectedBefore: '2026-10-21' },
+        expect.objectContaining(PAGE),
+      );
+      receiving.findPendingLines.mockClear();
+      expect(
+        await tools.invoke(
+          'purchase_pending_lines',
+          { expectedBefore: '2026-10-21T00:00:00.000Z' },
+          chat(actor('MEMBER')),
+        ),
+      ).toMatchObject({ ok: false });
+      expect(receiving.findPendingLines).not.toHaveBeenCalled();
+    });
+
     it('supplier_search maps the query; supplier notes appear only in supplier_get, untrusted', async () => {
       const search = ok(
         await tools.invoke(
@@ -1453,6 +1492,9 @@ describe('purchases toolset (#1478)', () => {
       expect((get.data as Row).notes).toBe(
         `<untrusted_content>${INJECTION}</untrusted_content>`,
       );
+      // The route now carries the yearly totals (#1500); the tool's projection is unchanged and drops them.
+      expect(suppliers.findDetail).toHaveBeenCalledWith(SUPPLIER);
+      expect(get.data as Row).not.toHaveProperty('yearlyTotals');
     });
   });
 

@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -2262,9 +2262,10 @@ model AiActionLog {
 - For the runtime (W2-3): build the system prompt once at conversation creation from the frozen
   `AiToolService.list` output and store `version` as `AiConversation.promptVersion`; prepend
   `buildTurnContext` to each user message; neutralize a literal `<turn_context>` typed by the user the
-  way `untrusted()` neutralizes its delimiter. As built (W2-3), the built text is stored as the
-  conversation's first `ai_messages` row (`format = lazyit-system-prompt-v1`) and sent unchanged on every
-  step, so a later role, permission or `instructions` change never alters an existing conversation's
+  way `untrusted()` neutralizes its delimiter. As built (W2-3), the built text is stored once and sent
+  unchanged on every step — in `AiConversation.systemPrompt` since #1675; a conversation created before
+  that keeps it in its first `ai_messages` row (`format = lazyit-system-prompt-v1`), which the runtime
+  falls back to when the column is null — so a later role, permission or `instructions` change never alters an existing conversation's
   prompt ([[ai-assistant/provider-and-runtime|provider]] §8.1).
 
 ## 13. Upgrade safety

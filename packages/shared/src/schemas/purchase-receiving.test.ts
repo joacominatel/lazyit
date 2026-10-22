@@ -5,7 +5,11 @@ import { AttachmentEntityTypeSchema } from "./attachment";
 import { PURCHASE_ORDER_EVENT_TYPES } from "./purchase-order";
 import {
   ApplyLicenseSchema,
+  ApplyToLinkedAssetsSchema,
   AssetPurchaseProvenanceSchema,
+  PendingExpectedBeforeSchema,
+  PendingPurchaseSummarySchema,
+  PurchaseLinkedPreviewRequestSchema,
   CreatePurchaseFromAssetsSchema,
   CancelRemainingUnitsSchema,
   LinkAssetsToLineSchema,
@@ -130,7 +134,7 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("the purchase log gains the receiving, linking and document events", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-12, -6)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-13, -7)).toEqual([
       "UNITS_RECEIVED",
       "UNITS_CANCELLED",
       "ASSET_LINKED",
@@ -141,19 +145,23 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("Phase 1b (#1476) appends the stock receipt and the document label edit", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-6, -4)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-7, -5)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
   });
 
   test("Phase 2 (#1477) appends the license apply, the extraction run and the create from assets", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-4, -1)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-5, -2)).toEqual([
       "LICENSE_APPLIED",
       "EXTRACTION_RUN",
       "CREATED_FROM_ASSETS",
     ]);
   });
 
-  test("merging suppliers (#1496) appends SUPPLIER_MERGED at the tail", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.at(-1)).toBe("SUPPLIER_MERGED");
+  test("merging suppliers (#1496) appends SUPPLIER_MERGED", () => {
+    expect(PURCHASE_ORDER_EVENT_TYPES.at(-2)).toBe("SUPPLIER_MERGED");
+  });
+
+  test("re-applying values to linked assets (#1502) appends LINKED_VALUES_APPLIED at the tail", () => {
+    expect(PURCHASE_ORDER_EVENT_TYPES.at(-1)).toBe("LINKED_VALUES_APPLIED");
   });
 });
 
@@ -209,5 +217,56 @@ describe("AssetPurchaseProvenanceSchema", () => {
     };
     expect(header.safeParse({ ...base, createdAt: "2026-10-02T12:00:00.000Z" }).success).toBe(true);
     expect(header.safeParse(base).success).toBe(false);
+  });
+});
+
+describe("Pending units: expectedBefore and the summary (#1503, #1498)", () => {
+  test("expectedBefore is a calendar date, the viewer's today — not a datetime", () => {
+    expect(PendingExpectedBeforeSchema.safeParse("2026-10-21").success).toBe(true);
+    expect(PendingExpectedBeforeSchema.safeParse("2026-10-21T00:00:00.000Z").success).toBe(false);
+    expect(PendingExpectedBeforeSchema.safeParse("2026-13-01").success).toBe(false);
+    expect(PendingExpectedBeforeSchema.safeParse("yesterday").success).toBe(false);
+  });
+
+  test("the summary is three non-negative counts", () => {
+    expect(PendingPurchaseSummarySchema.parse({ purchases: 3, units: 7, overduePurchases: 1 })).toEqual({
+      purchases: 3,
+      units: 7,
+      overduePurchases: 1,
+    });
+    expect(PendingPurchaseSummarySchema.safeParse({ purchases: -1, units: 0, overduePurchases: 0 }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("Re-apply to the linked assets (#1502)", () => {
+  test("the preview body is optional: a previous price (null = none) and its label", () => {
+    expect(PurchaseLinkedPreviewRequestSchema.parse({})).toEqual({});
+    expect(PurchaseLinkedPreviewRequestSchema.parse({ previousUnitPrice: 1380000, previousCurrency: " ARS " })).toEqual({
+      previousUnitPrice: 1380000,
+      previousCurrency: "ARS",
+    });
+    expect(PurchaseLinkedPreviewRequestSchema.safeParse({ previousUnitPrice: null, previousCurrency: null }).success).toBe(
+      true,
+    );
+    expect(PurchaseLinkedPreviewRequestSchema.safeParse({ previousUnitPrice: -1 }).success).toBe(false);
+    expect(PurchaseLinkedPreviewRequestSchema.safeParse({ previousUnitPrice: 1.5 }).success).toBe(false);
+    expect(PurchaseLinkedPreviewRequestSchema.safeParse({ assetIds: [A1] }).success).toBe(false);
+  });
+
+  test("the apply needs assets and at least one known field, nothing else", () => {
+    expect(ApplyToLinkedAssetsSchema.parse({ assetIds: [A1], fields: ["purchaseCost"] })).toEqual({
+      assetIds: [A1],
+      fields: ["purchaseCost"],
+    });
+    expect(ApplyToLinkedAssetsSchema.safeParse({ assetIds: [A1], fields: [] }).success).toBe(false);
+    expect(ApplyToLinkedAssetsSchema.safeParse({ assetIds: [A1] }).success).toBe(false);
+    expect(ApplyToLinkedAssetsSchema.safeParse({ assetIds: [A1], fields: ["serial"] }).success).toBe(false);
+    expect(ApplyToLinkedAssetsSchema.safeParse({ assetIds: [A1, A1], fields: ["purchaseCost"] }).success).toBe(false);
+    expect(ApplyToLinkedAssetsSchema.safeParse({ assetIds: [], fields: ["purchaseCost"] }).success).toBe(false);
+    expect(
+      ApplyToLinkedAssetsSchema.safeParse({ assetIds: [A1], fields: ["purchaseCost"], move: true }).success,
+    ).toBe(false);
   });
 });

@@ -142,11 +142,13 @@ describe('create, send and read', () => {
     await say(id, 'Look it up');
     await h.rt.drain();
     const stored = h.rt.messages(id);
-    const systemPrompt = stored.find(
-      (r) => r.format === 'lazyit-system-prompt-v1',
-    )!.content.text as string;
+    // The frozen prompt is a column since #1675 (and the run's epoch too).
+    const systemPrompt = h.rt.prisma.tables.aiConversation.rows.find(
+      (r) => r.id === id,
+    )!.systemPrompt as string;
+    expect(systemPrompt).toContain('lazyit');
     expect(stored.map((r) => r.format)).toEqual(
-      expect.arrayContaining(['lazyit-run-v1', 'lazyit-step-v1']),
+      expect.arrayContaining(['lazyit-step-v1']),
     );
 
     const res = await http()
@@ -161,6 +163,56 @@ describe('create, send and read', () => {
     for (const message of res.body.messages) {
       expect(['user', 'assistant']).toContain(message.role);
     }
+  });
+
+  it('never puts the legacy runtime rows of a conversation from before #1675 on the wire', async () => {
+    const id = await newConversation();
+    const conversation = h.rt.prisma.tables.aiConversation.rows.find(
+      (r) => r.id === id,
+    )!;
+    conversation.systemPrompt = null;
+    h.rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId: id,
+        runId: null,
+        seq: 0,
+        role: 'system',
+        format: 'lazyit-system-prompt-v1',
+        content: { text: 'LEGACY SYSTEM PROMPT SECRET' },
+      },
+    });
+    h.rt.model.push({ text: 'Done.' });
+    const sent = await say(id, 'Hi');
+    expect(sent.status).toBe(202);
+    const runId = sent.body.runId as string;
+    h.rt.run(runId).sessionEpoch = null;
+    h.rt.prisma.tables.aiMessage.create({
+      data: {
+        conversationId: id,
+        runId,
+        seq: 2,
+        role: 'system',
+        format: 'lazyit-run-v1',
+        content: { runId, sessionEpoch: 3 },
+      },
+    });
+    await h.rt.drain();
+    expect(h.rt.run(runId).status).toBe('SUCCEEDED');
+    expect(h.rt.model.requests[0].instructions).toBe(
+      'LEGACY SYSTEM PROMPT SECRET',
+    );
+
+    const res = await http()
+      .get(`/ai/conversations/${id}`)
+      .set('X-Test-Principal', 'A');
+    expect(res.status).toBe(200);
+    const wire = JSON.stringify(res.body);
+    expect(wire).not.toContain('LEGACY SYSTEM PROMPT SECRET');
+    expect(wire).not.toContain('sessionEpoch');
+    expect(res.body.messages.map((m: { role: string }) => m.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
   });
 
   it('shows the approval card with the stored preview and its outcome', async () => {

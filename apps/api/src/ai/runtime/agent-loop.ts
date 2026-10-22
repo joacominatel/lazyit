@@ -66,15 +66,11 @@ import {
 } from './run-lifecycle';
 import {
   AI_MESSAGE_FORMAT_MODEL,
-  AI_MESSAGE_FORMAT_RUN,
   AI_MESSAGE_FORMAT_STEP,
-  AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
   AI_MESSAGE_FORMAT_WEB_SEARCH,
   AI_RUNTIME_RECORD_ROLE,
   assistantMessageId,
-  readRunRecord,
   readStepRecord,
-  readSystemPrompt,
   roleOf,
   toApprovalRequest,
   type StepOutcome,
@@ -652,15 +648,9 @@ export class AgentLoop {
 
     let identity: DelegatedIdentity;
     if (run.userId) {
-      const record = await this.prisma.aiMessage.findFirst({
-        where: {
-          conversationId: conversation.id,
-          runId,
-          format: AI_MESSAGE_FORMAT_RUN,
-        },
-      });
-      const epoch = record ? readRunRecord(record.content)?.sessionEpoch : null;
-      if (epoch === null || epoch === undefined) {
+      // The run's column, else its legacy `lazyit-run-v1` row (#1675).
+      const epoch = await this.lifecycle.runSessionEpoch(run);
+      if (epoch === null) {
         await this.fail(runId, {
           code: 'FORBIDDEN',
           message: 'The session this run was started from is unknown.',
@@ -678,14 +668,8 @@ export class AgentLoop {
       return null;
     }
 
-    const system = await this.prisma.aiMessage.findFirst({
-      where: {
-        conversationId: conversation.id,
-        format: AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
-      },
-      orderBy: { seq: 'asc' },
-    });
-    const instructions = system ? readSystemPrompt(system.content) : null;
+    // The conversation's column, else its legacy `lazyit-system-prompt-v1` row (#1675).
+    const instructions = await this.lifecycle.frozenSystemPrompt(conversation);
     if (!instructions) {
       await this.lifecycle.closeConversation(
         conversation.id,

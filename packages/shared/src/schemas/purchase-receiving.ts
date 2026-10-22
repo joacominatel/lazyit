@@ -186,6 +186,72 @@ export const UnlinkAssetsResultSchema = z.object({
   line: PurchaseOrderLineSchema,
 });
 
+// ── Re-apply purchase values to the assets already linked to a line (#1502) ─────────────────────────
+
+/**
+ * `POST /purchase-orders/:id/lines/:lineId/linked-preview` — a read with a body: what re-applying the line's
+ * values would do to the live assets ALREADY linked to it, after the line changed (its unit price, today).
+ * `previousUnitPrice` (minor units; `null` = the line had no price) is the price before the edit;
+ * `previousCurrency` the purchase's label at the time (omitted = the purchase's current label; `null` = no
+ * label). Together they drive the pre-check: "follow unless overridden" — an asset that still holds the old
+ * purchase value follows the new one, an asset whose cost was changed by hand is never pre-checked
+ * (ADR-0099 §2, ux-proposal §3.a). With no previous price, only fills are pre-checked.
+ */
+export const PurchaseLinkedPreviewRequestSchema = z.strictObject({
+  previousUnitPrice: money().nullable().optional(),
+  previousCurrency: z.string().trim().max(CURRENCY_LABEL_MAX_LENGTH).nullable().optional(),
+});
+
+/**
+ * One linked asset of the linked preview: its per-field diff against the line (the link preview's shape),
+ * whether its cost is still the previous purchase value (`null` when no previous price was given), and the
+ * fields the confirmation pre-checks — `purchaseCost` when it would FILL, or REPLACE a cost that is still the
+ * previous purchase value. Nothing else is ever pre-checked: the trigger is the unit price only.
+ */
+export const PurchaseLinkedPreviewAssetSchema = PurchaseLinkPreviewAssetSchema.pick({
+  assetId: true,
+  name: true,
+  assetTag: true,
+  fields: true,
+}).extend({
+  holdsPreviousCost: z.boolean().nullable(),
+  preChecked: z.array(PurchaseApplyFieldSchema),
+});
+
+/**
+ * The linked preview: the line and the values it offers now, the previous cost the pre-check compared
+ * against (`null` when none was given), and every live asset linked to the line, by asset tag.
+ */
+export const PurchaseLinkedPreviewSchema = z.object({
+  line: PurchaseOrderLineSchema,
+  values: PurchaseLineValuesSchema,
+  previousCost: PurchaseCostValueSchema.nullable(),
+  assets: z.array(PurchaseLinkedPreviewAssetSchema),
+});
+
+/**
+ * `POST /purchase-orders/:id/lines/:lineId/apply-to-linked` — copy the line's current values onto assets
+ * already linked to it: the listed `fields`, on the listed assets, where the diff is a fill or a replace (a
+ * field the purchase has no value for is never cleared; an equal one is not rewritten). `purchaseCost` writes
+ * its currency label with it. One transaction; explicit and user-triggered, never automatic.
+ */
+export const ApplyToLinkedAssetsSchema = z.strictObject({
+  assetIds: assetIds(),
+  fields: z.array(PurchaseApplyFieldSchema).min(1).max(PURCHASE_APPLY_FIELDS.length),
+});
+
+/**
+ * The apply result: the assets changed, the linked ones that had nothing to change (`unchanged` — every
+ * listed field SAME or UNAVAILABLE), the ones refused (`NOT_FOUND`: missing or archived; `NOT_LINKED`: not on
+ * this line) and the line afterwards.
+ */
+export const ApplyToLinkedAssetsResultSchema = z.object({
+  updated: z.array(AssetSchema),
+  unchanged: z.array(z.string()),
+  failed: z.array(linkFailure),
+  line: PurchaseOrderLineSchema,
+});
+
 // ── Receive from a line ───────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -401,6 +467,25 @@ export const PendingPurchaseLineSchema = PurchaseOrderLineSchema.extend({
 
 export const PendingPurchaseLinePageSchema = pageSchema(PendingPurchaseLineSchema);
 
+/**
+ * `expectedBefore` on `GET /purchase-orders/pending-lines`, its export and `/pending-summary` (#1503,
+ * #1498): the viewer's today, as a calendar date (`YYYY-MM-DD`). A purchase is OVERDUE when its expected
+ * date falls on an earlier day — due today is not late, and a purchase with no expected date is never
+ * overdue. The date is the client's, because "today" is the viewer's, not the server's.
+ */
+export const PendingExpectedBeforeSchema = z.iso.date();
+
+/**
+ * `GET /purchase-orders/pending-summary` — the dashboard's *Pending deliveries* row (#1498), over exactly
+ * the Pending units rows: `purchases` with at least one pending line, the `units` pending on them, and the
+ * `overduePurchases` among them (expected before `expectedBefore`, else before the server's UTC today).
+ */
+export const PendingPurchaseSummarySchema = z.object({
+  purchases: z.number().int().min(0),
+  units: z.number().int().min(0),
+  overduePurchases: z.number().int().min(0),
+});
+
 // ── An asset's purchase provenance ────────────────────────────────────────────────────────────────────
 
 /** The supplier as an asset's provenance shows it — with the support / RMA contact (warranty claims). */
@@ -461,6 +546,12 @@ export type ReceiveStockFromLineResult = z.infer<typeof ReceiveStockFromLineResu
 export type CancelRemainingUnits = z.infer<typeof CancelRemainingUnitsSchema>;
 export type PendingPurchaseLine = z.infer<typeof PendingPurchaseLineSchema>;
 export type PendingPurchaseLinePage = z.infer<typeof PendingPurchaseLinePageSchema>;
+export type PendingPurchaseSummary = z.infer<typeof PendingPurchaseSummarySchema>;
+export type PurchaseLinkedPreviewRequest = z.infer<typeof PurchaseLinkedPreviewRequestSchema>;
+export type PurchaseLinkedPreviewAsset = z.infer<typeof PurchaseLinkedPreviewAssetSchema>;
+export type PurchaseLinkedPreview = z.infer<typeof PurchaseLinkedPreviewSchema>;
+export type ApplyToLinkedAssets = z.infer<typeof ApplyToLinkedAssetsSchema>;
+export type ApplyToLinkedAssetsResult = z.infer<typeof ApplyToLinkedAssetsResultSchema>;
 export type AssetPurchaseProvenance = z.infer<typeof AssetPurchaseProvenanceSchema>;
 export type LicenseApplyWarning = z.infer<typeof LicenseApplyWarningSchema>;
 export type LicenseApplication = z.infer<typeof LicenseApplicationSchema>;

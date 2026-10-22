@@ -678,8 +678,10 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
   **Done in #1683** ([[ai-assistant/mcp-and-oauth|MCP]] §16): a per-user overall cap on `/mcp` on top of
   the per-grant / per-SA limits (CEO Q8), DCR keyed per IPv4 address or IPv6 /64, and the oldest unused
   pending registration evicted at the cap.
-- Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
-  `lazyit-*` system rows in `ai_messages`.
+- ~~Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
+  `lazyit-*` system rows in `ai_messages`.~~ **Done (#1675):** `AiConversation.systemPrompt` and
+  `AiRun.sessionEpoch`; the legacy rows are read as a fallback, never backfilled or deleted
+  ([[ai-assistant/provider-and-runtime|provider]] §8.1 *Runtime state columns*).
 - A per-host plugin name (two instances installed side by side share the `lazyit` namespace).
 - ~~From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
   the authorization code, record the code → grant link so a replayed code revokes its grant, and a

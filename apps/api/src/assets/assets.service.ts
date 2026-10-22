@@ -160,6 +160,13 @@ export interface AssetFilters {
    * `expired` = warranty end already passed. Assets with no `warrantyEnd` match neither.
    */
   warranty?: AssetWarrantyFilter;
+  /**
+   * The acquisition-date window (#1503), ISO datetimes, both inclusive: the asset's `purchaseDate`, or its
+   * `createdAt` when it has no purchase date, within `[acquiredFrom, acquiredTo]`. Either bound alone is open
+   * on the other side. A plain-column filter (`asset:read`), unlike the purchase filters below.
+   */
+  acquiredFrom?: string;
+  acquiredTo?: string;
   /** Exact, case-sensitive asset tags (#1387): the assets holding any of them. */
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
@@ -352,6 +359,26 @@ type LeanListRow = Omit<
   Partial<Pick<AssetWithLeanSelect, 'purchaseCost' | 'purchaseCurrency'>>;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The acquisition-date window (#1503): the asset's purchase date within `[from, to]`, or — for an asset with
+ * no purchase date — the day it was recorded. Both bounds inclusive, either one optional; neither → no filter.
+ * The link picker's "created near the order date" chip: a back-linked asset is usually dated by its purchase,
+ * a received one only by its creation.
+ */
+export function acquiredWindowWhere(
+  from: string | undefined,
+  to: string | undefined,
+): Prisma.AssetWhereInput | undefined {
+  if (from === undefined && to === undefined) return undefined;
+  const range: Prisma.DateTimeFilter = {
+    ...(from !== undefined ? { gte: new Date(from) } : {}),
+    ...(to !== undefined ? { lte: new Date(to) } : {}),
+  };
+  return {
+    OR: [{ purchaseDate: range }, { purchaseDate: null, createdAt: range }],
+  };
+}
 
 /**
  * The `warrantyEnd` predicate for the warranty-window list filter (#955). `expiring90d` = the same
@@ -658,6 +685,8 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    acquiredFrom,
+    acquiredTo,
     purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
     // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
@@ -683,8 +712,12 @@ export class AssetsService {
             },
           ]),
     ];
+    // The acquisition window (#1503) — an OR of its own, so it joins the AND list rather than the top-level
+    // `OR` the text search writes.
+    const acquired = acquiredWindowWhere(acquiredFrom, acquiredTo);
+    const and = [...purchase, ...(acquired ? [acquired] : [])];
     return {
-      ...(purchase.length > 0 ? { AND: purchase } : {}),
+      ...(and.length > 0 ? { AND: and } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.

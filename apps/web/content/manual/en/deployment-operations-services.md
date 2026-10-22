@@ -25,8 +25,9 @@ that publishes ports to the host; everything else lives on an internal Docker ne
 
 No identity provider runs in the stack. With local accounts lazyit handles sign-in itself; with your
 own OIDC provider, sign-in goes to a service you run elsewhere (see
-[Identity provider](/help/deployment-operations-identity-provider)). An optional **backup** sidecar
-can also run alongside — see [Backups & restore](/help/deployment-operations-backups-restore).
+[Identity provider](/help/deployment-operations-identity-provider)). A **backup** sidecar runs
+alongside, dumping the database and archiving the uploaded files on a schedule — see
+[Backups & restore](/help/deployment-operations-backups-restore).
 
 ## How the pieces fit together
 
@@ -49,6 +50,9 @@ restore](/help/deployment-operations-backups-restore).
 ## What is and isn't a backup target
 
 - **db** holds real state — **back it up.**
+- The **attachments volume** (mounted on **api**) holds the uploaded files — documents and
+  knowledge-base images. It is real state too, and the backup sidecar archives it with every database
+  dump.
 - **meilisearch** is rebuildable: its index is reconstructed from the database with a re-index
   command, so its data does not need backing up.
 - **valkey** holds only in-flight background-job state (PostgreSQL is the system of record), so it is

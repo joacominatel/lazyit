@@ -651,6 +651,330 @@ describe('unlink assets', () => {
   });
 });
 
+describe('re-apply to the linked assets (#1502)', () => {
+  /** The line's unit price 141250000 ARS replaced 138000000 ARS. */
+  const PREVIOUS = { previousUnitPrice: 138000000 };
+
+  it('preview: every live asset on the line, pre-checked where it fills or still holds the previous price', async () => {
+    const { service, reads } = setup();
+    reads.asset.findMany.mockResolvedValue([
+      // Still the old purchase value (the label compared trimmed, case-insensitive) → follows: pre-checked.
+      assetRow(A1, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(138000000),
+        purchaseCurrency: 'ars',
+      }),
+      // Changed by hand → overridden: never pre-checked.
+      assetRow(A2, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(120000000),
+        purchaseCurrency: 'ARS',
+      }),
+      // No cost → a fill: pre-checked.
+      assetRow(A3, { purchaseOrderLineId: LINE }),
+      // Already the new price → nothing to do.
+      assetRow(A4, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(141250000),
+        purchaseCurrency: 'ARS',
+      }),
+    ]);
+
+    const preview = await service.linkedPreview(PO, LINE, PREVIOUS);
+
+    expect(reads.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { purchaseOrderLineId: LINE, deletedAt: null },
+        orderBy: [{ assetTag: 'asc' }, { id: 'asc' }],
+      }),
+    );
+    // The previous label defaults to the purchase's current one.
+    expect(preview.previousCost).toEqual({
+      amount: 138000000,
+      currency: 'ARS',
+    });
+    expect(preview.values.purchaseCost).toEqual({
+      amount: 141250000,
+      currency: 'ARS',
+    });
+    expect(
+      preview.assets.map((a) => [
+        a.assetId,
+        a.fields.purchaseCost.action,
+        a.holdsPreviousCost,
+        a.preChecked,
+      ]),
+    ).toEqual([
+      [A1, 'REPLACE', true, ['purchaseCost']],
+      [A2, 'REPLACE', false, []],
+      [A3, 'FILL', false, ['purchaseCost']],
+      [A4, 'SAME', false, []],
+    ]);
+  });
+
+  it('preview: another previous label makes a same-amount asset overridden; no previous price pre-checks fills only', async () => {
+    const { service, reads } = setup();
+    reads.asset.findMany.mockResolvedValue([
+      assetRow(A1, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(138000000),
+        purchaseCurrency: 'ARS',
+      }),
+      assetRow(A2, { purchaseOrderLineId: LINE }),
+    ]);
+
+    const usd = await service.linkedPreview(PO, LINE, {
+      previousUnitPrice: 138000000,
+      previousCurrency: 'USD',
+    });
+    expect(usd.assets[0]).toMatchObject({
+      holdsPreviousCost: false,
+      preChecked: [],
+    });
+
+    const none = await service.linkedPreview(PO, LINE, {});
+    expect(none.previousCost).toBeNull();
+    expect(none.assets.map((a) => [a.holdsPreviousCost, a.preChecked])).toEqual(
+      [
+        [null, []],
+        [null, ['purchaseCost']],
+      ],
+    );
+  });
+
+  it('preview: 400 on a line that is not ASSET, 404 on an archived purchase; it writes nothing', async () => {
+    const { service, reads, prisma } = setup();
+    reads.purchaseOrderLine.findFirst.mockResolvedValueOnce(
+      lineRow({ kind: 'CONSUMABLE' }),
+    );
+    await expect(
+      service.linkedPreview(PO, LINE, PREVIOUS),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    reads.purchaseOrder.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.linkedPreview(PO, LINE, PREVIOUS),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.asset.update).not.toHaveBeenCalled();
+  });
+
+  /** The fake update returns the asset as stored after the write: its row, then the written columns. */
+  function storedAfterUpdate(
+    tx: { asset: { update: jest.Mock } },
+    rows: Row[],
+  ) {
+    const byId = new Map(rows.map((row) => [row.id as string, row]));
+    tx.asset.update.mockImplementation(
+      ({ where, data }: { where: { id: string }; data: Row }) =>
+        Promise.resolve({ salvageValue: null, ...byId.get(where.id), ...data }),
+    );
+  }
+
+  it('apply: cost and currency together, on the listed assets only, audited on both sides in ONE transaction', async () => {
+    const { service, tx, prisma, reads } = setup();
+    const rows = [
+      assetRow(A1, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(138000000),
+        purchaseCurrency: 'ARS',
+      }),
+      // Same amount under another label: only the currency changes.
+      assetRow(A2, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(141250000),
+        purchaseCurrency: 'USD',
+      }),
+      // Already the purchase value: unchanged, nothing written.
+      assetRow(A3, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(141250000),
+        purchaseCurrency: 'ARS',
+      }),
+      // On another line: refused.
+      assetRow(A4, { purchaseOrderLineId: OTHER_LINE }),
+    ];
+    reads.asset.findMany.mockResolvedValue(rows);
+    storedAfterUpdate(tx, rows);
+    const MISSING = 'classet00000000000000009';
+
+    const result = await service.applyToLinked(
+      PO,
+      LINE,
+      { assetIds: [A1, A2, A3, A4, MISSING], fields: ['purchaseCost'] },
+      member,
+    );
+
+    expect(
+      result.updated.map((a) => [a.id, a.purchaseCost, a.purchaseCurrency]),
+    ).toEqual([
+      [A1, 141250000, 'ARS'],
+      [A2, 141250000, 'ARS'],
+    ]);
+    expect(result.unchanged).toEqual([A3]);
+    expect(result.failed).toEqual([
+      expect.objectContaining({ assetId: A4, reason: 'NOT_LINKED' }),
+      expect.objectContaining({ assetId: MISSING, reason: 'NOT_FOUND' }),
+    ]);
+    // Cost and its label move together; nothing else is written.
+    expect(written(tx.asset.update)).toEqual([
+      { purchaseCost: BigInt(141250000), purchaseCurrency: 'ARS' },
+      { purchaseCost: BigInt(141250000), purchaseCurrency: 'ARS' },
+    ]);
+    const provenance = {
+      source: 'purchase',
+      purchaseOrderId: PO,
+      purchaseOrderLineId: LINE,
+    };
+    expect(written(tx.assetHistory.create)).toEqual([
+      expect.objectContaining({
+        assetId: A1,
+        eventType: 'UPDATED',
+        payload: { fields: ['purchaseCost'], ...provenance },
+      }),
+      expect.objectContaining({
+        assetId: A2,
+        eventType: 'UPDATED',
+        payload: { fields: ['purchaseCurrency'], ...provenance },
+      }),
+    ]);
+    expect(written(tx.purchaseOrderEvent.create)).toEqual([
+      expect.objectContaining({
+        purchaseOrderId: PO,
+        eventType: 'LINKED_VALUES_APPLIED',
+        performedById: USER_ID,
+        payload: {
+          lineId: LINE,
+          fields: ['purchaseCost'],
+          assetIds: [A1, A2],
+          applied: { [A1]: ['purchaseCost'], [A2]: ['purchaseCost'] },
+        },
+      }),
+    ]);
+    // Nothing escaped the transaction.
+    expect(prisma.asset.update).not.toHaveBeenCalled();
+    expect(prisma.purchaseOrderEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('apply: the lock order is the link one — the purchase FOR KEY SHARE first, then the assets FOR UPDATE by id', async () => {
+    const { service, tx, reads } = setup();
+    const rows = [
+      assetRow(A1, { purchaseOrderLineId: LINE, purchaseCost: BigInt(1) }),
+    ];
+    reads.asset.findMany.mockResolvedValue(rows);
+    storedAfterUpdate(tx, rows);
+
+    await service.applyToLinked(
+      PO,
+      LINE,
+      { assetIds: [A1], fields: ['purchaseCost'] },
+      member,
+    );
+
+    const [purchaseLock, assetLock] = tx.$queryRaw.mock.calls as [
+      TemplateStringsArray,
+      ...unknown[],
+    ][];
+    expect(purchaseLock[0].join('?')).toContain(
+      'FROM "purchase_orders" WHERE "id" = ? FOR KEY SHARE',
+    );
+    expect(assetLock[0].join('?')).toContain('ORDER BY "id" FOR UPDATE');
+    const lockOrder = tx.$queryRaw.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(
+      reads.purchaseOrder.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      tx.asset.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('apply: a line without a price clears nothing; nothing to change writes no event', async () => {
+    const { service, tx, reads } = setup();
+    reads.purchaseOrderLine.findFirst.mockResolvedValue(
+      lineRow({ unitPrice: null }),
+    );
+    reads.asset.findMany.mockResolvedValue([
+      assetRow(A1, {
+        purchaseOrderLineId: LINE,
+        purchaseCost: BigInt(138000000),
+        purchaseCurrency: 'ARS',
+      }),
+    ]);
+
+    const result = await service.applyToLinked(
+      PO,
+      LINE,
+      { assetIds: [A1], fields: ['purchaseCost'] },
+      member,
+    );
+
+    expect(result.updated).toEqual([]);
+    expect(result.unchanged).toEqual([A1]);
+    expect(tx.asset.update).not.toHaveBeenCalled();
+    expect(tx.assetHistory.create).not.toHaveBeenCalled();
+    expect(tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('apply: the model goes through MODEL_CHANGED, and an archived line model is refused (400) before any write', async () => {
+    const { service, tx, reads } = setup();
+    const rows = [
+      assetRow(A1, { purchaseOrderLineId: LINE, modelId: OLD_MODEL }),
+    ];
+    reads.asset.findMany.mockResolvedValue(rows);
+    storedAfterUpdate(tx, rows);
+
+    await service.applyToLinked(
+      PO,
+      LINE,
+      { assetIds: [A1], fields: ['modelId'] },
+      member,
+    );
+    expect(written(tx.assetHistory.create)).toEqual([
+      expect.objectContaining({
+        eventType: 'MODEL_CHANGED',
+        payload: { from: OLD_MODEL, to: MODEL },
+      }),
+    ]);
+
+    const archived = setup();
+    archived.reads.assetModel.findFirst.mockResolvedValue(null);
+    archived.reads.asset.findMany.mockResolvedValue(rows);
+    await expect(
+      archived.service.applyToLinked(
+        PO,
+        LINE,
+        { assetIds: [A1], fields: ['modelId'] },
+        member,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(archived.tx.asset.update).not.toHaveBeenCalled();
+  });
+
+  it('apply: 400 on a line that is not ASSET and 404 on an archived purchase, before touching any asset', async () => {
+    const { service, tx, reads } = setup();
+    reads.purchaseOrderLine.findFirst.mockResolvedValueOnce(
+      lineRow({ kind: 'OTHER' }),
+    );
+    await expect(
+      service.applyToLinked(
+        PO,
+        LINE,
+        { assetIds: [A1], fields: ['purchaseCost'] },
+        member,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    reads.purchaseOrder.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.applyToLinked(
+        PO,
+        LINE,
+        { assetIds: [A1], fields: ['purchaseCost'] },
+        member,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.asset.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('receive from a line', () => {
   const ok = { created: [], failed: [], overReceived: false };
 
@@ -830,6 +1154,99 @@ describe('pending units', () => {
     expect(sql).toContain('po."deletedAt" IS NULL');
     expect(sql).toContain('po."supplierId" = ');
     expect(sql).toContain('clsupplier00000000000001');
+  });
+});
+
+describe('pending units — overdue and the summary (#1503, #1498)', () => {
+  /** The raw SQL of one $queryRaw call, flattened (strings and nested fragments). */
+  const sqlOf = (call: unknown) => JSON.stringify(call).replace(/\\"/g, '"');
+
+  it('expectedBefore keeps the purchases expected on an EARLIER day: expectedDate < that day 00:00 UTC', async () => {
+    const { service, prisma, reads } = setup();
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+    reads.purchaseOrderLine.findMany.mockResolvedValue([]);
+
+    await service.findPendingLines({ expectedBefore: '2026-10-21' }, {
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    } as never);
+
+    for (const call of prisma.$queryRaw.mock.calls) {
+      const sql = sqlOf(call);
+      expect(sql).toContain('po."expectedDate" < ');
+      expect(sql).toContain('::timestamp(3)');
+      expect(sql).toContain('2026-10-21T00:00:00.000Z');
+    }
+  });
+
+  it('without expectedBefore the list is unchanged: no expected-date predicate', async () => {
+    const { service, prisma, reads } = setup();
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+    reads.purchaseOrderLine.findMany.mockResolvedValue([]);
+
+    await service.findPendingLines({}, {
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    } as never);
+
+    expect(sqlOf(prisma.$queryRaw.mock.calls[0])).not.toContain('expectedDate');
+  });
+
+  it('the export walks the same overdue fragment', async () => {
+    const { service, prisma } = setup();
+    prisma.$queryRaw.mockResolvedValueOnce([{ total: 0 }]);
+    await service
+      .pendingLinesExportSource({ expectedBefore: '2026-10-21' })
+      .count();
+    expect(sqlOf(prisma.$queryRaw.mock.calls[0])).toContain(
+      'po."expectedDate" < ',
+    );
+  });
+
+  it('the summary counts purchases, units and overdue purchases over the Pending units rows', async () => {
+    const { service, prisma } = setup();
+    prisma.$queryRaw.mockResolvedValueOnce([
+      { purchases: 3, units: BigInt(7), overduePurchases: 1 },
+    ]);
+
+    const summary = await service.pendingSummary('2026-10-21');
+
+    expect(summary).toEqual({ purchases: 3, units: 7, overduePurchases: 1 });
+    const sql = sqlOf(prisma.$queryRaw.mock.calls[0]);
+    // Exactly the pending rule of the list: same exclusions, same derived received count.
+    expect(sql).toContain(`NOT IN ('DRAFT', 'CANCELLED')`);
+    expect(sql).toContain('l."quantity" - l."cancelledQuantity" - ');
+    expect(sql).toContain('a."deletedAt" IS NULL');
+    expect(sql).toContain('"consumable_movements"');
+    expect(sql).toContain('COUNT(DISTINCT po."id")');
+    expect(sql).toContain('FILTER');
+    expect(sql).toContain('2026-10-21T00:00:00.000Z');
+  });
+
+  it("the summary's overdue day defaults to the server's UTC today; an empty result is zeros", async () => {
+    const { service, prisma } = setup();
+    prisma.$queryRaw.mockResolvedValueOnce([
+      { purchases: 0, units: null, overduePurchases: 0 },
+    ]);
+    jest.useFakeTimers({ now: new Date('2026-10-21T23:30:00.000Z') });
+    try {
+      expect(await service.pendingSummary()).toEqual({
+        purchases: 0,
+        units: 0,
+        overduePurchases: 0,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(sqlOf(prisma.$queryRaw.mock.calls[0])).toContain(
+      '2026-10-21T00:00:00.000Z',
+    );
   });
 });
 
