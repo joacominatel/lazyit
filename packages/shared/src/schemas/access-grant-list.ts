@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AccessGrantSchema } from "./access-grant";
+import { AccessGrantSchema, MyAccessGrantSchema } from "./access-grant";
 import { pageSchema } from "./pagination";
 
 /**
@@ -15,6 +15,14 @@ import { pageSchema } from "./pagination";
 export const AccessGrantListPageSchema = pageSchema(AccessGrantSchema);
 
 export type AccessGrantListPage = z.infer<typeof AccessGrantListPageSchema>;
+
+/**
+ * Paginated self-scope `GET /access-grants/mine` envelope (#1700): the same page, with each grant
+ * carrying the coarse `provisioning` status ({@link MyAccessGrantSchema}). The admin lists above do not.
+ */
+export const MyAccessGrantListPageSchema = pageSchema(MyAccessGrantSchema);
+
+export type MyAccessGrantListPage = z.infer<typeof MyAccessGrantListPageSchema>;
 
 /**
  * The "expiring soon" look-ahead for an access grant, in days (#1660). The same 30 the dashboard's

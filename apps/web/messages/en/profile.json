@@ -55,5 +55,23 @@
     "deniedReason": "Reason: {reason}",
     "filedForYouBy": "Filed for you by {name}",
     "filedForYou": "Filed for you by an approver"
+  },
+  "provisioning": {
+    "NONE": {
+      "label": "No automation",
+      "hint": "IT sets up your account for this application by hand, outside lazyit."
+    },
+    "IN_PROGRESS": {
+      "label": "Setup in progress",
+      "hint": "lazyit is setting up your account for this application."
+    },
+    "DONE": {
+      "label": "Set up",
+      "hint": "Your account for this application was set up automatically."
+    },
+    "WAITING_ON_IT": {
+      "label": "Waiting on IT",
+      "hint": "IT has to finish setting up your account for this application. Nothing is needed from you."
+    }
   }
 }
