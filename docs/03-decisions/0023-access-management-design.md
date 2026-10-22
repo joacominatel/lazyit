@@ -237,17 +237,30 @@ archived parent. Writes and deletes now serialize on the parent row:
     before that row (#1604 review). Purchases come before assets so the delete cannot cross a link or an
     apply on the same purchase and assets (#1696);
   - the **asset-model delete** takes both model rows, the purchases of the mapped lines `FOR SHARE`, its
-    assets `FOR UPDATE`, then the open lines `FOR UPDATE`, all in id order — so it crosses neither a
-    location delete over the same purchase and assets nor a link of its asset to its line;
+    assets `FOR UPDATE`, then the open lines `FOR UPDATE`, all in id order — so it does not cross a
+    location delete over the same purchase and assets, nor a link of its asset to its line that leaves
+    the model alone;
   - a category delete takes its rows, then the rows filed under them.
 
-  No transaction waits for an earlier row in this order while it holds a later one, so none of these
-  pairs can deadlock. Each pair is reproduced against Postgres in `apps/api/test/parent-row-locks.db.spec.ts`.
-- **A lost lock race is a retryable `409`, not a `500` (#1696).** Should a deadlock (`40P01`) or a
-  serialization failure (`40001`) still happen, Prisma reports it as `P2034` (a model call) or `P2010`
-  with the Postgres code (a raw query). The global `PrismaExceptionFilter` and the AI tool error mapper
-  answer `409` with a generic "try again" message (the transaction rolled back, so nothing was saved),
-  and it is logged at `warn`, since it means two writes took locks in different orders.
+  For the pairs above, no transaction waits for an earlier row in this order while it holds a later one, so
+  they do not deadlock. Each pair is reproduced against Postgres in `apps/api/test/parent-row-locks.db.spec.ts`.
+- **Known exception: writes that set a model** (#1703, already the case before this amendment). The link
+  with `apply: ['modelId']`, `applyToLinked` with `modelId`, purchase-from-assets applying the line's
+  model, `updateLine` setting `assetModelId`, and the asset `modelId` writes lock the asset or line first
+  and reach the model only through its FK (`FOR KEY SHARE`). The model delete holds the model and waits for
+  that asset or line, so the two can deadlock (`40P01`); reproduced on Postgres and recorded as an
+  `it.todo` in that suite. The fix is the same rule: the writer locks the model `FOR SHARE` before its own
+  rows.
+- **A lost lock race is a retryable `503`, not a `500` (#1696).** Should a deadlock (`40P01`) or a
+  serialization failure (`40001`) still happen (see the known exception above), Prisma reports it as
+  `P2034` (a model call) or `P2010` with the Postgres code (a raw query). The transaction rolled back, so
+  nothing was saved and the same request should be sent again. The global `PrismaExceptionFilter`
+  answers **`503`** with `Retry-After: 1` and a body
+  `{ statusCode: 503, code: "TRANSACTION_CONFLICT", message }`, the message a generic "try again".
+  It is not a `409`: web flows read a `409` as a specific business conflict, and MCP and headless
+  clients treat it as final. The AI tool error mapper answers `CONFLICT` with the same "try again"
+  message, which the model reads as a cue to retry. A deadlock is logged as an **error** (it means two
+  writes took row locks in different orders, a lock-order bug); a serialization failure as a warning.
 - **Cost:** a parent rename or delete waits for in-flight writes that name the parent, and those writes
   wait for it. Concurrent writes never wait on each other, since shared locks do not conflict.
 

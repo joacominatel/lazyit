@@ -43,7 +43,10 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
   (30 s timeout). Locks, in order: both models `FOR UPDATE`, the purchases of the mapped lines
   `FOR SHARE` (settled against a status change or archive in flight), the assets `FOR UPDATE`, then the
   open lines `FOR UPDATE` — purchase, asset, line, the order a link and a location delete take
-  ([[0023-access-management-design]], #1696). Each moved asset gets a
+  ([[0023-access-management-design]], #1696). Known exception (#1703): a write that **sets** this model
+  on an asset or a line (a link or apply with `modelId`, purchase-from-assets, a line update, an asset
+  `modelId` write) locks its row before it reaches the model through the FK, so it can still deadlock
+  with the delete. The request then gets a retryable `503`. Each moved asset gets a
   `MODEL_CHANGED` [[asset-history]] row (`{ from, to }`, `to: null` on detach), all written in one
   insert, and each line a `LINE_UPDATED` [[purchase-order-event]] for `assetModelId`. History keeps its
   reference: archived assets, received lines and the lines of cancelled purchases still point at the
