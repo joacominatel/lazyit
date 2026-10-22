@@ -41,7 +41,8 @@ Puedes volver **Atrás** en cualquier paso antes de confirmar para cambiar tus r
 Exporta tu hoja de cálculo como **CSV (UTF-8)**, o proporciona un **arreglo JSON** de objetos. Cada
 fila (u objeto) se convierte en un activo.
 
-- Los archivos `.xlsx` **no** se aceptan — expórtalos a CSV primero.
+- Los archivos `.xlsx` **no** se aceptan — expórtalos a CSV primero. Eso incluye el archivo de Excel de
+  la exportación de Activos: para ir y volver, exporta el inventario como **CSV**.
 - El archivo se analiza en segundo plano; suele tardar unos segundos.
 - Las columnas de solo fecha y cualquier columna de marca temporal `created`/`updated`/`deleted` se
   rechazan — esta primera fase importa el *estado actual* de un activo, no su historial.

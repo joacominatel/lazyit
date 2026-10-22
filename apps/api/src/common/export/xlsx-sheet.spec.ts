@@ -51,6 +51,19 @@ describe('xlsxText — an inline string body', () => {
     expect(decodeXlsxText(out)).toBe('id_x0041_end');
   });
 
+  it('keeps chained _xHHHH_ escapes that share an underscore literal', () => {
+    const out = xlsxText('_x0041_x0042_');
+    expect(out).toBe('_x005F_x0041_x005F_x0042_');
+    expect(decodeXlsxText(out)).toBe('_x0041_x0042_');
+  });
+
+  it('keeps a literal _xHHHH literal when a control character follows it', () => {
+    const out = xlsxText('_x0041\u0002');
+    expect(out).toBe('_x005F_x0041_x0002_');
+    expect(decodeXlsxText(out)).toBe('_x0041\u0002');
+    expect(decodeXlsxText(xlsxText('id_x00e9\r'))).toBe('id_x00e9\r');
+  });
+
   it('round-trips every character Excel can hold', () => {
     const value = 'José 😀 ＝1+1 \u0002 _x00e9_ <&>';
     expect(decodeXlsxText(xlsxText(value))).toBe(value);

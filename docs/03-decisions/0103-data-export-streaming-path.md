@@ -225,6 +225,11 @@ purchases list and the asset inventory, and offered to other routes later, one a
   so the filter name carries the exact row count. The response stream emits `close` on success, failure
   and disconnect alike, which is what frees the limiter slot; a batch failing mid-stream destroys the
   response as in §4.
+- **The web (2026-10-22, #1501).** `<ExportButton>` takes the list's `resource`; for one in
+  `DATA_EXPORT_XLSX_RESOURCES` it becomes an *Export* menu with **CSV (.csv)** and **Excel (.xlsx)**, and
+  every other list keeps its single *Export CSV* button. The two formats send the same filter params
+  (`lib/export/export-file.ts` `exportParams()`): CSV adds nothing, so its request is unchanged, and XLSX
+  appends one `format=xlsx`. The saved file takes the format's extension and media type.
 
 ## Consequences
 

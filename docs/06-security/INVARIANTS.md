@@ -760,8 +760,9 @@ side door around field gating and soft-delete scoping, and without an audit row 
 of the user directory, or of the audit logs themselves — leaves no trace.
 
 **Where enforced** (2026-10-16; paths relative to `apps/api/src/`).
-- `common/export/export.service.ts` — `exportCsv()` writes the audit row through `recordExport()` after
-  the cap check and before streaming; `sanitizeExportFilters()` flattens what is stored.
+- `common/export/export.service.ts` — `exportFile()` (which `exportCsv()` delegates to, and which the
+  XLSX routes call with `format: 'xlsx'`, ADR-0103 §11) writes the audit row through `recordExport()`
+  after the cap check and before streaming; `sanitizeExportFilters()` flattens what is stored.
 - `common/export/export-column.ts` — `ExportColumn<T>`: a resource can only emit the columns it lists.
 - `prisma/migrations/20261016140000_add_data_export_log` — the table, and the at-most-one-actor CHECK.
 - Tests: `common/export/export.service.spec.ts` (one audit row with the pre-count, nothing written on a

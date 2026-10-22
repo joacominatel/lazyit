@@ -2,6 +2,14 @@
   "button": "Export CSV",
   "busy": "Exporting…",
   "title": "Download every row matching the current filters as a CSV, not just this page",
+  "menu": {
+    "button": "Export",
+    "title": "Download every row matching the current filters, not just this page, as a CSV or an Excel workbook",
+    "formats": {
+      "csv": "CSV (.csv)",
+      "xlsx": "Excel (.xlsx)"
+    }
+  },
   "overCap": "This view matches {total, number} rows, more than the {cap, number} an export can hold. Narrow your filters and try again.",
   "errors": {
     "overCap": "Too many rows to export. Narrow your filters and try again.",
