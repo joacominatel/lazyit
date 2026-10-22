@@ -34,6 +34,14 @@ import {
 import { NotificationsService } from '../notifications/notifications.service';
 import { SearchService } from '../search/search.service';
 import { projectConsumable } from '../search/search.documents';
+import { lockLiveParent } from '../common/parent-row-lock';
+
+/** The 400 for a write that files a consumable under a missing or archived category (SEC-052). */
+function categoryNotLive(categoryId: string): BadRequestException {
+  return new BadRequestException(
+    `ConsumableCategory ${categoryId} not found (missing or archived)`,
+  );
+}
 
 /**
  * PostgreSQL `int4` upper bound — the max value a Prisma `Int` column (here `currentStock`) can
@@ -322,8 +330,10 @@ export class ConsumablesService {
    * the fire-and-forget search sync can fire on the created row (#873).
    */
   async create(data: CreateConsumable) {
-    await this.assertCategoryLive(data.categoryId);
-    const consumable = await this.prisma.consumable.create({ data });
+    const consumable = await this.prisma.$transaction(async (tx) => {
+      await this.lockCategoryLive(tx, data.categoryId);
+      return tx.consumable.create({ data });
+    });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search?.upsert('consumables', projectConsumable(consumable));
     return consumable;
@@ -334,20 +344,27 @@ export class ConsumablesService {
    * clears an optional field (and detaches the category).
    */
   async update(id: string, data: UpdateConsumable) {
-    const existing = await this.prisma.consumable.findFirst({
-      where: { id, deletedAt: null },
-      select: { id: true, categoryId: true },
-    });
-    if (!existing) {
-      throw new NotFoundException(`Consumable ${id} not found`);
-    }
-    // Filing under an archived category is refused (400); keeping a legacy one is not.
-    if (data.categoryId !== existing.categoryId) {
-      await this.assertCategoryLive(data.categoryId);
-    }
-    const consumable = await this.prisma.consumable.update({
-      where: { id },
-      data,
+    const consumable = await this.prisma.$transaction(async (tx) => {
+      // The named category is locked FOR SHARE before the consumable row is read or written (#1604).
+      const categoryLive = data.categoryId
+        ? await lockLiveParent(tx, 'consumable_categories', data.categoryId)
+        : true;
+      const existing = await tx.consumable.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true, categoryId: true },
+      });
+      if (!existing) {
+        throw new NotFoundException(`Consumable ${id} not found`);
+      }
+      // Filing under an archived category is refused (400); keeping a legacy one is not.
+      if (
+        data.categoryId &&
+        data.categoryId !== existing.categoryId &&
+        !categoryLive
+      ) {
+        throw categoryNotLive(data.categoryId);
+      }
+      return tx.consumable.update({ where: { id }, data });
     });
     this.search?.upsert('consumables', projectConsumable(consumable));
     return consumable;
@@ -356,20 +373,17 @@ export class ConsumablesService {
   /**
    * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
    * without this a consumable could be filed under a category the taxonomy hides (SEC-052). Write-only:
-   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   * reads stay tolerant, and an update that leaves the category unchanged is not checked. The category stays
+   * locked `FOR SHARE` until the commit (#1604), so a concurrent category delete — which locks it `FOR UPDATE`
+   * before moving its consumables — cannot strand this one on it.
    */
-  private async assertCategoryLive(
+  private async lockCategoryLive(
+    tx: Prisma.TransactionClient,
     categoryId: string | null | undefined,
   ): Promise<void> {
     if (!categoryId) return;
-    const category = await this.prisma.consumableCategory.findFirst({
-      where: { id: categoryId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!category) {
-      throw new BadRequestException(
-        `ConsumableCategory ${categoryId} not found (missing or archived)`,
-      );
+    if (!(await lockLiveParent(tx, 'consumable_categories', categoryId))) {
+      throw categoryNotLive(categoryId);
     }
   }
 
