@@ -26,6 +26,9 @@
 #      tarball and still ages old tarballs out; an unknown BACKUP_ATTACHMENTS or a non-numeric
 #      BACKUP_ATTACHMENTS_RETENTION_DAYS fails the run loud and keeps the dump. The defaults (on, 7 days)
 #      apply with neither variable set — what an existing install gets on update.
+#   8. Leading zeros: BACKUP_MIN_FREE_MB=08 and BACKUP_ATTACHMENTS_RETENTION_DAYS=07 are read as 8 and 7
+#      (shell arithmetic would read them as octal and abort the run before prune, offsite and the alert);
+#      a non-numeric value still fails loud, keeps the dump and fires BACKUP_ON_FAILURE_CMD.
 #
 # Isolation: its own compose project name, temp directory, env file and volumes. It never reads or
 # writes infra/env/.env.prod, ./backups or any lazyit-prod_* volume of the checkout it runs from.
@@ -227,5 +230,23 @@ in_backups "test -s /b/app-$TS6.dump && test ! -e /b/attachments-$TS6.tar.gz" ||
 if OUT=$(run_backup -e BACKUP_ATTACHMENTS_RETENTION_DAYS=week); then die "retention: a non-numeric BACKUP_ATTACHMENTS_RETENTION_DAYS was accepted"; fi
 echo "$OUT" | grep -q "BACKUP_ATTACHMENTS_RETENTION_DAYS must be a whole number" || { echo "$OUT" >&2; die "retention: no reason for a bad BACKUP_ATTACHMENTS_RETENTION_DAYS"; }
 pass "bad values: unknown BACKUP_ATTACHMENTS / non-numeric retention fail loud, the dump is kept"
+
+# --- 8. leading zeros and the alert on a bad number ------------------------------------------------
+in_backups "touch -d \"$DAYS10\" /b/attachments-old10c.tar.gz"
+OUT=$(run_backup -e BACKUP_MIN_FREE_MB=08 -e BACKUP_ATTACHMENTS_RETENTION_DAYS=07) \
+  || { echo "$OUT" >&2; die "leading zeros: a run with BACKUP_MIN_FREE_MB=08 / BACKUP_ATTACHMENTS_RETENTION_DAYS=07 failed"; }
+TS7=$(ts_of "$OUT")
+echo "$OUT" | grep -q "run $TS7 complete" || { echo "$OUT" >&2; die "leading zeros: the run did not complete"; }
+in_backups "test -s /b/app-$TS7.dump && test -s /b/attachments-$TS7.tar.gz" || die "leading zeros: the pair was not written"
+in_backups 'test ! -e /b/attachments-old10c.tar.gz' || die "leading zeros: 07 days did not prune a 10-day-old tarball"
+in_backups 'rm -f /b/alert.txt'
+if OUT=$(run_backup -e BACKUP_MIN_FREE_MB=1e3 -e 'BACKUP_ON_FAILURE_CMD=echo "$1" > /backups/alert.txt'); then
+  die "bad number: BACKUP_MIN_FREE_MB=1e3 was accepted"
+fi
+TS8=$(ts_of "$OUT")
+echo "$OUT" | grep -q "FAILED run $TS8: BACKUP_MIN_FREE_MB must be a whole number" || { echo "$OUT" >&2; die "bad number: no FAILED reason"; }
+in_backups "test -s /b/app-$TS8.dump" || die "bad number: the dump was not kept"
+in_backups "grep -q 'BACKUP_MIN_FREE_MB must be a whole number' /b/alert.txt" || die "bad number: the alert hook did not fire"
+pass "leading zeros read as decimal (08 MB, 07 days); a bad number fails loud, keeps the dump, fires the alert"
 
 echo "all $PASS checks passed"

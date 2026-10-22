@@ -424,6 +424,15 @@ services:
           echo "[lazyit-backup] $$label DB -> $$final ($$(wc -c < "$$final") bytes, restorable)"
         }
 
+        # whole_number VALUE: print VALUE as a plain decimal, or fail if it is not all digits. Leading
+        # zeros are stripped — shell arithmetic reads 08 as (invalid) octal and aborts the whole run under
+        # `set -e`, skipping prune, offsite and the alert hook; an empty result is 0.
+        whole_number() {
+          case "$$1" in ''|*[!0-9]*) return 1 ;; esac
+          n="$$(echo "$$1" | sed 's/^0*//')"
+          echo "$${n:-0}"
+        }
+
         # tar_attachments FINAL_PATH: archive the attachments volume (read-only at /attachments) to
         # FINAL_PATH.partial, verify, then atomically promote — dump_db's partial -> verify -> rename
         # discipline. Unlike dump_db it does NOT abort the run: it returns non-zero with the reason in
@@ -438,11 +447,10 @@ services:
             ATT_ERR="attachments volume is not mounted at /attachments; $$final NOT written"
             return 1
           fi
-          case "$${BACKUP_MIN_FREE_MB:-}" in
-            ''|*[!0-9]*)
-              ATT_ERR="BACKUP_MIN_FREE_MB must be a whole number of MB (got '$${BACKUP_MIN_FREE_MB:-}'); $$final NOT written, last good tarball kept"
-              return 1 ;;
-          esac
+          if ! min_free_mb="$$(whole_number "$${BACKUP_MIN_FREE_MB:-}")"; then
+            ATT_ERR="BACKUP_MIN_FREE_MB must be a whole number of MB (got '$${BACKUP_MIN_FREE_MB:-}'); $$final NOT written, last good tarball kept"
+            return 1
+          fi
           # Disk guard: the blobs are mostly already-compressed (PDF, JPEG/PNG/WebP, docx/xlsx), so the
           # tarball is about the size of the volume. Refuse BEFORE writing if it would leave less than
           # BACKUP_MIN_FREE_MB free on the ./backups filesystem — usually the disk Postgres lives on.
@@ -454,7 +462,7 @@ services:
               ATT_ERR="could not measure the attachments volume or the free space on /backups (du='$${need_kb}', df='$${avail_kb}'); $$final NOT written, last good tarball kept"
               return 1 ;;
           esac
-          reserve_kb=$$((BACKUP_MIN_FREE_MB * 1024))
+          reserve_kb=$$((min_free_mb * 1024))
           if [ $$((avail_kb - need_kb)) -lt "$$reserve_kb" ]; then
             ATT_ERR="not enough free space for the attachments tarball (volume $${need_kb} KB, free $${avail_kb} KB on /backups, BACKUP_MIN_FREE_MB=$${BACKUP_MIN_FREE_MB}); $$final NOT written, last good tarball kept"
             return 1
@@ -493,11 +501,10 @@ services:
         ATT_ERR=""
         ATT_FILE="/backups/attachments-$${TS}.tar.gz"
         ATT_PRUNE=1
-        case "$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}" in
-          ''|*[!0-9]*)
-            ATT_ERR="BACKUP_ATTACHMENTS_RETENTION_DAYS must be a whole number of days (got '$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}'); no attachments tarball written or pruned"
-            ATT_PRUNE=0 ;;
-        esac
+        if ! att_days="$$(whole_number "$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}")"; then
+          ATT_ERR="BACKUP_ATTACHMENTS_RETENTION_DAYS must be a whole number of days (got '$${BACKUP_ATTACHMENTS_RETENTION_DAYS:-}'); no attachments tarball written or pruned"
+          ATT_PRUNE=0
+        fi
         if [ -z "$$ATT_ERR" ]; then
           case "$$(echo "$${BACKUP_ATTACHMENTS:-true}" | tr 'A-Z' 'a-z')" in
             true|1|yes|on)
@@ -523,7 +530,7 @@ services:
         # a corrupt run can never be retained as a "real" backup.
         find /backups -name 'app-*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
         if [ "$$ATT_PRUNE" = 1 ]; then
-          find /backups -name 'attachments-*.tar.gz' -type f -mtime "+$${BACKUP_ATTACHMENTS_RETENTION_DAYS}" -print -delete || true
+          find /backups -name 'attachments-*.tar.gz' -type f -mtime "+$${att_days}" -print -delete || true
         fi
 
         # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs once per file this run
