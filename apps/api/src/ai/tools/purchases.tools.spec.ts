@@ -622,6 +622,18 @@ const extraction = {
   ),
 };
 
+const supplierRead = (id: string) => {
+  if (id !== SUPPLIER) throw new NotFoundException('Supplier not found');
+  return Promise.resolve({
+    id: SUPPLIER,
+    name: 'Compumundo',
+    taxId: null,
+    notes: INJECTION,
+    createdAt: T0,
+    updatedAt: T0,
+  });
+};
+
 const suppliers = {
   findPage: jest.fn(() =>
     Promise.resolve(
@@ -632,17 +644,20 @@ const suppliers = {
       ),
     ),
   ),
-  findOne: jest.fn((id: string) => {
-    if (id !== SUPPLIER) throw new NotFoundException('Supplier not found');
-    return Promise.resolve({
-      id: SUPPLIER,
-      name: 'Compumundo',
-      taxId: null,
-      notes: INJECTION,
-      createdAt: T0,
-      updatedAt: T0,
-    });
-  }),
+  findOne: jest.fn(supplierRead),
+  // `GET /suppliers/:id` answers the supplier plus its yearly totals (#1500).
+  findDetail: jest.fn(async (id: string) => ({
+    ...(await supplierRead(id)),
+    yearlyTotals: [
+      {
+        year: 2026,
+        currency: 'USD',
+        amount: 150_000,
+        unpricedLines: 0,
+        purchaseCount: 1,
+      },
+    ],
+  })),
   create: jest.fn((dto: Row) =>
     Promise.resolve({ ...dto, id: cid('knewsupplier'), notes: null }),
   ),
@@ -1477,6 +1492,9 @@ describe('purchases toolset (#1478)', () => {
       expect((get.data as Row).notes).toBe(
         `<untrusted_content>${INJECTION}</untrusted_content>`,
       );
+      // The route now carries the yearly totals (#1500); the tool's projection is unchanged and drops them.
+      expect(suppliers.findDetail).toHaveBeenCalledWith(SUPPLIER);
+      expect(get.data as Row).not.toHaveProperty('yearlyTotals');
     });
   });
 

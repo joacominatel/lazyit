@@ -3,12 +3,13 @@ title: Supplier
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-21
 ---
 
 # Supplier
 
-> 🟢 built — backend (#1472), screens (#1474), AI assistant tools (#1478), merge (#1496) · Area: Purchases ·
+> 🟢 built — backend (#1472), screens (#1474), AI assistant tools (#1478), merge (#1496), yearly totals API (#1500)
+> · Area: Purchases ·
 > [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
@@ -20,7 +21,8 @@ updated: 2026-10-03
 > decisions while building Phase 1 web). The AI assistant reads and proposes suppliers through
 > `supplier_search`, `supplier_get`, `supplier_create` and `supplier_update` (#1478). Merging a duplicate
 > (#1496): `POST /suppliers/:id/merge` and `GET /suppliers/:id/merge-preview`, **Merge into…** on the supplier
-> page.
+> page. Yearly totals (#1500, API): `GET /suppliers/:id` carries `yearlyTotals`; the supplier page shows them in a
+> follow-up web change.
 
 ## Purpose
 
@@ -69,6 +71,28 @@ fields stay as they are.
   salesContactEmail, salesContactPhone, supportContactName, supportContactEmail, supportContactPhone, notes,
   createdAt, updatedAt, deletedAt` — the list row, field for field. Every export is audited
   ([[data-export-log]]).
+- **Yearly totals** (#1500; CEO decision 2026-10-21 on #1495; [[0099-purchases-scope-model-and-optionality]] §5,
+  D-C). `GET /suppliers/:id` answers the supplier plus `yearlyTotals` — what the team spent with it per year,
+  per currency label. Derived on every read, never stored:
+  - **year** — the calendar year (UTC) of the purchase's order date, else of when the purchase was recorded
+    (`createdAt`). The web stores a date-only order date at UTC midnight, so it lands in its own year; the
+    recorded-date fallback can shift a purchase recorded around midnight on 31 December by a few hours;
+  - **counted** — the supplier's live purchases whose status is neither `DRAFT` nor `CANCELLED` (a status a
+    newer build adds counts), and their live lines, each as **(quantity − cancelled) × unit price**. This
+    differs on purpose from a purchase's own total (quantity × unit price): cancelled units were not bought;
+  - **per currency label**, through the shared grouping rule (`groupMoneyTotals`): trimmed and
+    case-insensitive, the first spelling of the year shown, a separate *No currency* group (`currency: null`),
+    never converted and never summed across labels. A sum above `MONEY_MAX` reads `amount: null`;
+  - a line with units left and no price adds nothing and is counted in `unpricedLines` (a fully cancelled line
+    is not — it would add nothing either way); `purchaseCount` counts the purchases in that year and label, a
+    purchase with no lines included;
+  - purchases a merge moved here count here; an archived supplier is a `404`, as before.
+
+  Order: newest year first; within a year, one entry per label in the order its earliest purchase that year
+  was dated. One aggregate query over the supplier's purchases (`@@index([supplierId])`) and their lines, one
+  row per year and stored spelling. The field is optional in the contract (`SupplierDetailSchema`), so an older
+  client still parses the row. The AI tool `supplier_get` reads the same route and keeps its projection: it does
+  not return the totals.
 - Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
 - **Global search** (#1499, [[0035-search-architecture]]): the `suppliers` index carries the name, tax ID and
   the two contact names (the names searchable, not returned) — never emails, phones, website or notes. Searched
