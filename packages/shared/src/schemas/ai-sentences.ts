@@ -21,6 +21,13 @@ import { z } from "zod";
  *   the English and the codes cannot drift.
  * - Param kinds: `text` is a value rendered verbatim (a name, a label, a host) — it may carry the
  *   `<untrusted_content>` wrappers exactly where the English does, and the web strips them to plain text;
+ *   `input` is a value the MODEL supplied in its tool input (the name of something it creates, an access
+ *   level it typed — #1687, CEO decision Q6 on #1344): the API bounds it with {@link boundAiSentenceInput}
+ *   (one line, no control or quote characters, at most {@link AI_SENTENCE_INPUT_MAX} characters) before
+ *   it reaches the English or the params, every template quotes it (`"{name}"`), and the web renders it
+ *   visibly distinct from the names lazyit read from its database. The full value stays in the card's
+ *   structured rows. A web build that predates the kind reads its own compiled list, where the param is
+ *   still `text`, and shows it as plain text;
  *   `number` is a count (ICU `plural`); `date` is an ISO date or date-time as the English shows it;
  *   `enum:<Name>` is a raw code the template maps with ICU `select` (`yes`/`no` flags are `enum:YesNo`).
  * - READ-TOLERANT: the web renders the localized form only when it knows EVERY code of a list and has
@@ -29,7 +36,7 @@ import { z } from "zod";
  */
 
 /** The kinds a sentence param can have. `enum:<Name>` names the value set the template `select`s on. */
-export type AiSentenceParamKind = "text" | "number" | "date" | `enum:${string}`;
+export type AiSentenceParamKind = "text" | "input" | "number" | "date" | `enum:${string}`;
 
 interface AiSentenceDefinition {
   /** The English template, ICU MessageFormat (`{name}`, `{n, plural, …}`, `{v, select, …}`). */
@@ -43,6 +50,8 @@ const YES_NO = "enum:YesNo" as const;
 /** `"admin" access` / `access` — an access level as the application names it, when there is one. */
 const ACCESS = `{hasLevel, select, yes {"{level}" access} other {access}}`;
 const ACCESS_PARAMS = { hasLevel: YES_NO, level: "text" } as const;
+/** {@link ACCESS_PARAMS} when the level is the one the model typed in its tool input. */
+const INPUT_ACCESS_PARAMS = { hasLevel: YES_NO, level: "input" } as const;
 
 /** A built-in asset status in words (`kind` is an `AssetStatus` code): `in storage`, `lost`… */
 const ASSET_STATUS_WORD = `{kind, select, OPERATIONAL {operational} IN_MAINTENANCE {in maintenance} IN_STORAGE {in storage} RETIRED {retired} LOST {lost} other {unknown}}`;
@@ -64,7 +73,7 @@ export const AI_SENTENCES = {
   /* ─── Applications and access (access.tools.ts) ─────────────────────────────────────────────── */
   "application_create.action": {
     en: `Add the application "{name}" to the catalog.`,
-    params: { name: "text" },
+    params: { name: "input" },
   },
   "application_create.actionCritical": {
     en: "It is marked critical: every later AI change to it needs your password in the chat.",
@@ -95,7 +104,7 @@ export const AI_SENTENCES = {
     params: {
       self: YES_NO,
       person: "text",
-      ...ACCESS_PARAMS,
+      ...INPUT_ACCESS_PARAMS,
       application: "text",
       hasUntil: YES_NO,
       until: "date",
@@ -115,7 +124,7 @@ export const AI_SENTENCES = {
   },
   "access_request_create.action": {
     en: `Ask for ${ACCESS} to {application} for yourself. The people who can grant access are notified and approve or deny it.`,
-    params: { ...ACCESS_PARAMS, application: "text" },
+    params: { ...INPUT_ACCESS_PARAMS, application: "text" },
   },
   "access_request_create.summary": {
     en: `Requested ${ACCESS} to {application}; it now waits for an approver.`,
@@ -258,7 +267,7 @@ export const AI_SENTENCES = {
   },
   "purchase_line_add.action": {
     en: `Add the line "{line}" to the purchase {purchase}.`,
-    params: { line: "text", purchase: "text" },
+    params: { line: "input", purchase: "text" },
   },
   "purchase_line_add.summary": {
     en: `Added the line "{line}" to the purchase {purchase}.`,
@@ -330,7 +339,7 @@ export const AI_SENTENCES = {
   },
   "supplier_create.action": {
     en: `Add the supplier "{name}".`,
-    params: { name: "text" },
+    params: { name: "input" },
   },
   "supplier_create.summary": {
     en: `Added the supplier "{name}".`,
@@ -926,6 +935,69 @@ export const AiSentenceListSchema = z.array(AiSentenceSchema).min(1).max(20);
  * a stored preview must keep parsing at approve time (tools-and-execution.md §9 step 3).
  */
 export const AiSentencesFieldSchema = AiSentenceListSchema.optional().catch(undefined);
+
+/* ─── Model-supplied values (`input` params, #1687) ────────────────────────────────────────────── */
+
+/**
+ * The longest `input` param a sentence carries, in characters (code points). Longer values are cut and
+ * end with `…`; the full value is in the card's structured rows.
+ */
+export const AI_SENTENCE_INPUT_MAX = 80;
+
+/** `<untrusted_content>` wrapper tags: the model must not be able to fake a boundary inside a sentence. */
+const UNTRUSTED_TAG = /<\/?untrusted_content\b[^>]*>/gi;
+/** C0 and C1 control characters (line breaks and tabs included): they become a space. */
+const CONTROL = /[\u0000-\u001F\u007F-\u009F]/g;
+/**
+ * Invisible format characters that can reorder or hide text: the Arabic letter mark, bidi embeddings,
+ * overrides and isolates, zero-width characters, word joiners, the BOM and the Unicode tag block
+ * (U+E0000–E007F, invisible "ASCII smuggling"). They are removed.
+ */
+const INVISIBLE = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
+/** Quote characters a template could be closed with (`"…"`, `“…”`, `«…»`, fullwidth `＂`): they become `'`. */
+const QUOTES = /["\u201C\u201D\u201E\u201F\u00AB\u00BB\u2033\uFF02]/g;
+
+/**
+ * Wrapper tags removed until none is left. Invisible characters go FIRST, so `</untrusted_\u200Bcontent>`
+ * cannot survive as a tag, and the removal repeats, so a nested `<untrusted_<untrusted_content>content>`
+ * cannot reassemble one.
+ */
+function stripWrapperTags(text: string): string {
+  let current = text;
+  for (;;) {
+    const next = current.replace(UNTRUSTED_TAG, "");
+    if (next === current) return current;
+    current = next;
+  }
+}
+
+/**
+ * A model-supplied value as an `input` param carries it (#1687): control characters turned into spaces and
+ * invisible format characters removed, THEN wrapper tags removed until none is left, quote characters
+ * turned into `'` (so the value can never close the quotes the template puts around it), every run of
+ * whitespace collapsed to one space (one line), trimmed, and cut to {@link AI_SENTENCE_INPUT_MAX}
+ * characters with `…`. Pure and idempotent: the API applies it on write, the web again on read (a row
+ * stored before the kind existed).
+ */
+export function boundAiSentenceInput(value: unknown, max: number = AI_SENTENCE_INPUT_MAX): string {
+  const visible = String(value ?? "")
+    .replace(CONTROL, " ")
+    .replace(INVISIBLE, "");
+  const text = stripWrapperTags(visible)
+    .replace(QUOTES, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = Array.from(text);
+  return chars.length > max ? `${chars.slice(0, Math.max(max - 1, 0)).join("").trimEnd()}…` : text;
+}
+
+/** The names of a code's `input` params (empty for most codes). */
+export function aiSentenceInputParams(code: AiSentenceCode): string[] {
+  const params: Readonly<Record<string, AiSentenceParamKind>> = AI_SENTENCES[code].params;
+  return Object.entries(params)
+    .filter(([, kind]) => kind === "input")
+    .map(([name]) => name);
+}
 
 /* ─── English rendering (a minimal ICU MessageFormat subset: argument, plural, select) ─────────── */
 

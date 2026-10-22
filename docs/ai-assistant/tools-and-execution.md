@@ -1932,8 +1932,9 @@ sentence as **codes + params**, and the web renders the code's template in the u
 - **The closed list** is `AI_SENTENCES` in `@lazyit/shared` (`schemas/ai-sentences.ts`): each code carries
   its English template in ICU MessageFormat (the syntax `next-intl` reads, so the web's `en` catalog can
   copy it) and the kind of each param — `text` (verbatim; it may carry the same `<untrusted_content>`
-  wrappers the English does, stripped to plain text by the web), `number` (ICU `plural`), `date` (as the
-  English shows it) or `enum:<Name>` (a raw code the template `select`s on; `enum:YesNo` is `yes` / `no`).
+  wrappers the English does, stripped to plain text by the web), `input` (a value the **model** supplied
+  in its tool input — #1687, below), `number` (ICU `plural`), `date` (as the English shows it) or
+  `enum:<Name>` (a raw code the template `select`s on; `enum:YesNo` is `yes` / `no`).
   Codes are `<tool_name>.<part>` for a tool's own sentences, `access.*`, `kb.audience.*`, `taxonomy.*`,
   `workflow.*`, `workflows.*` for shared parts, and `refusal.*` for core and runtime refusals.
 - **One source for both.** The API builds each sentence with `phrase(code, params)`
@@ -1942,6 +1943,20 @@ sentence as **codes + params**, and the web renders the code's template in the u
   row, the output or the error. An edge case the list does not model is `englishOnly(text)`: the phrase,
   and any phrase joined with it, then carries no codes and the web shows the English — a sentence is
   localized whole or not at all.
+- **Model-supplied values (`input`, #1687; CEO decision Q6 on #1344).** A server-built sentence may embed
+  words the model chose: `application_create.action` and `supplier_create.action` (`name`),
+  `access_grant_create.action` and `access_request_create.action` (`level`), `purchase_line_add.action`
+  (`line`). Those params are kind `input`. `phrase()` applies `boundAiSentenceInput` (`@lazyit/shared`) to
+  every `input` param before it renders the English or stores the params — control characters turned
+  into spaces and invisible characters removed (bidi marks and controls, zero-width characters, the Unicode
+  tag block) **first**, then `<untrusted_content>` tags removed until none is left (so neither an invisible
+  character inside a tag nor a nested tag can leave one behind), quote characters (`"`, `“ ”`, `« »`,
+  fullwidth `＂`) turned into `'`, whitespace runs collapsed to one space, trimmed, at most
+  `AI_SENTENCE_INPUT_MAX` (80) characters ending in `…` — so no tool can forget it and the English the
+  ledger and MCP read matches what the web renders. Every template quotes an `input` param (`"{name}"`,
+  checked by the shared test). The full value stays in the preview's structured rows. The web renders it
+  as a distinct chip ([[ai-assistant/frontend|frontend]] §11a); a web build that predates the kind reads
+  its own compiled list, where the param is `text`, and shows the plain sentence.
 - **Web rule (read-tolerant).** Render the localized form only when this build knows **every** code of the
   list and has every param its template names; otherwise show the English. An older web ignores the
   fields (zod strips unknown keys); a newer web reading a row stored before #1384 finds none and shows the
@@ -1955,7 +1970,7 @@ sentence as **codes + params**, and the web renders the code's template in the u
   PENDING → APPROVED`, `COMPLETED`, `CANCELLED`, `DRAFT`, `active → revoked`) are codes the web maps with
   its own value labels.
 - **Tests.** `ai-sentences.test.ts` (shared) checks every template names exactly its declared params, never
-  uses ICU apostrophe quoting, and renders; `ai/core/sentences.spec.ts` checks every write tool's summary
+  uses ICU apostrophe quoting, quotes every `input` param, and renders, and covers `boundAiSentenceInput`; `ai/core/sentences.spec.ts` checks every write tool's summary
   and every `action` row are built from a code, that every listed code is used and every used code is
   listed, and that a restricted KB audience renders the same English as before.
 - **Upgrade.** No migration and no change to hashing: `isStale` compares only the `precondition`, step 0

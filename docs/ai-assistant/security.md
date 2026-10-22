@@ -430,6 +430,15 @@ the **exfiltration leg** and the **consequential-action leg**.
   (`updatedAt`), an expiry, and the untrusted sources read. The card is rendered **from that
   record**, as a before → after diff of the target entity. The model's prose is shown separately and
   labelled as the assistant's description.
+- **Model-supplied words inside the server-built sentence are marked (#1687, CEO decision Q6 on #1344).**
+  The card's first row, the `action` sentence, is written by the tool, but some of its values come from
+  the model's own tool input — the name of an application or supplier it creates, an access level it
+  typed, a new purchase line's description. Such a param has the sentence kind `input`: `phrase()` bounds
+  it on the server (invisible and control characters removed first, then wrapper tags removed until none
+  is left, one line, quote characters turned into `'`, at most 80 characters) so it can never close the quotes every template puts
+  around it or stretch the sentence into something else, and the web shows it as a distinct chip, apart
+  from the names lazyit read from its database. The full value is in the card's structured rows. This
+  closes the "known limitation" of the W3-7 review (item 6; [[ai-assistant/frontend|frontend]] §11a).
 - **Approve carries only the pending-action id**, over a human-session-only endpoint
   (`HumanPrincipal`; `ai:use`). It is not callable with an MCP token or an SA token, and it is not a
   tool. Arguments are never taken from the client at approve time.

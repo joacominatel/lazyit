@@ -134,6 +134,7 @@
     "yes": "Sí",
     "no": "No",
     "quoted": "Escrito por otra persona; se muestra como texto plano.",
+    "modelInput": "Lo escribió el asistente. El valor completo está en las filas de abajo.",
     "warningsTitle": "Antes de aprobar",
     "warnings": {
       "EXTERNAL_PROVISIONING": "Crea un acceso en un sistema externo mediante una automatización.",
