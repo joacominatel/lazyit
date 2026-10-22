@@ -52,6 +52,11 @@ import {
   serverUnderstandsSoftwareDelta,
   softwareWireFields,
 } from "./software-delta";
+import {
+  decommissionPayload,
+  describeDecommission,
+  interpretDecommission,
+} from "./decommission";
 
 // Build-time version stamp (ADR-0083 mechanism, issue #907): the compile scripts bake `APP_VERSION`
 // via `bun build --define` (git describe → env). A plain `bun run`/an unstamped compile falls back to
@@ -67,6 +72,9 @@ Usage:
   lazyit-agent [report] [--once] [--force] [--url <url>] [--token <token>]
   lazyit-agent show     Print the report this host WOULD send, as JSON. Sends nothing.
   lazyit-agent test     Check config, network, TLS and the token. Writes nothing, anywhere.
+  lazyit-agent decommission
+                        Tell lazyit this host is going away: its node is RETIRED, not left
+                        to go OFFLINE. The uninstaller runs this before it removes the token.
 
 Collects host inventory and reports it to your lazyit instance. Config resolves from
 flags > env (LAZYIT_URL / LAZYIT_TOKEN) > ${DEFAULT_CONFIG_FILE}. URL + token are required.
@@ -318,6 +326,47 @@ async function report(
   }
 }
 
+/**
+ * `lazyit-agent decommission` (#1701) — the uninstaller's last report. See `./decommission` for why it
+ * is a FULL report and how each answer reads. Never gated on the cadence, and it writes no local state:
+ * the installer deletes that state right after.
+ */
+async function decommission(cfg: AgentConfig): Promise<void> {
+  const url = cfg.url as string;
+  const token = cfg.token as string;
+  // A full report, exactly as `show` builds it: no cached fingerprint and no handshake, so the package
+  // list rides in full and an instance that predates the flag reads an ordinary, complete check-in.
+  const { report: built } = await buildReport(await effectivePolicy(cfg), undefined, false);
+  const endpoint = `${url.replace(/\/+$/, "")}/api/infra/report`;
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(decommissionPayload(built)),
+      signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
+      ...agentFetchInit(cfg.network, endpoint),
+    });
+  } catch (err) {
+    throw new Error(
+      `could not reach ${endpoint} — ${(err as Error).message}. Nothing was retired; retire the node by hand in lazyit.`,
+    );
+  }
+  const text = await res.text().catch(() => "");
+  let ack: unknown = null;
+  try {
+    ack = text ? JSON.parse(text) : null;
+  } catch {
+    ack = null;
+  }
+  const { ok, message } = describeDecommission(interpretDecommission(res.status, ack, text));
+  if (!ok) throw new Error(message);
+  console.log(`lazyit-agent: ${message}`);
+}
+
 /** The policy this run applies: what the last run cached, narrowed by whatever this host refuses. */
 async function effectivePolicy(cfg: AgentConfig): Promise<AgentPolicy> {
   return applyAgentPolicyVeto(await loadCachedPolicy(), cfg.localLimits);
@@ -500,15 +549,19 @@ async function main(): Promise<void> {
     await test(cfg);
     return;
   }
-  if (cfg.command !== "report") {
+  if (cfg.command !== "report" && cfg.command !== "decommission") {
     throw new Error(
-      `unknown command "${cfg.command}" — try: lazyit-agent report --once, lazyit-agent show, lazyit-agent test`,
+      `unknown command "${cfg.command}" — try: lazyit-agent report --once, lazyit-agent show, lazyit-agent test, lazyit-agent decommission`,
     );
   }
   if (!cfg.url || !cfg.token) {
     throw new Error(
       `missing URL and/or token — pass --url/--token, set LAZYIT_URL/LAZYIT_TOKEN, or write ${cfg.configFile}`,
     );
+  }
+  if (cfg.command === "decommission") {
+    await decommission(cfg);
+    return;
   }
 
   // THE INTERVAL INVERSION (#1140). Load the policy the LAST run cached, intersect it with whatever
