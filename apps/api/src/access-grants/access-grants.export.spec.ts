@@ -419,15 +419,46 @@ describe('Access-grant CSV exports (ADR-0103)', () => {
       `/applications/${APP1}/access-grants/export?status=expiring&accessLevel=admin&q=ben`,
       'ADMIN',
     );
+    // With `status`, the defaulted activeOnly/includeExpired are NOT recorded (ADR-0103 §10).
     expect(auditCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         resource: 'ACCESS_GRANTS',
-        filters: expect.objectContaining({
+        filters: {
           applicationId: APP1,
           status: 'expiring',
           accessLevel: 'admin',
           q: 'ben',
-        }) as unknown,
+        },
+      }) as unknown,
+    });
+  });
+
+  it('audits a no-level export as noAccessLevel: true, not as "any level"', async () => {
+    await get(
+      `/applications/${APP1}/access-grants/export?status=all&noAccessLevel=true`,
+      'ADMIN',
+    );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        resource: 'ACCESS_GRANTS',
+        filters: { applicationId: APP1, status: 'all', noAccessLevel: true },
+      }) as unknown,
+    });
+  });
+
+  it('audits a no-level export on the legacy filters with activeOnly/includeExpired', async () => {
+    await get(
+      `/applications/${APP1}/access-grants/export?activeOnly=false&noAccessLevel=true`,
+      'ADMIN',
+    );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        filters: {
+          applicationId: APP1,
+          activeOnly: false,
+          includeExpired: true,
+          noAccessLevel: true,
+        },
       }) as unknown,
     });
   });

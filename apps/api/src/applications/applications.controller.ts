@@ -440,16 +440,25 @@ export class ApplicationsController {
       );
     }
     await this.assertCanSearchPeople(filters, principal);
-    return this.grantExports.export(
-      {
-        applicationId: id,
-        activeOnly: parseBooleanQuery(activeOnly, true),
-        includeExpired: parseBooleanQuery(includeExpired, true),
-        ...filters,
-      },
-      principal,
-      response,
-    );
+    // `status` replaces activeOnly/includeExpired, so they are only part of the query (and the audit
+    // row) when `status` is absent. The audit records `noAccessLevel: true` rather than a null level,
+    // which the audit sanitizer would drop as "any level" (ADR-0103 §10).
+    const query = {
+      applicationId: id,
+      ...(filters.status === undefined
+        ? {
+            activeOnly: parseBooleanQuery(activeOnly, true),
+            includeExpired: parseBooleanQuery(includeExpired, true),
+          }
+        : {}),
+      ...filters,
+    };
+    const audit: Record<string, unknown> = { ...query };
+    if (query.accessLevel === null) {
+      delete audit.accessLevel;
+      audit.noAccessLevel = true;
+    }
+    return this.grantExports.export(query, principal, response, audit);
   }
 
   @Get(':id/articles')
