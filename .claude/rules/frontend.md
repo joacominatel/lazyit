@@ -53,7 +53,8 @@ languages, with `_nav.ts` wired if the page is new. `_nav.ts` is a shared critic
 
 ## Tests and lint
 
-`bun test`. Frontend unit coverage is deliberately light and e2e is deferred — rigor lives on
+`bun test --isolate` (= `bun run test`, the same flag CI uses; rely on isolation or restore what
+you `mock.module`). Frontend unit coverage is deliberately light and e2e is deferred — rigor lives on
 core logic and in review. → `docs/03-decisions/0012-testing-strategy.md`
 
 `apps/web` eslint has **no** prettier rule, unlike `apps/api`. Run `bunx eslint` on your changed
