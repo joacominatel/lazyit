@@ -79,6 +79,7 @@ export const INFRA_GRAPH_NODES_MAX = 2000;
  *  - `x`, `y` — the free-move board position (null → the fallback grid layout).
  *  - `chassis` — never rendered, but `isEndpointChassis` partitions endpoints out of the board with
  *    it (ADR-0093 §2/§5). A scalar, so it costs nothing to carry.
+ *  - `retiredAt`, `alertsSnoozedUntil` — the Retired and Snoozed badges on the node card (#1701).
  *
  * What is deliberately ABSENT is the point: `owners` and `assetName` each cost a relation join per
  * row (Asset → active AssetAssignment → User) on a read that is unpaginated AND polled, and the
@@ -93,6 +94,9 @@ export const InfraGraphNodeSchema = InfraNodeSchema.pick({
   status: true,
   ipAddress: true,
   chassis: true,
+  // The retire / snooze badges (#1701). Two nullable timestamps; no join.
+  retiredAt: true,
+  alertsSnoozedUntil: true,
   x: true,
   y: true,
 });

@@ -121,6 +121,10 @@ export class AgentFleetService {
         chassis: true,
         reportingSource: true,
         lastReportedAt: true,
+        // The retire / snooze badges (#1701). A retired host stays a ROW — its history is still worth
+        // reading — but `summarizeAgentFleet` counts it under `retired` only.
+        retiredAt: true,
+        alertsSnoozedUntil: true,
         // Gated in app code on the asset being live: a to-one relation cannot be `where`-filtered, and
         // a soft-deleted (detached/archived) Asset must never leak its name — the same rule
         // `listNodePage` follows.
@@ -152,6 +156,8 @@ export class AgentFleetService {
         lastReportedAt: row.lastReportedAt?.toISOString() ?? null,
         diagnostics,
         degraded: isAgentDegraded(diagnostics),
+        retiredAt: row.retiredAt?.toISOString() ?? null,
+        alertsSnoozedUntil: row.alertsSnoozedUntil?.toISOString() ?? null,
       };
     });
 
@@ -200,10 +206,16 @@ export class AgentFleetService {
    * and it must not carry a jsonb projection or a credential read into a sweeper. Fail-soft is
    * inherited from `agentVersionBucket` — a fleet reporting `dev` counts zero, so the email simply
    * gains no line.
+   *
+   * A RETIRED host is not counted (#1701): a decommissioned server has no agent left to update.
    */
   async countAgentsMajorBehind(): Promise<number> {
     const rows = await this.prisma.infraNode.findMany({
-      where: { ...AGENT_HOST_WHERE, agentVersion: { not: null } },
+      where: {
+        ...AGENT_HOST_WHERE,
+        agentVersion: { not: null },
+        retiredAt: null,
+      },
       select: { agentVersion: true },
     });
     return rows.filter(

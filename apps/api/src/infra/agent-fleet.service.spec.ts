@@ -402,6 +402,43 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
       expect(view.nodes.map((n) => n.chassis)).toEqual(['laptop', null]);
     });
 
+    it('keeps a RETIRED host as a badged row but counts it under `retired` only (#1701)', async () => {
+      nodeFindMany.mockResolvedValue([
+        row({
+          id: 'gone',
+          status: 'OFFLINE',
+          agentVersion: 'v0.9.0',
+          retiredAt: new Date('2026-10-20T00:00:00.000Z'),
+        }),
+        row({
+          id: 'snoozed',
+          agentVersion: 'v1.10.0',
+          alertsSnoozedUntil: new Date('2026-10-30T00:00:00.000Z'),
+        }),
+      ]);
+      service = await build('v1.10.0');
+
+      const view = await service.getFleet();
+
+      expect(
+        view.nodes.map((n) => [n.id, n.retiredAt, n.alertsSnoozedUntil]),
+      ).toEqual([
+        ['gone', '2026-10-20T00:00:00.000Z', null],
+        ['snoozed', null, '2026-10-30T00:00:00.000Z'],
+      ]);
+      expect(view.summary).toMatchObject({
+        total: 1,
+        majorBehind: 0,
+        current: 1,
+        notReporting: 0,
+        retired: 1,
+      });
+      expect(nodeArgs().select).toMatchObject({
+        retiredAt: true,
+        alertsSnoozedUntil: true,
+      });
+    });
+
     it('serialises timestamps as ISO strings', async () => {
       nodeFindMany.mockResolvedValue([row({ id: 'a' })]);
       service = await build();
@@ -633,6 +670,8 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
       expect(nodeArgs().where).toEqual({
         ...AGENT_HOST_WHERE,
         agentVersion: { not: null },
+        // A retired host has no agent left to update (#1701).
+        retiredAt: null,
       });
     });
 

@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-10-17
+updated: 2026-10-22
 ---
 
 # Notification
@@ -110,7 +110,10 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   sweep snapshots the `status != OFFLINE` set before the bulk flip). Dedupe
   `infra.agent_offline:<nodeId>:<lastReportedAt>` → one nudge per outage (a node stuck OFFLINE across sweeps
   is not re-selected; a genuinely new outage has a fresh last-report instant ⇒ a fresh nudge), never
-  once-per-sweep. Metadata = nodeId + label + last-report time.
+  once-per-sweep. Metadata = nodeId + label + last-report time. **Not emitted** for a RETIRED node,
+  which the sweep never selects, or for a node whose `alertsSnoozedUntil` is still in the future. A
+  snoozed node still flips OFFLINE, but its transition is announced by neither the bell nor the email,
+  and is not announced later when the window ends (#1701).
 - **The report ingest** (`InfraService.ingestReport`, [[0074-server-reporting-agent]] §3 amendment /
   #1141) → **`infra.identity_conflict`**, a broadcast admin nudge when a report matches an existing
   node's `externalId` while its serial **and** its MAC set both differ — two hosts sharing one machine
