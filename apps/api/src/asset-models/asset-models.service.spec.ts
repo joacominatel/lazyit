@@ -58,6 +58,8 @@ describe('AssetModelsService', () => {
   let transaction: jest.Mock;
   // Live model ids: the row lock only returns these.
   let liveModels: Set<string>;
+  // What a model write's category `FOR SHARE` lock (#1604) finds live.
+  let liveCategories: Set<string>;
   let readable: Set<string>;
   let inTransaction: boolean;
   let writesOutsideTx: number;
@@ -69,6 +71,10 @@ describe('AssetModelsService', () => {
     queryRaw.mockImplementation(
       (strings: TemplateStringsArray, ...values: unknown[]) => {
         const sql = strings.join('?');
+        if (sql.includes('FROM "asset_categories"')) {
+          const id = values[0] as string;
+          return Promise.resolve(liveCategories.has(id) ? [{ id }] : []);
+        }
         if (sql.includes('FROM "asset_models"')) {
           const ids = values[0] as string[];
           return Promise.resolve(
@@ -110,6 +116,7 @@ describe('AssetModelsService', () => {
       findFirst: jest.fn().mockResolvedValue({ id: 'cat-live' }),
     };
     liveModels = new Set(['m1', 'm2']);
+    liveCategories = new Set(['cat-live']);
     readable = new Set(['asset:read', 'purchaseOrder:read']);
     inTransaction = false;
     writesOutsideTx = 0;
@@ -191,6 +198,17 @@ describe('AssetModelsService', () => {
     expect(calls[0][0].data).not.toHaveProperty('specs');
   });
 
+  // The category ids a model write locked FOR SHARE (#1604), in call order.
+  const lockedCategories = () =>
+    (queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][])
+      .filter(([strings]) => {
+        const sql = strings.join('?');
+        return (
+          sql.includes('FROM "asset_categories"') && sql.includes('FOR SHARE')
+        );
+      })
+      .map(([, id]) => id);
+
   it('creates a model under a live category (SEC-041)', async () => {
     const dto = {
       name: 'Latitude 5520',
@@ -201,10 +219,7 @@ describe('AssetModelsService', () => {
 
     await service.create(dto);
 
-    expect(assetCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'cat-live', deletedAt: null },
-      select: { id: true },
-    });
+    expect(lockedCategories()).toEqual(['cat-live']);
     expect(assetModel.create).toHaveBeenCalledWith({ data: dto });
   });
 
@@ -245,6 +260,81 @@ describe('AssetModelsService', () => {
 
     expect(assetCategory.findFirst).not.toHaveBeenCalled();
     expect(assetModel.update).toHaveBeenCalledTimes(2);
+  });
+
+  // An asset category delete locks the category FOR UPDATE before it moves the models filed under it; a model
+  // write holds it FOR SHARE until it commits (#1604, first comment).
+  describe('the category a model write names is locked FOR SHARE (#1604)', () => {
+    it('create locks the category, with its liveness in the locking statement, before inserting — in one transaction', async () => {
+      assetModel.create.mockResolvedValue({ id: 'm3' });
+
+      await service.create({
+        name: 'X',
+        manufacturer: 'Y',
+        categoryId: 'cat-live',
+      });
+
+      expect(transaction).toHaveBeenCalledTimes(1);
+      const [strings] = queryRaw.mock.calls[0] as [TemplateStringsArray];
+      expect(strings.join('?')).toMatch(
+        /FROM "asset_categories"[\s\S]*"deletedAt" IS NULL[\s\S]*FOR SHARE/,
+      );
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        assetModel.create.mock.invocationCallOrder[0],
+      );
+      expect(writesOutsideTx).toBe(0);
+    });
+
+    it('create under a category a concurrent delete archived while it waited is a 400 — nothing written', async () => {
+      liveCategories.delete('cat-live');
+
+      await expect(
+        service.create({
+          name: 'X',
+          manufacturer: 'Y',
+          categoryId: 'cat-live',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(assetModel.create).not.toHaveBeenCalled();
+    });
+
+    it('a re-categorisation locks the target category before reading or writing the model', async () => {
+      liveCategories.add('cat-2');
+      assetModel.findFirst.mockResolvedValue({
+        id: 'm1',
+        categoryId: 'cat-live',
+      });
+      assetModel.update.mockResolvedValue({ id: 'm1' });
+
+      await service.update('m1', { categoryId: 'cat-2' });
+
+      expect(lockedCategories()).toEqual(['cat-2']);
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        assetModel.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(assetModel.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('a re-categorisation into a category archived while it waited is a 400 — nothing written', async () => {
+      assetModel.findFirst.mockResolvedValue({
+        id: 'm1',
+        categoryId: 'cat-live',
+      });
+
+      await expect(
+        service.update('m1', { categoryId: 'cat-2' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(assetModel.update).not.toHaveBeenCalled();
+    });
+
+    it('an update of a model that is gone is a 404', async () => {
+      assetModel.findFirst.mockResolvedValue(null);
+
+      await expect(service.update('m9', { name: 'X' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(lockedCategories()).toEqual([]);
+    });
   });
 
   it('returns a model by id when it exists', async () => {
@@ -480,7 +570,7 @@ describe('AssetModelsService', () => {
     expect(lineQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
   });
 
-  it('locks the purchases of the mapped lines, in id order, after the assets and before the lines', async () => {
+  it('locks the purchases of the mapped lines in id order, then the assets, then the lines — the order a link and a location delete take (#1696)', async () => {
     seedDependents({
       assets: ['a1'],
       lines: [{ id: 'l1', purchaseOrderId: 'po1' }],
@@ -501,8 +591,8 @@ describe('AssetModelsService', () => {
     const assetLock = sqls.findIndex((sql) => sql.includes('FROM "assets"'));
     expect(sqls[purchaseLock]).toContain('ORDER BY "id" FOR SHARE');
     expect(sqls[purchaseLock]).toContain('"assetModelId" = ?');
-    expect(assetLock).toBeLessThan(purchaseLock);
-    expect(purchaseLock).toBeLessThan(lineLock);
+    expect(purchaseLock).toBeLessThan(assetLock);
+    expect(assetLock).toBeLessThan(lineLock);
   });
 
   it('gives the delete transaction more than the 5 s default, so a model with many assets can still be deleted', async () => {
