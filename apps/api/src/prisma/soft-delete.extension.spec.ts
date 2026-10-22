@@ -97,7 +97,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 22 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 23 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
@@ -130,6 +130,8 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // Auto-confirm rules (ADR-0074 §1 amendment, #1145) soft-delete: a deleted rule must stop matching
     // reports, so its reads are auto-scoped like every other mutable domain entity.
     expect(SOFT_DELETABLE_MODELS.has('InfraAutoConfirmRule')).toBe(true);
+    // The software watchlist (#1684): a deleted watch must vanish from the list and free its name.
+    expect(SOFT_DELETABLE_MODELS.has('SoftwareWatch')).toBe(true);
     // File attachments (ADR-0082): delete = soft delete; the GC sweep adjudicates the blob later.
     expect(SOFT_DELETABLE_MODELS.has('Attachment')).toBe(true);
     // Purchases (ADR-0099): suppliers, purchases and their lines soft-delete; the activity log is append-only.
@@ -139,7 +141,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     expect(SOFT_DELETABLE_MODELS.has('PurchaseOrderEvent')).toBe(false);
     // Custom asset statuses (ADR-0101) soft-delete like the categories.
     expect(SOFT_DELETABLE_MODELS.has('AssetStatusLabel')).toBe(true);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(22);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(23);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

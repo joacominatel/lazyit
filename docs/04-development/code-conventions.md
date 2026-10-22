@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Code Conventions
@@ -208,8 +208,10 @@ Symptoms and recovery: [[docker-build-troubleshooting]] § `error: lockfile had 
 
 - Unit tests **always**; core/complex logic gets thorough, many-cased testing. Priority is
   the application core, not scaffolding/UI. Full policy: [[0012-testing-strategy]].
-- Runners: **Jest** (`apps/api`) · **`bun test`** (`packages/shared`). Frontend unit tests and
-  e2e are **deferred**. No global coverage gate — rigor on the core via review.
+- Runners: **Jest** (`apps/api`) · **`bun test --isolate`** (`packages/shared`, the pure logic in
+  `apps/web`, `apps/agent` — via `bun run test`). Rely on isolation or restore what you stub — see
+  [[workflows]] § Testing. Frontend component tests and e2e are **deferred**. No global coverage
+  gate — rigor on the core via review.
 
 ## Workflow
 

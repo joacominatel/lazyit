@@ -490,7 +490,7 @@ export class PasswordLifecycleService {
       // Checked BEFORE minting, so a disabled-email instance never accumulates orphan tokens.
       throw new AdminResetLinkError(
         'smtp-not-configured',
-        'Outbound email is not configured, so a reset link cannot be sent. Configure SMTP under Settings → Instance, or hand off a temporary password instead.',
+        'Outbound email is not configured, so a reset link cannot be sent. Configure it under Settings → Email, or hand off a temporary password instead.',
       );
     }
 

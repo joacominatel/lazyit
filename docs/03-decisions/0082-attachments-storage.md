@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-15
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,8 +14,9 @@ deciders: [Joaquín Minatel]
 accepted — issue #876. First binary-upload subsystem in lazyit. Serves two surfaces from one
 model: **documents on assets** (warranty PDFs, receipts, damage photos) and **inline images in KB
 runbooks** (`![](attachment:<id>)`). Blobs live on a named Docker volume mounted on the api
-service. Serving is API-only, behind per-parent authz. Backup coverage is **deferred to v1.1 by
-explicit CEO decision** — a documented, loud gap (see [Deferred](#deferred)). Lands the long-deferred
+service. Serving is API-only, behind per-parent authz. Backup coverage was **deferred to v1.1 by
+explicit CEO decision** — a documented, loud gap (see [Deferred](#deferred)) — and **closed 2026-10-21
+(#1467)**: the backup sidecar archives the volume beside the DB dump. Lands the long-deferred
 KB render-time sanitizer with the first image render ([[0029-untrusted-content-sanitization]] /
 SEC-003).
 
@@ -29,9 +30,35 @@ SEC-003).
 > **2026-10-02 (#1476)**: asset and purchase documents gain an optional free-text type label
 > (`attachments.label`, nullable), set at upload and editable with a `PATCH` under the parent's write
 > permission; untrusted text, rendered as text ([[0029-untrusted-content-sanitization]]).
-> **The backup prerequisite was not delivered with Purchases**: #1467 is open, deferred by the CEO, so the
-> v1.1 deferral below still describes what is backed up today — purchase documents included. The
-> purchase's documents panel says so, and [[backups]] item 7 carries the manual workaround.
+> **The backup prerequisite was not delivered with Purchases**: #1467 stayed open, deferred by the CEO,
+> and the purchase's documents panel says the files are not in the backup.
+
+> [!note] Amended 2026-10-21 — the attachments backup ships (#1467)
+> The DR gap below is closed. The backup sidecar ([[backups]] "Automated backup")
+> mounts `attachments_data` **read-only** and, on every run, archives it right after the app DB dump,
+> under the same timestamp: `app-<ts>.dump` + `attachments-<ts>.tar.gz`, on the same `BACKUP_CRON` /
+> `BACKUP_RETENTION_DAYS` / `BACKUP_OFFSITE_CMD` / `BACKUP_ON_FAILURE_CMD` knobs, as this ADR's Deferred
+> section asked. Decisions made while building, each the one consistent with the DB dump:
+> - **DB first, then blobs.** §3's blob-first write means every row in the dump has its blob in the
+>   tarball; the reverse order would let an upload land between the two as a row without bytes.
+>   Restore is the mirror: DB, then attachments, **then** the api — the GC (§6 pass 3) removes row-less
+>   blobs past the 24 h grace, and restored blobs keep their mtime.
+> - **A full `tar.gz` per run**, verified (`gzip -t` + `tar -t`) and promoted by an atomic rename like
+>   the dump; `tmp/` is left out. Incremental/dedup copies (blobs are immutable and content-addressed)
+>   are not built.
+> - **Its own retention and an opt-out (CEO decision 2026-10-21).** Each tarball costs about the volume's
+>   size, so it does not share the dumps' window: `BACKUP_ATTACHMENTS_RETENTION_DAYS` (default 7, ~8
+>   tarballs — up to ~40 GB at a full 5 GB budget) beside `BACKUP_RETENTION_DAYS` (dumps, 14, unchanged),
+>   and `BACKUP_ATTACHMENTS=false` skips the tarball for operators who back the volume up another way.
+>   The sidecar itself stays always on (its profiles are unchanged). Cost: past 7 days a dump has no
+>   matching tarball, so older restores come back without their files.
+> - **A free-space guard** (`BACKUP_MIN_FREE_MB`, default 1024) refuses the tarball before writing rather
+>   than fill the disk Postgres shares; a failed tarball keeps that run's dump, its retention and its
+>   offsite copy, and fails the run loud.
+> - **Not encrypted by the sidecar**, like the dumps: the off-host copy is the operator's to encrypt
+>   (per-blob encryption stays rejected, below).
+>
+> The purchase documents panel's "not in the backup" notice is updated separately, in the web app (#1690).
 
 ## Context
 
@@ -235,7 +262,8 @@ finite," and — critically — Marta's version-restore requirement:
   sniff/re-encode/quota path. Hand-authored/exported `attachment:<id>` refs still survive import
   unchanged (bodies stored verbatim). There is still no article **export** feature, so no
   lazyit→lazyit blob archive exists to carry — that remains out of scope.
-- **DR gap (accepted, loud).** `pg_dump` does **not** capture a filesystem volume. Until the v1.1
+- **DR gap (accepted, loud) — closed 2026-10-21 (#1467)**; see the amendment above. `pg_dump` does
+  **not** capture a filesystem volume. Until the v1.1
   backup sidecar extension ships, a host disk loss loses **all attachments** while the DB restores
   cleanly — leaving `Attachment` rows pointing at vanished blobs (which degrade to a broken-file
   placeholder, not a crash, thanks to the soft-ref design). This is the exact pattern the [[backups]]
@@ -296,7 +324,8 @@ finite," and — critically — Marta's version-restore requirement:
 
 ## Deferred
 
-- **Backup coverage (v1.1 — the named follow-up).** Extend the opt-in backup sidecar
+- ~~**Backup coverage (v1.1 — the named follow-up).**~~ **DONE — issue #1467** (2026-10-21, see the
+  amendment at the top). Extend the opt-in backup sidecar
   ([[backups]] "Automated backup") to `tar` the `attachments_data` volume on the same
   `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` / `BACKUP_OFFSITE_CMD` knobs, and add the volume to the DR
   inventory + restore order. Until then the DR-table row and warning callout (added by *this* issue)

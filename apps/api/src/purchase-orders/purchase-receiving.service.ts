@@ -13,8 +13,11 @@ import {
   RECEIVE_ASSETS_MAX_QUANTITY,
   warrantyEndFrom,
   type LinkAssetsToLine,
+  holdsPurchaseCost,
+  type ApplyToLinkedAssets,
   type PageQuery,
   type PurchaseApplyAction,
+  type PurchaseCostValue,
   type PurchaseApplyField,
   type PurchaseLineValues,
   type PurchaseLinkFailureReason,
@@ -49,6 +52,16 @@ type Tx = Prisma.TransactionClient;
 /** The Pending units tab's filters. */
 export interface PendingLineFilters {
   supplierId?: string;
+  /**
+   * The viewer's today (`YYYY-MM-DD`, #1503): only the lines of purchases expected on an EARLIER day — the
+   * overdue ones. Due today is not late; a purchase with no expected date is never overdue.
+   */
+  expectedBefore?: string;
+}
+
+/** The start of `date` (`YYYY-MM-DD`) in UTC — the instant an expected date must fall before to be overdue. */
+function startOfUtcDay(date: string): Date {
+  return new Date(`${date}T00:00:00.000Z`);
 }
 
 /** An asset row as the wire carries it (money as numbers). */
@@ -213,6 +226,36 @@ function appliedData(
     ) as Prisma.AssetUncheckedUpdateInput,
     applied,
   };
+}
+
+/** The plain asset columns a purchase apply may write — the names an `UPDATED` history row lists. */
+const PURCHASE_PLAIN_FIELDS = [
+  'purchaseDate',
+  'purchaseCost',
+  'purchaseCurrency',
+  'warrantyEnd',
+  'company',
+] as const;
+
+/** A column value for comparison: a Date by its instant, a bigint by its digits, a missing value as null. */
+function comparable(value: unknown): unknown {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'bigint') return value.toString();
+  return value ?? null;
+}
+
+/**
+ * The plain columns whose stored value differs between an asset before and after an apply — names only,
+ * never values, as every plain-field `UPDATED` row (ADR-0033 amendment, #1382). A cost re-applied at the same
+ * amount under another label lists `purchaseCurrency` alone.
+ */
+function changedPurchaseFields(
+  before: LinkAssetRow,
+  after: Pick<Asset, (typeof PURCHASE_PLAIN_FIELDS)[number]>,
+): string[] {
+  return PURCHASE_PLAIN_FIELDS.filter(
+    (field) => comparable(before[field]) !== comparable(after[field]),
+  );
 }
 
 /**
@@ -535,6 +578,186 @@ export class PurchaseReceivingService {
     });
   }
 
+  // ── Re-apply to the linked assets (#1502) ──────────────────────────────────────────────────────────────
+
+  /**
+   * What re-applying the line's CURRENT values would do to the live assets already linked to it — the
+   * follow-up of a line price edit (ADR-0099 §2: an edit only PROPOSES updates). Each asset carries the link
+   * preview's per-field diff, whether its cost is still the previous purchase value, and the fields to
+   * pre-check: `purchaseCost` where it would fill, or replace a cost that still holds the previous purchase
+   * value ("follow unless overridden"). The previous value is the caller's (the price it just replaced); its
+   * label defaults to the purchase's current one. Writes nothing.
+   */
+  async linkedPreview(
+    purchaseOrderId: string,
+    lineId: string,
+    previous: {
+      previousUnitPrice?: number | null;
+      previousCurrency?: string | null;
+    },
+  ) {
+    const { purchase, line } = await this.purchases.assertLineLive(
+      this.prisma,
+      purchaseOrderId,
+      lineId,
+    );
+    assertAssetLine(line);
+    const offered = lineValues(purchase, line);
+    // An archived model is never applied (the apply refuses it): offer it as UNAVAILABLE, as the link does.
+    const values = (await this.modelLive(this.prisma, offered.modelId))
+      ? offered
+      : { ...offered, modelId: null };
+    const previousCost: PurchaseCostValue | null =
+      previous.previousUnitPrice === undefined
+        ? null
+        : {
+            amount: previous.previousUnitPrice,
+            currency:
+              previous.previousCurrency === undefined
+                ? purchase.currency
+                : previous.previousCurrency,
+          };
+    const rows = await this.prisma.asset.findMany({
+      where: { purchaseOrderLineId: lineId, deletedAt: null },
+      select: LINK_ASSET_SELECT,
+      orderBy: [{ assetTag: 'asc' }, { id: 'asc' }],
+    });
+    return {
+      line: await this.purchases.readLine(this.prisma, lineId),
+      values,
+      previousCost,
+      assets: rows.map((row) => {
+        const fields = diffAsset(row, values);
+        const holdsPreviousCost =
+          previousCost === null
+            ? null
+            : holdsPurchaseCost(fields.purchaseCost.current, previousCost);
+        const costAction = fields.purchaseCost.action;
+        const preChecked: PurchaseApplyField[] =
+          costAction === 'FILL' ||
+          (costAction === 'REPLACE' && holdsPreviousCost === true)
+            ? ['purchaseCost']
+            : [];
+        return {
+          assetId: row.id,
+          name: row.name,
+          assetTag: row.assetTag,
+          fields,
+          holdsPreviousCost,
+          preChecked,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Copy the line's current values onto assets already linked to it — explicit, user-triggered, never
+   * automatic (ADR-0099 §2). The listed `fields` are written only where the diff is a fill or a replace (a
+   * field the purchase has no value for is never cleared, an equal one is not rewritten; cost and currency
+   * move together). ONE transaction, with the link's lock order: the purchase `FOR KEY SHARE` (so a line
+   * removal or kind change serializes with it), then the assets `FOR UPDATE` in id order. Each changed asset
+   * gets an `UPDATED` history row naming the plain fields that changed, with the purchase as its source (and
+   * `MODEL_CHANGED` when the model is applied); the purchase gets ONE `LINKED_VALUES_APPLIED`. Partial
+   * success: an asset that is not live (`NOT_FOUND`) or not on this line (`NOT_LINKED`) is refused, one with
+   * nothing to change is reported `unchanged`.
+   */
+  async applyToLinked(
+    purchaseOrderId: string,
+    lineId: string,
+    data: ApplyToLinkedAssets,
+    principal?: Principal,
+  ) {
+    const actor = this.actor.resolveActor(principal);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
+      const { purchase, line } = await this.purchases.assertLineLive(
+        tx,
+        purchaseOrderId,
+        lineId,
+      );
+      assertAssetLine(line);
+      const values = lineValues(purchase, line);
+      const modelLive = await this.modelLive(tx, values.modelId);
+      const rows = await this.lockAssets(tx, data.assetIds);
+
+      const updated: AssetWire[] = [];
+      const unchanged: string[] = [];
+      const failed: Failure[] = [];
+      const applied: Record<string, PurchaseApplyField[]> = {};
+
+      for (const assetId of data.assetIds) {
+        const row = rows.get(assetId);
+        if (!row) {
+          failed.push(failure(assetId, 'NOT_FOUND'));
+          continue;
+        }
+        if (row.purchaseOrderLineId !== lineId) {
+          failed.push(failure(assetId, 'NOT_LINKED'));
+          continue;
+        }
+        const write = appliedData(data.fields, diffAsset(row, values), values);
+        if (write.applied.length === 0) {
+          unchanged.push(assetId);
+          continue;
+        }
+        if (!modelLive && write.applied.includes('modelId')) {
+          throw new BadRequestException(
+            `AssetModel ${values.modelId} is archived: map the line to a live model, or leave modelId out of fields`,
+          );
+        }
+        const after = await tx.asset.update({
+          where: { id: assetId },
+          data: write.data,
+        });
+        const fields = changedPurchaseFields(row, after);
+        if (fields.length > 0) {
+          await this.history.record(tx, {
+            assetId,
+            eventType: 'UPDATED',
+            actor,
+            payload: {
+              fields,
+              source: 'purchase',
+              purchaseOrderId,
+              purchaseOrderLineId: lineId,
+            },
+          });
+        }
+        if (write.applied.includes('modelId')) {
+          await this.history.record(tx, {
+            assetId,
+            eventType: 'MODEL_CHANGED',
+            actor,
+            payload: { from: row.modelId, to: after.modelId },
+          });
+        }
+        applied[assetId] = write.applied;
+        updated.push(assetMoneyToWire(after));
+      }
+
+      if (updated.length > 0) {
+        await recordPurchaseOrderEvent(
+          tx,
+          purchaseOrderId,
+          'LINKED_VALUES_APPLIED',
+          actor,
+          {
+            lineId,
+            fields: [...new Set(data.fields)],
+            assetIds: updated.map((asset) => asset.id),
+            applied,
+          },
+        );
+      }
+      return {
+        updated,
+        unchanged,
+        failed,
+        line: await this.purchases.readLine(tx, lineId),
+      };
+    });
+  }
+
   /** Whether the line's model may be written onto an asset — live, as every asset write requires. */
   private async modelLive(
     client: Tx | PrismaService,
@@ -823,10 +1046,43 @@ export class PurchaseReceivingService {
     };
   }
 
+  /**
+   * The dashboard's *Pending deliveries* row (#1498): over exactly the Pending units rows (the same fragment,
+   * unfiltered), the purchases with a pending line, the units pending on them, and the overdue purchases among
+   * them — expected on a day before `expectedBefore` (the viewer's today), else before the server's UTC today.
+   * One aggregate query; pending is derived in SQL as the list derives it.
+   */
+  async pendingSummary(expectedBefore?: string) {
+    const today = expectedBefore ?? new Date().toISOString().slice(0, 10);
+    const pending = this.pendingLinesFrom({});
+    const [row] = await this.prisma.$queryRaw<
+      {
+        purchases: number;
+        units: bigint | number | null;
+        overduePurchases: number;
+      }[]
+    >`
+      SELECT COUNT(DISTINCT po."id")::int AS "purchases",
+             SUM(l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()})::bigint AS "units",
+             (COUNT(DISTINCT po."id") FILTER (
+               WHERE po."expectedDate" < ${startOfUtcDay(today)}::timestamp(3)))::int AS "overduePurchases"
+      ${pending}`;
+    return {
+      purchases: Number(row?.purchases ?? 0),
+      units: Number(row?.units ?? 0),
+      overduePurchases: Number(row?.overduePurchases ?? 0),
+    };
+  }
+
   /** The list's filter: countable lines with pending > 0 on live purchases that are neither DRAFT nor CANCELLED. */
   private pendingLinesFrom(filters: PendingLineFilters): Prisma.Sql {
     const supplier = filters.supplierId
       ? Prisma.sql`AND po."supplierId" = ${filters.supplierId}`
+      : Prisma.empty;
+    // TIMESTAMP(3), no zone: the adapter writes a Date as its UTC wall clock, which is what the column holds.
+    // `expectedDate.slice(0, 10) < today` (the web's isOverdue) is exactly `expectedDate < today 00:00 UTC`.
+    const overdue = filters.expectedBefore
+      ? Prisma.sql`AND po."expectedDate" < ${startOfUtcDay(filters.expectedBefore)}::timestamp(3)`
       : Prisma.empty;
     return Prisma.sql`
         FROM "purchase_order_lines" l
@@ -836,6 +1092,7 @@ export class PurchaseReceivingService {
          AND po."status" NOT IN ('DRAFT', 'CANCELLED')
          AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})
          ${supplier}
+         ${overdue}
          AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0`;
   }
 

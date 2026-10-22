@@ -12,7 +12,11 @@ import {
   type AiToolErrorCode,
   type AiUsage,
 } from '@lazyit/shared';
-import type { AiRun, Prisma } from '../../../generated/prisma/client';
+import type {
+  AiConversation,
+  AiRun,
+  Prisma,
+} from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AppTransactionClient } from '../../prisma/prisma-omit';
 import { AiToolService } from '../core/ai-tool.service';
@@ -33,8 +37,12 @@ import { AiInputRequests } from './input-requests';
 import { capToolOutput } from './limits';
 import {
   AI_MESSAGE_FORMAT_MODEL,
+  AI_MESSAGE_FORMAT_RUN,
   AI_MESSAGE_FORMAT_STEP,
+  AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
+  readRunRecord,
   readStepRecord,
+  readSystemPrompt,
   roleOf,
   type StepOutcome,
   type StepRecord,
@@ -182,6 +190,49 @@ export class AiRunLifecycle {
       select: { seq: true },
     });
     return (last?.seq ?? -1) + 1;
+  }
+
+  /**
+   * The conversation's frozen system prompt: the `systemPrompt` column (#1675), else — on a conversation
+   * created before it, whose column is null — its legacy `lazyit-system-prompt-v1` row (never backfilled).
+   * Null when neither is readable: the conversation cannot continue on this build.
+   */
+  async frozenSystemPrompt(
+    conversation: Pick<AiConversation, 'id' | 'systemPrompt'>,
+  ): Promise<string | null> {
+    if (conversation.systemPrompt) return conversation.systemPrompt;
+    const legacy = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: conversation.id,
+        format: AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
+      },
+      orderBy: { seq: 'asc' },
+      select: { content: true },
+    });
+    return legacy ? readSystemPrompt(legacy.content) : null;
+  }
+
+  /**
+   * The chat session epoch a human run is delegated under: the run's `sessionEpoch` column (#1675), else —
+   * on a run created before it, whose column is null — its legacy `lazyit-run-v1` row (never backfilled).
+   * Null when neither holds one (a service account's run, or a record this build cannot read).
+   */
+  async runSessionEpoch(
+    run: Pick<AiRun, 'id' | 'conversationId' | 'sessionEpoch'>,
+  ): Promise<number | null> {
+    if (typeof run.sessionEpoch === 'number') return run.sessionEpoch;
+    if (!run.conversationId) return null;
+    const legacy = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: run.conversationId,
+        runId: run.id,
+        format: AI_MESSAGE_FORMAT_RUN,
+      },
+      select: { content: true },
+    });
+    return legacy
+      ? (readRunRecord(legacy.content)?.sessionEpoch ?? null)
+      : null;
   }
 
   /**

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { isSafeApplicationUrl } from "./application";
 import { pageSchema } from "./pagination";
-import { optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
+import { MoneyTotalSchema } from "./purchase-order";
 
 /**
  * Supplier — who the team buys from and pays (a reseller, a wholesaler, a CSP), ADR-0099 §2. NOT a
@@ -44,6 +45,31 @@ export const SupplierSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+});
+
+/**
+ * One year of spend with a supplier in ONE currency label (#1500; ADR-0099 §5, CEO decision D-C) — a
+ * `MoneyTotal` plus the year and the number of purchases behind it. Derived on read, never stored:
+ *   - `year` — the calendar year (UTC) of the purchase's `orderDate`, else of when it was recorded (`createdAt`);
+ *   - counted: the supplier's live purchases whose status is neither `DRAFT` nor `CANCELLED`, and their live
+ *     lines, each as (quantity − cancelled) × unit price;
+ *   - `currency` / `amount` / `unpricedLines` — as in `MoneyTotal`: grouped by label (trimmed, case-insensitive;
+ *     `null` = "No currency"), never converted or summed across labels, `amount: null` when the sum would
+ *     exceed `MONEY_MAX`; a line with units left and no price adds nothing and is counted in `unpricedLines`;
+ *   - `purchaseCount` — the purchases in that year and label.
+ */
+export const SupplierYearlyTotalSchema = MoneyTotalSchema.extend({
+  year: int4({ min: 0, example: 2026 }),
+  purchaseCount: int4({ min: 0 }),
+});
+
+/**
+ * `GET /suppliers/:id`: the supplier plus its yearly totals, newest year first; within a year, one entry per
+ * currency label in the order its earliest purchase that year was dated. Optional so a reader built before
+ * #1500 — or a newer one reading an older API — still parses the row.
+ */
+export const SupplierDetailSchema = SupplierSchema.extend({
+  yearlyTotals: z.array(SupplierYearlyTotalSchema).optional(),
 });
 
 /** The editable fields, as a create accepts them: only `name` is required. */
@@ -144,6 +170,8 @@ export const SupplierMergeResultSchema = z.object({
 export const SupplierListPageSchema = pageSchema(SupplierSchema);
 
 export type Supplier = z.infer<typeof SupplierSchema>;
+export type SupplierYearlyTotal = z.infer<typeof SupplierYearlyTotalSchema>;
+export type SupplierDetail = z.infer<typeof SupplierDetailSchema>;
 export type CreateSupplier = z.infer<typeof CreateSupplierSchema>;
 export type UpdateSupplier = z.infer<typeof UpdateSupplierSchema>;
 export type SupplierListPage = z.infer<typeof SupplierListPageSchema>;

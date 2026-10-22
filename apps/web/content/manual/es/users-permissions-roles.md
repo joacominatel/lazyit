@@ -30,7 +30,9 @@ pueden ajustar. El rol es lo que un usuario *tiene*; los permisos son lo que un 
   del propio Miembro.
 - **Lector** — solo lectura. Por defecto un Lector puede mirar la mayoría de las áreas pero no cambiar
   nada. Además, algunas vistas sensibles (el directorio de usuarios, el registro de concesiones de
-  acceso y las compras y proveedores) quedan ocultas para el Lector por defecto.
+  acceso y las compras y proveedores) quedan ocultas para el Lector por defecto. Aun así, un Lector ve
+  el nombre y el correo de los responsables de cada activo, porque quién tiene un equipo es parte del
+  inventario (ver [Asignaciones e historial](/help/assets-assignments-history)).
 
 ## La página de Roles y permisos
 

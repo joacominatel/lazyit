@@ -65,6 +65,7 @@ import {
   capabilitiesForPillar,
   detectPreset,
   type SaveDiff,
+  savePayload,
   type StagedMatrix,
   toggleCapability,
   togglePermission,
@@ -98,6 +99,11 @@ const ROLE_TONE: Record<Role, StatusTone> = {
  * removed read, or a newly granted admin-level permission, on either role) routes through the same
  * confirmation as before; any other save goes straight through. Fine-tune (every raw permission, per
  * role) stays below the matrix.
+ *
+ * Write implies read (#1518): turning a permission on turns on the read it needs; turning a read off
+ * turns off what needs it, and the confirmation (a removed read is always consequential) names those
+ * permissions. Chosen over blocking the un-tick so the matrix keeps the "warn, never client-block" rule
+ * of its confirmation. A save also adds any read a matrix saved before the rule lacks, and says so.
  */
 function RolesMatrix() {
   const t = useTranslations("settings");
@@ -177,9 +183,11 @@ function RolesMatrix() {
   // ── Save flow (unchanged rules: validate the full body, confirm only a consequential diff) ─────────
   const doSave = useCallback(async () => {
     if (!staged) return;
+    // Write implies read (#1518): the payload carries every read a kept permission needs. The toggles
+    // already keep it; this heals a matrix saved before the rule (shown in the confirm first).
     const parsed = UpdateRolePermissionsSchema.safeParse({
-      MEMBER: staged.MEMBER,
-      VIEWER: staged.VIEWER,
+      MEMBER: savePayload(staged.MEMBER),
+      VIEWER: savePayload(staged.VIEWER),
     });
     if (!parsed.success) {
       toast.error(t("roles.permissions.toast.invalid"), {
@@ -205,6 +213,8 @@ function RolesMatrix() {
     );
     const combined: SaveDiff = {
       removedReads: diffs.flatMap((d) => d.removedReads),
+      removedDependents: diffs.flatMap((d) => d.removedDependents),
+      impliedReads: diffs.flatMap((d) => d.impliedReads),
       aboveTierGrants: diffs.flatMap((d) => d.aboveTierGrants),
       isConsequential: diffs.some((d) => d.isConsequential),
     };

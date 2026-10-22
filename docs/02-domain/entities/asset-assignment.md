@@ -165,6 +165,20 @@ Plus the natural sub-resource endpoints on the related entities:
   missing/soft-deleted).
 - `GET /users/:id/assignments?activeOnly=` — assignments of one [[user]].
 
+> [!important] Who sees an owner's email
+> The asset-side reads inline each assignment's `user` through the public column allowlist
+> (`PUBLIC_USER_SELECT`), email included, behind `asset:read` alone: `GET /assets/:id/assignments`,
+> the asset detail's `activeAssignments`, and the asset list row. VIEWER holds `asset:read` and not
+> `user:read`, so a VIEWER sees owners' emails here. That is a **decision**, not an oversight
+> (2026-10-21, #1636): the holder of an asset is part of the inventory record. The decision covers
+> the owner's id, name and email (plus `deletedAt`) only. Today the detail and assignment reads still
+> return the rest of `PUBLIC_USER_SELECT` (role, `legajo`, `username`, `directoryAttrs`); the CEO decided
+> on 2026-10-21 that callers without `user:read` will not get those fields, and that filtering by person
+> (`?userId=`, `?assignedToUserId=`) will require `user:read` (#1685 — decided, not built yet). The reasoning, and
+> the contrast with the servers reads that gate the same email behind `user:read` (#1627), are in
+> [[asset]]. The user-side read, `GET /users/:id/assignments`, starts from a person and is
+> directory-relational, so it needs `user:read` ([[user]]).
+
 All documented via Swagger ([[0018-api-documentation-swagger]]).
 
 Related: [[asset]] · [[user]] · [[service-account]] · [[asset-history]] · [[asset-centric]] ·

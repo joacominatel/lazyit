@@ -3,6 +3,7 @@ import {
   addMonthsUtc,
   applyActionOf,
   costApplyActionOf,
+  holdsPurchaseCost,
   purchaseLineValues,
   warrantyEndFrom,
 } from "./purchase-line-values";
@@ -87,5 +88,26 @@ describe("the diff actions", () => {
     expect(costApplyActionOf({ amount: 1000, currency: null }, offered)).toBe("REPLACE");
     expect(costApplyActionOf({ amount: 999, currency: "USD" }, offered)).toBe("REPLACE");
     expect(costApplyActionOf({ amount: 1000, currency: "USD" }, null)).toBe("UNAVAILABLE");
+  });
+});
+
+describe("holdsPurchaseCost (#1502) — follow unless overridden", () => {
+  test("the same amount and label (trimmed, case-insensitive) is still the purchase value", () => {
+    expect(holdsPurchaseCost({ amount: 100, currency: "ars " }, { amount: 100, currency: "ARS" })).toBe(true);
+  });
+
+  test("another amount, or another label at the same amount, was overridden", () => {
+    expect(holdsPurchaseCost({ amount: 101, currency: "ARS" }, { amount: 100, currency: "ARS" })).toBe(false);
+    expect(holdsPurchaseCost({ amount: 100, currency: "USD" }, { amount: 100, currency: "ARS" })).toBe(false);
+    expect(holdsPurchaseCost({ amount: 100, currency: null }, { amount: 100, currency: "ARS" })).toBe(false);
+  });
+
+  test("no previous price is held only by an asset with no cost", () => {
+    expect(holdsPurchaseCost({ amount: null, currency: null }, { amount: null, currency: "ARS" })).toBe(true);
+    expect(holdsPurchaseCost({ amount: 5, currency: "ARS" }, { amount: null, currency: "ARS" })).toBe(false);
+  });
+
+  test("an asset with no cost does not hold a previous price", () => {
+    expect(holdsPurchaseCost({ amount: null, currency: null }, { amount: 100, currency: "ARS" })).toBe(false);
   });
 });

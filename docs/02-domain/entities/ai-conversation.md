@@ -3,7 +3,7 @@ title: AiConversation
 tags: [domain, entity, ai-assistant, retention]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-21
 ---
 
 # AiConversation
@@ -53,6 +53,10 @@ permanent [[ai-action-log]].
   `http(s)` sources) after its assistant message: the web shows the sources under the answer. Once such a
   record exists, every later turn of the conversation counts as having read untrusted content, so nothing
   in it is auto-approved anymore.
+- **Frozen system prompt** (#1675): built once at creation and stored in `systemPrompt`, sent unchanged
+  on every step; never on the wire. A conversation created before #1675 has the column null and keeps its
+  prompt in a legacy `lazyit-system-prompt-v1` row (seq 0) — the runtime reads the column, else that row
+  (never backfilled, never deleted). Neither readable: the conversation goes read-only `VERSION_CHANGED`.
 - **One active run** at a time (409 `RUN_IN_PROGRESS`, enforced by the runtime).
 - MCP keeps **no** server-side conversation.
 
@@ -71,6 +75,7 @@ Prisma model `AiConversation` → table `ai_conversations`.
 | `effort` / `providerOptions` | `text?` / `json?` | the owner's reasoning effort and provider options; null = the instance setting. Validated on write, read tolerantly. |
 | `autoApprove` / `autoApproveEnabledAt` | `bool` / `datetime?` | auto-approve mode (#1376), default off; when it was last switched on. |
 | `webSearchMaxUses` | `int?` | the web search cap the conversation was frozen with (#1389); null = no web search (every legacy and headless row). |
+| `systemPrompt` | `text?` | the frozen system prompt (#1675); null on a pre-#1675 conversation, read from its `lazyit-system-prompt-v1` row. |
 | `closedReason` | `text?` | null while writable. |
 | `lastActivityAt` | `datetime` | drives retention. |
 | `createdAt` / `updatedAt` | `datetime` | no `deletedAt` (hard-deleted). |
@@ -88,7 +93,7 @@ Append-only; it cascades with its conversation.
 | `seq` | `int` | unique per conversation. |
 | `role` | `text` | `user` \| `assistant` \| `tool`. |
 | `content` | `json` | the exact provider message; projected to a neutral wire shape before it leaves the API. |
-| `format` | `text` | default `aisdk-v7` — the converter a future SDK major needs. Runtime records (never sent to the model) use `lazyit-*` formats, e.g. `lazyit-web-search-v1` (#1389). |
+| `format` | `text` | default `aisdk-v7` — the converter a future SDK major needs. Runtime records (never sent to the model) use `lazyit-*` formats, e.g. `lazyit-step-v1`, `lazyit-web-search-v1` (#1389); `lazyit-system-prompt-v1` and `lazyit-run-v1` are legacy, read only (#1675). |
 | `createdAt` | `datetime` | |
 
 Related: [[ai-run]] · [[ai-tool-invocation]] · [[ai-action-log]] · [[ai-settings]]

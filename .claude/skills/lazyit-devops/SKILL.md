@@ -126,7 +126,10 @@ CI runs on every **push to** and **PR targeting `master`/`dev`** (`.github/workf
 3. Typecheck (`tsc --noEmit` per workspace).
 4. Lint — **`eslint` without `--fix`** (the repo's `lint` script uses `--fix`, which mutates files
    and masks failures; CI must gate, not rewrite).
-5. Test — api Jest (**mocks the Prisma client → no DB needed**) + shared `bun test`.
+5. Test — api Jest (**mocks the Prisma client → no DB needed**); then the Postgres-backed API suite
+   (`apps/api/test/*.db.spec.ts`): `verify` starts `compose.yaml`'s `db` (same digest pin as prod)
+   at the top of the job, runs `prisma migrate deploy` against it and `bun run test:db` with
+   `DB_TEST_URL` (#1656); then shared, web and agent with `bun test --isolate` (#1318).
 6. Build all workspaces (`turbo build`).
 7. Build the Docker images (`push: false`, GHA layer cache) — validates the Dockerfiles.
 

@@ -163,7 +163,11 @@ export class ConfigController {
       'A non-ADMIN caller is refused with 403 `ADMIN_REQUIRED`, whatever the matrix grants it (SEC-088). ' +
       'Replaces the MEMBER and VIEWER permission sets wholesale (a full PUT). The ADMIN row is ' +
       'IMMUTABLE — the strict body cannot name it (an ADMIN/extra key → 400); every permission must ' +
-      'be in the @lazyit/shared catalog (unknown → 400). Applied transactionally; every added/removed ' +
+      'be in the @lazyit/shared catalog (unknown → 400). Write implies read (#1518): a body that grants a ' +
+      'non-read permission without its domain read, or revokes a read a kept permission needs, is refused ' +
+      'with 400 `PERMISSION_READ_REQUIRED` (listing each { role, permission, requires }); a write-without-read ' +
+      'the stored matrix already held is healed by adding the read, never by dropping the write. ' +
+      'Applied transactionally; every added/removed ' +
       'permission is audited (PermissionAuditLog) with the actor, and the resolver cache is ' +
       'invalidated so the NEXT authorization decision reflects the change. Returns the new matrix.',
   })

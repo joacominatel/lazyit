@@ -20,11 +20,12 @@ right order. A working, **tested** restore is mandatory before you trust an inst
 | --- | --- | --- |
 | **Environment file** (`infra/env/.env.prod`) | a file on the host | **Yes — off-host, encrypted.** Irreplaceable: it holds the database password and the encryption keys. |
 | **Application database** | the `db` service | **Yes.** Your data — and, with local accounts, everyone's sign-in credentials. |
+| **Uploaded files** | the attachments volume | **Yes.** Documents on assets and purchases (invoices, orders, delivery notes) and knowledge-base images. The database only records them; the files themselves are here. |
 | Search index | the `meilisearch` service | No — rebuildable by re-indexing from the database. |
 | TLS certificates | the `caddy` service | No — re-issued automatically. |
 
-The environment file is your responsibility to copy off-host. The database can be dumped
-automatically by the optional backup sidecar (below).
+The environment file is your responsibility to copy off-host. The database and the uploaded files
+are backed up automatically by the backup sidecar (below), as a pair: keep and restore them together.
 
 ## The key you cannot lose
 
@@ -53,11 +54,18 @@ What this means for recovery:
   design** — no database restore and no administrator can recover the plaintext. Keep sensitive vaults
   multi-member so a peer can restore access. See [Secret Manager](/help/secret-manager).
 
-## Automated backups (optional sidecar)
+## Automated backups (the backup sidecar)
 
-An opt-in **backup** service dumps the application database on a schedule to a host folder, with
-retention, and an optional off-site copy hook. It is off by default. Bring it up alongside the running
-stack:
+A **backup** service runs on a schedule. Each run dumps the application database, then archives the
+uploaded files, and writes both into `./backups` under the same timestamp — `app-<time>.dump` and
+`attachments-<time>.tar.gz` — then removes copies older than their retention window (14 days for the
+database dumps, 7 for the file archives by default). It has an optional
+off-site copy hook and an optional failure alert hook.
+
+It starts with the production stack: the standard bring-up (`./infra/start.sh`, `./infra/update.sh`)
+already runs it, whatever the installer's yes/no about backups says. Check with
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod ps backup`. To start it
+on its own:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --env-file infra/env/.env.prod \
@@ -68,24 +76,53 @@ Tune it in the environment file (defaults shown):
 
 ```sh
 BACKUP_CRON="30 2 * * *"     # when to run (crontab syntax) — daily at 02:30 by default
-BACKUP_RETENTION_DAYS=14     # prune dumps older than this many days
-BACKUP_OFFSITE_CMD=          # optional off-site copy hook — off unless you set it
+BACKUP_RETENTION_DAYS=14     # remove database dumps older than this many days
+BACKUP_ATTACHMENTS=true      # archive the uploaded files on every run; false turns the archive off
+BACKUP_ATTACHMENTS_RETENTION_DAYS=7   # remove file archives older than this many days
+BACKUP_MIN_FREE_MB=1024      # skip the file archive if it would leave less free disk than this
+BACKUP_OFFSITE_CMD=          # optional off-site copy, run for each file with its path as "$1"
+BACKUP_ON_FAILURE_CMD=       # optional alert, run with the reason as "$1" when a run fails
 ```
 
-The sidecar writes timestamped dumps of the application database into `./backups`. It does **not** back
-up the environment file — copy that off-host yourself.
+For example, `BACKUP_OFFSITE_CMD='rclone copy "$1" offsite:lazyit/'` sends both files of every run to an
+rclone remote. The sidecar does **not** back up the environment file — copy that off-host yourself —
+and it does not encrypt anything: encrypt the off-site copy. You don't need to add any of these to
+the environment file: an instance updated in place uses the defaults shown.
+
+Set `BACKUP_ATTACHMENTS=false` only if you back up the uploaded files some other way (for example with
+snapshots of the server's disk): the database dumps continue, but the files are then your
+responsibility. Archives already in `./backups` still age out after their retention.
+
+**Plan the disk space.** The file archive is a full copy every run, about the size of all uploaded
+files — which is why it keeps fewer days than the database dumps. With the defaults that is about 8
+copies: 300 MB of attachments takes about 2.4 GB in `./backups`, 1 GB about 8 GB, 5 GB about 40 GB. A
+restore needs a database dump and the file archive of the same run, so only the last 7 days can be
+restored with their files. If the disk is too full, the run skips the archive and reports a failure
+rather than filling the disk the database uses; the database dump is still written. Lower
+`BACKUP_ATTACHMENTS_RETENTION_DAYS`, give `./backups` a bigger disk, or copy each run off-site and keep
+fewer days locally.
+
+A failed run is never silent: the log shows `[lazyit-backup] FAILED run <time>: <reason>`, and your
+alert hook fires if you set one. Check with
+`docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod logs backup | grep lazyit-backup`.
 
 ## Manual backup
 
 The database stays on the internal network, so the dump runs inside the compose network. The custom
-format (`-Fc`) is compressed and supports selective restore:
+format (`-Fc`) is compressed and supports selective restore. Take the database first, then the files:
 
 ```sh
-DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod"
+DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
 $DC exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "app-$(date +%Y%m%d-%H%M%S).dump"
+$DC run --rm --no-deps -T backup \
+  sh -c 'tar -czf - -C /attachments --exclude ./tmp .' > "attachments-$(date +%Y%m%d-%H%M%S).tar.gz"
 ```
 
-Copy the dump **and** `infra/env/.env.prod` off the host, to a secure, access-controlled location.
+With the sidecar running, `$DC exec -T backup lazyit-backup` takes one complete, verified pair right now
+into `./backups` instead.
+
+Copy the dump, the archive **and** `infra/env/.env.prod` off the host, to a secure, access-controlled
+location.
 
 ## Restore
 
@@ -96,21 +133,38 @@ For a full recovery onto a rebuilt host, restore in this order:
 
 1. **Put the environment file back first.** It must contain the **same keys** as when the database
    was dumped. `chmod 600 infra/env/.env.prod`.
-2. **Restore the application database** from its dump.
-3. **Bring the stack up.**
-4. **Re-index search** — the index is rebuildable:
+2. **Restore the application database** from its dump. Start only the `db` service for this.
+3. **Restore the uploaded files** from the archive **of the same run** (same timestamp), before the
+   API starts. Put the archive in `./backups`, then:
+
+   ```sh
+   DC="docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod --env-file infra/env/.env.prod"
+   $DC stop api
+   $DC run --rm --no-deps -T -v lazyit-prod_attachments_data:/restore backup \
+     sh -c 'find /restore -mindepth 1 -delete && tar -xzf /backups/attachments-20260530-120000.tar.gz -C /restore --numeric-owner'
+   ```
+
+   This empties the attachments volume and unpacks the archive into it, keeping each file's owner and
+   dates.
+4. **Bring the stack up.**
+5. **Re-index search** — the index is rebuildable:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
   --env-file infra/env/.env.prod run --rm migrate bun run reindex:all
 ```
 
+> **Keep the database and the files in step.** lazyit regularly cleans up stored files that no record
+> points to. Start the API against a database that does not match the restored files — an empty one,
+> or a much older dump — and that clean-up deletes the restored files. Restore both from the same run,
+> database first, before the API starts.
+
 > **Never reset the database with `down -v`.** That command removes **all** named volumes — the
 > uploaded attachments included, not just the database. To reset only the database, remove only its
 > volume (`docker volume rm lazyit-prod_db_data`), bring that service up fresh, then load the dump.
 
 Verify the restore end-to-end by signing in through the web app and checking that your records are
-there. If you use the Applications Workflow Engine, run **Test connection** on a connection too: it
+there, and open a document on an asset or a purchase. If you use the Applications Workflow Engine, run **Test connection** on a connection too: it
 proves the workflow secret key matches the restored database.
 
 ## Related

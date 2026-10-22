@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
+  missingImpliedReads,
   PERMISSIONS,
   type MyPermissions,
   type Permission,
@@ -29,6 +30,13 @@ const HIGH_RISK_VERBS = new Set<string>([
 const isHighRiskVerb = (permission: string): boolean =>
   HIGH_RISK_VERBS.has(permission) || permission.endsWith(':delete');
 
+/** One write-without-read in a PUT body that the stored matrix did not already carry (#1518). */
+interface ReadRequiredViolation {
+  role: Role;
+  permission: Permission;
+  requires: Permission;
+}
+
 /**
  * The configurable role→permission matrix backend (Roles & Permissions v2, ADR-0046 P5).
  *
@@ -43,6 +51,13 @@ const isHighRiskVerb = (permission: string): boolean =>
  * every permission must be in the frozen `@lazyit/shared` catalog (the body's zod enum rejects an
  * unknown literal with a 400 before this runs). Within those two limits, MEMBER/VIEWER are fully
  * configurable — granting MEMBER a `:delete` or a coarse verb is the intended feature, not a leak.
+ *
+ * WRITE IMPLIES READ (#1518, CEO decision): a role holding a non-read verb on a domain must hold that
+ * domain's read (`missingImpliedReads`, derived from the catalog in `@lazyit/shared`). {@link updateMatrix}
+ * refuses a body that INTRODUCES a write-without-read with 400 `PERMISSION_READ_REQUIRED`, and HEALS one
+ * the stored matrix already carried (a legacy row from before the rule) by adding the read — never by
+ * dropping the write, so nobody loses a capability they had. Reads stay tolerant: {@link getMatrix}
+ * returns the stored rows as they are.
  *
  * ADMIN is NEVER materialized from the DB here: the resolver always returns the complete catalog for
  * ADMIN regardless of any rows, so {@link getMatrix} reports the catalog for ADMIN to match what the
@@ -108,16 +123,26 @@ export class PermissionsConfigService {
     const widened: { role: Role; permission: string }[] = [];
 
     await this.prisma.$transaction(async (tx) => {
+      // Read both roles' stored sets first, so the write-implies-read check (#1518) runs over the whole
+      // body before anything is written.
+      const current: Record<(typeof EDITABLE_ROLES)[number], Set<string>> = {
+        [Role.MEMBER]: new Set(),
+        [Role.VIEWER]: new Set(),
+      };
       for (const role of EDITABLE_ROLES) {
         const currentRows = await tx.rolePermission.findMany({
           where: { role },
           select: { permission: true },
         });
-        const current = new Set<string>(currentRows.map((r) => r.permission));
-        const next = new Set<string>(desired[role]);
+        current[role] = new Set(currentRows.map((r) => r.permission));
+      }
+      const healed = this.enforceImpliedReads(desired, current);
 
-        const toRevoke = [...current].filter((p) => !next.has(p));
-        const toGrant = [...next].filter((p) => !current.has(p));
+      for (const role of EDITABLE_ROLES) {
+        const next = new Set<string>(healed[role]);
+
+        const toRevoke = [...current[role]].filter((p) => !next.has(p));
+        const toGrant = [...next].filter((p) => !current[role].has(p));
 
         for (const permission of toGrant) {
           if (isHighRiskVerb(permission)) {
@@ -172,6 +197,47 @@ export class PermissionsConfigService {
     }
 
     return this.getMatrix();
+  }
+
+  /**
+   * Write implies read (#1518). For each editable role, every permission of the body whose implied read
+   * the body leaves out is either:
+   *   - LEGACY — the stored set already held that permission without its read (a matrix saved before the
+   *     rule): healed by adding the read to the desired set. The write is never removed, so nobody loses
+   *     a capability; the role gains the matching view, audited as a GRANT like any other.
+   *   - NEW — the body grants the permission, or revokes the read it needs: refused with 400
+   *     `PERMISSION_READ_REQUIRED`, listing every such pair, and nothing is written. The editor never
+   *     sends one (it turns the read on with the write); this is the server's half of the rule.
+   * Returns the desired sets with the legacy reads added.
+   */
+  private enforceImpliedReads(
+    desired: Record<(typeof EDITABLE_ROLES)[number], Permission[]>,
+    current: Record<(typeof EDITABLE_ROLES)[number], ReadonlySet<string>>,
+  ): Record<(typeof EDITABLE_ROLES)[number], Permission[]> {
+    const healed = { ...desired };
+    const violations: ReadRequiredViolation[] = [];
+    for (const role of EDITABLE_ROLES) {
+      const additions: Permission[] = [];
+      for (const { permission, requires } of missingImpliedReads(
+        desired[role],
+      )) {
+        const legacy =
+          current[role].has(permission) && !current[role].has(requires);
+        if (legacy) additions.push(requires);
+        else violations.push({ role, permission, requires });
+      }
+      healed[role] = [...new Set([...desired[role], ...additions])];
+    }
+    if (violations.length > 0) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'PERMISSION_READ_REQUIRED',
+        message:
+          'A role that can change something must also be able to view it: grant the read permission, or remove the permissions that need it.',
+        violations,
+      });
+    }
+    return healed;
   }
 
   /**

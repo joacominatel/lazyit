@@ -10,9 +10,16 @@ import type {
   DeletedFilter,
   PageQuery,
   SupplierMergeField,
+  SupplierYearlyTotal,
   UpdateSupplier,
 } from '@lazyit/shared';
-import { SUPPLIER_MERGE_FIELDS, offsetOf, pageOf } from '@lazyit/shared';
+import {
+  SUPPLIER_MERGE_FIELDS,
+  currencyGroupKey,
+  groupMoneyTotals,
+  offsetOf,
+  pageOf,
+} from '@lazyit/shared';
 import { Prisma, type Supplier } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PurchaseSearchSync } from '../search/purchase-search.sync';
@@ -72,6 +79,64 @@ export function planSupplierMerge(
       plan.kept.push({ field, value, sourceValue });
   }
   return plan;
+}
+
+/**
+ * One row of the yearly-totals aggregate (see {@link SuppliersService.yearlyTotals}): one year and one stored
+ * currency spelling. `amount` is the exact `numeric` sum as text, so nothing is lost before the grouping.
+ */
+export interface SupplierYearRow {
+  year: number;
+  currency: string | null;
+  amount: string;
+  unpricedLines: number;
+  purchaseCount: number;
+}
+
+/**
+ * Fold the per-(year, spelling) rows into the wire totals (#1500): per year, the spellings are grouped by the
+ * shared money rule ({@link groupMoneyTotals}: trimmed, case-insensitive, `null` for "No currency", never
+ * converted, `amount: null` beyond `MONEY_MAX`); the unpriced lines and purchases of the spellings of one
+ * group add up. Rows arrive newest year first and, within a year, in the order each spelling was first dated,
+ * so a group shows its earliest spelling and the output keeps that order. Pure.
+ */
+export function foldSupplierYearlyTotals(
+  rows: readonly SupplierYearRow[],
+): SupplierYearlyTotal[] {
+  const years = new Map<number, SupplierYearRow[]>();
+  for (const row of rows) {
+    const bucket = years.get(row.year);
+    if (bucket) bucket.push(row);
+    else years.set(row.year, [row]);
+  }
+  const out: SupplierYearlyTotal[] = [];
+  for (const [year, yearRows] of years) {
+    const counts = new Map<string, { unpriced: number; purchases: number }>();
+    for (const row of yearRows) {
+      const key = currencyGroupKey(row.currency);
+      const count = counts.get(key) ?? { unpriced: 0, purchases: 0 };
+      count.unpriced += row.unpricedLines;
+      count.purchases += row.purchaseCount;
+      counts.set(key, count);
+    }
+    const totals = groupMoneyTotals(
+      yearRows.map((row) => ({
+        currency: row.currency,
+        amount: BigInt(row.amount),
+      })),
+    );
+    for (const total of totals) {
+      const count = counts.get(currencyGroupKey(total.currency));
+      out.push({
+        year,
+        currency: total.currency,
+        amount: total.amount,
+        unpricedLines: count?.unpriced ?? 0,
+        purchaseCount: count?.purchases ?? 0,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -162,6 +227,51 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier ${id} not found`);
     }
     return supplier;
+  }
+
+  /** `GET /suppliers/:id`: the live supplier plus its yearly totals (#1500). */
+  async findDetail(id: string) {
+    const supplier = await this.findOne(id);
+    return { ...supplier, yearlyTotals: await this.yearlyTotals(id) };
+  }
+
+  /**
+   * What the team spent with a supplier per year, per currency label (#1500; ADR-0099 §5, CEO decisions D-C and
+   * 2026-10-21 on #1495). One aggregate over the supplier's purchases (`@@index([supplierId])`) and their lines
+   * (`@@index([purchaseOrderId])`) — one row per year and stored currency spelling, never one per purchase:
+   *   - the year is the purchase's `orderDate`, else when it was recorded (`createdAt`), in UTC (the web stores a
+   *     date-only `orderDate` at UTC midnight, so it lands in its own year);
+   *   - counted: live purchases (`deletedAt` null — the raw query bypasses the soft-delete extension, so it says
+   *     so itself) whose status is neither `DRAFT` nor `CANCELLED` (a status a newer build adds counts); their
+   *     live lines each add (quantity − cancelled, floored at 0) × unit price, in `numeric` so no product or
+   *     sum can overflow;
+   *   - a line with units left and no price adds nothing and is counted as unpriced; a fully cancelled line
+   *     adds nothing either way, so its missing price does not mark the total partial;
+   *   - a purchase with no live lines still counts as a purchase of its year and label.
+   * Purchases a merge moved here (#1496) point at this supplier, so they count here.
+   */
+  async yearlyTotals(id: string): Promise<SupplierYearlyTotal[]> {
+    const rows = await this.prisma.$queryRaw<SupplierYearRow[]>`
+      SELECT
+        EXTRACT(YEAR FROM COALESCE(po."orderDate", po."createdAt"))::int AS "year",
+        po."currency" AS "currency",
+        COALESCE(
+          SUM(GREATEST(l."quantity" - l."cancelledQuantity", 0)::numeric * l."unitPrice"::numeric),
+          0
+        )::text AS "amount",
+        (COUNT(l."id") FILTER (
+          WHERE l."unitPrice" IS NULL AND l."quantity" - l."cancelledQuantity" > 0
+        ))::int AS "unpricedLines",
+        COUNT(DISTINCT po."id")::int AS "purchaseCount"
+      FROM "purchase_orders" po
+      LEFT JOIN "purchase_order_lines" l
+        ON l."purchaseOrderId" = po."id" AND l."deletedAt" IS NULL
+      WHERE po."supplierId" = ${id}
+        AND po."deletedAt" IS NULL
+        AND po."status" NOT IN ('DRAFT', 'CANCELLED')
+      GROUP BY 1, 2
+      ORDER BY 1 DESC, MIN(COALESCE(po."orderDate", po."createdAt")) ASC, 2 ASC NULLS LAST`;
+    return foldSupplierYearlyTotals(rows);
   }
 
   async create(data: CreateSupplier) {
