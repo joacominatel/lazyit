@@ -312,6 +312,12 @@ three stored fields are echoed on create/update.
   param; ADR-0099 §8, D-A). A list without them is never checked. Defense in depth: the list query applies
   only purchase filters minted by `AssetsService.authorizePurchaseFilters`, so no other caller of the query
   (the CSV export included) can apply ones it did not authorize (`403`).
+  **Acquisition window** (#1503; the CSV export takes it too): `acquiredFrom` / `acquiredTo`, ISO
+  datetimes, both inclusive, either optional (`400` when not a datetime, or when `acquiredFrom` is after
+  `acquiredTo`). An asset's acquisition date is its `purchaseDate`, or its `createdAt` when it has none — a
+  back-linked asset is usually dated by its purchase, a received one only by when it was recorded. A
+  plain-column filter: `asset:read` is enough, no purchase permission. It backs the link picker's "created
+  near the order date" chip (±90 days of the order date, computed by the web).
   **Cost on the list row** (#1511): each row carries `purchaseCost` (a JSON number, minor units —
   [[0100-money-as-64-bit-minor-units]]) and its `purchaseCurrency` label, for the list's optional *Cost*
   column — the same `asset:read` values the detail read shows. The self-read `GET /assets/mine` carries no
@@ -362,7 +368,10 @@ three stored fields are echoed on create/update.
   (`fromLabel` / `toLabel`) when either side has one ([[0101-custom-asset-statuses]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
   salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
-  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
+  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382). Re-applying a purchase line's values to
+  an asset already linked to it (`POST /purchase-orders/:id/lines/:lineId/apply-to-linked`, #1502 —
+  [[purchase-order-line]]) writes the same row with the purchase as its source:
+  `UPDATED { fields, source: 'purchase', purchaseOrderId, purchaseOrderLineId }`.
 - `POST /assets/batch/delete` · `POST /assets/batch/restore` · `POST /assets/batch/status` —
   **bulk actions** (`asset:delete`, ADMIN by default; [[0030-list-pagination-contract]] amendment). Body
   `{ ids }` (1–200 cuids); the status action adds `status` and/or `statusLabelId`, checked like a

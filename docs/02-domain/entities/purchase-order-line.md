@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # PurchaseOrderLine
@@ -86,10 +86,9 @@ line, the units that came out of it.
 - **Copy on confirm.** Receiving or linking copies the line's values (cost and currency, purchase date,
   warranty end from `warrantyMonths`) onto assets only through an explicit per-field confirmation: fills
   pre-checked, replacements never ([[0099-purchases-scope-model-and-optionality]] §2). A later price edit
-  changes **no** linked asset (never write-through). As built, nothing proposes the new price to them either:
-  the asset's *Purchase* panel marks the line price *Differs from purchase*, and an ordinary asset edit is how
-  its cost changes (ADR-0099, decisions while building Phase 1 flows web). The per-asset proposal §2
-  describes is not built.
+  changes **no** linked asset (never write-through): it only *proposes* the new value to them, through the
+  linked preview and an explicit apply (#1502, § Receiving and linking below). The asset's
+  *Purchase* panel still marks a divergent line price *Differs from purchase*.
 
 ## Receiving and linking (as built, #1473)
 
@@ -134,6 +133,29 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
   (`null` leaves it empty). The quantity defaults to the serials, else to every pending unit (`400` when
   none is pending and no quantity is given). Result `{ created, failed[], overReceived, line }`; each unit's
   `CREATED` history names the line and the purchase gets one `UNITS_RECEIVED`.
+- **Re-apply to the linked assets** (#1502) — the follow-up of a line price edit, "follow unless
+  overridden" (ADR-0099 §2, ux-proposal §3.a). Nothing changes without the click.
+  - `POST …/linked-preview { previousUnitPrice?, previousCurrency? }` (`purchaseOrder:read` + `asset:read`,
+    writes nothing): the line, the values it offers now, `previousCost` (the price the edit replaced, with
+    the purchase's current label unless `previousCurrency` says otherwise; `null` when no previous price was
+    given) and **every live asset linked to the line**, by asset tag, each with the link preview's per-field
+    diff, `holdsPreviousCost` (its cost is still the previous purchase value — same amount and label, trimmed
+    and case-insensitive; a previous price of `null` is held by an asset with no cost; `null` when no previous
+    price was given) and `preChecked`: `purchaseCost` where it would `FILL`, or `REPLACE` a cost that still
+    holds the previous value. An asset whose cost was changed by hand (`REPLACE`, not holding it) is
+    overridden: never pre-checked. Only the unit price triggers the follow-up today, so nothing else is
+    pre-checked.
+  - `POST …/apply-to-linked { assetIds, fields }` (`purchaseOrder:write` + `asset:write`): the listed
+    `fields` (any apply field; `purchaseCost` writes its label with it) copied onto the listed assets
+    **already on this line**, where the diff is a fill or a replace — never a clear, an equal value not
+    rewritten, an archived line model a `400`. Partial success `{ updated, unchanged, failed[], line }`:
+    `unchanged` had nothing to change, `failed` reasons are `NOT_FOUND` (missing or archived) and
+    `NOT_LINKED` (not on this line). **One transaction**, with the link's lock order: the purchase
+    `FOR KEY SHARE`, then the assets `FOR UPDATE` in id order. Each changed asset gets one
+    [[asset-history]] `UPDATED { fields, source: 'purchase', purchaseOrderId, purchaseOrderLineId }` naming
+    the plain columns that changed (and `MODEL_CHANGED` when the model is applied); the purchase gets one
+    `LINKED_VALUES_APPLIED` ([[purchase-order-event]]). Neither route is an AI tool (CEO decision,
+    2026-10-21).
 - **From the Assets list** — `POST /assets/batch/receive` accepts an optional `purchaseOrderLineId` (plus
   `purchaseCurrency` and `warrantyEnd`): the units are received against that line with the same checks
   (`400` for a line that is not a live `ASSET` line; `403` without `purchaseOrder:write`), and the result
@@ -143,9 +165,9 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 - A line can be removed (soft delete) only while nothing was received on it — no linked asset, no stock
   moved in, no seat applied (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
-- **Export** (`GET /purchase-orders/pending-lines/export?supplierId=`, #1597,
+- **Export** (`GET /purchase-orders/pending-lines/export?supplierId=&expectedBefore=`, #1597,
   [[0103-data-export-streaming-path]]): a CSV of every line the *Pending units* list would return for the
-  same `supplierId`, under the same `purchaseOrder:read` (VIEWER denied by default), one row per line,
+  same `supplierId` and `expectedBefore` (the overdue filter, #1503 — [[purchase-order]]), under the same `purchaseOrder:read` (VIEWER denied by default), one row per line,
   newest line first. Columns: `lineId, purchaseId, purchaseReference, supplier, purchaseStatus, orderDate,
   expectedDate, kind, description, manufacturer, model, quantityOrdered, quantityCancelled,
   quantityReceived, quantityPending` — the received and pending counts are the list's derived ones. The
