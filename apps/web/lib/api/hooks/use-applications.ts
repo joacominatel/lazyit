@@ -1,10 +1,13 @@
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
+  type ApplicationGrantPageParams,
   type ApplicationGrantsOptions,
   type ApplicationListParams,
   getApplication,
+  getApplicationGrantPage,
   getApplicationGrants,
+  getApplicationGrantSummary,
   getApplications,
 } from "../endpoints/applications";
 
@@ -22,6 +25,10 @@ export const applicationKeys = {
   detail: (id: string) => [...applicationKeys.all, "detail", id] as const,
   grants: (id: string, options: ApplicationGrantsOptions) =>
     [...applicationKeys.all, "detail", id, "grants", options] as const,
+  grantPage: (id: string, params: ApplicationGrantPageParams) =>
+    [...applicationKeys.all, "detail", id, "grantPage", params] as const,
+  grantSummary: (id: string) =>
+    [...applicationKeys.all, "detail", id, "grantSummary"] as const,
 };
 
 /**
@@ -73,6 +80,31 @@ export function useApplicationGrants(
   return useQuery({
     queryKey: applicationKeys.grants(id ?? "", options),
     queryFn: () => getApplicationGrants(id as string, options),
+    enabled: Boolean(id),
+  });
+}
+
+/**
+ * One page of an application's grants with the filters run server-side (#1660). `keepPreviousData`
+ * holds the current page while the next one resolves. Idle until an id is provided.
+ */
+export function useApplicationGrantPage(
+  id: string | undefined,
+  params: ApplicationGrantPageParams,
+) {
+  return useQuery({
+    queryKey: applicationKeys.grantPage(id ?? "", params),
+    queryFn: ({ signal }) => getApplicationGrantPage(id as string, params, signal),
+    enabled: Boolean(id),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The Access tab's counts, levels and offboarded holders over every grant (#1660). */
+export function useApplicationGrantSummary(id: string | undefined) {
+  return useQuery({
+    queryKey: applicationKeys.grantSummary(id ?? ""),
+    queryFn: ({ signal }) => getApplicationGrantSummary(id as string, signal),
     enabled: Boolean(id),
   });
 }

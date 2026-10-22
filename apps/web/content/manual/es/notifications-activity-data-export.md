@@ -18,7 +18,7 @@ de cálculo, pasar a finanzas o procesar con un script. Busca el botón **Export
 | **Informes** (actividad) | Una fila por evento: cuándo, acción, entidad, responsable y resumen. |
 | **Informes → Registro de auditoría** | Una fila por evento de la pestaña de fuente que tengas abierta (Secretos, Permisos, Cuentas de servicio o Exportaciones). |
 | **Usuarios** | Una fila por persona: nombre, correo, rol, si la cuenta está activa, datos del directorio, responsable directo, y cuántos activos y accesos tiene. |
-| **La página de una aplicación** | Sus accesos: los activos con la vista *Activos* o *Por vencer*, y todos, revocados incluidos, con *Revocados* o *Todos*. Quién, nivel de acceso, quién lo otorgó o revocó y cuándo, vencimiento y notas. El botón está en la pestaña *Accesos*. |
+| **La página de una aplicación** | Sus accesos, tal como los muestra la pestaña *Accesos*: la vista elegida (*Activos*, *Por vencer*, *Revocados* o *Todos*), acotada por el filtro de nivel y la búsqueda de personas. Quién, nivel de acceso, quién lo otorgó o revocó y cuándo, vencimiento y notas. El botón está en la pestaña *Accesos*. |
 | **La página de una persona** | Las mismas columnas de accesos para esa persona, activos y revocados. El botón está en la pestaña *Accesos*. |
 | **Consumibles** | Una fila por artículo: nombre, SKU, categoría, unidad, stock actual, umbral de reposición y si está bajo. |
 | **Compras** | Una fila por compra: referencia, proveedor, estado, estado de recepción, fechas, números de factura, unidades pedidas, recibidas y pendientes, total y moneda. |
