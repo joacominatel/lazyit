@@ -62,6 +62,7 @@ import {
   SnoozeInfraNodeAlertsSchema,
   UpdateInfraAutoConfirmRuleSchema,
   UpdateInfraNodeSchema,
+  type SnoozeInfraNodeAlerts,
 } from '@lazyit/shared';
 import { z } from 'zod';
 import {
@@ -314,7 +315,7 @@ export class InfraController {
   @UseGuards(InfraReportRateLimitGuard)
   @ApiOperation({
     summary:
-      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet) with its kind PROPOSED from the reported virtualization/chassis (#1139; a report with no evidence falls back to PHYSICAL_HOST); a known host refreshes its inventory + liveness without touching human curation, and is never re-kinded. A report carrying host.containers[] also reconciles CONTAINER child nodes joined to the host by an active RUNS_ON edge — absent means the collector never probed (nothing is touched), [] means it probed and found none (existing children go OFFLINE, never deleted). Rate-limited per service account, and a NEW host or child is refused once that account has enrolled its per-window quota — already-known hosts keep refreshing regardless, and a budget spent mid-list never fails the host report. A report carrying `decommissioning: true` (sent by `lazyit-agent uninstall`, #1701) ingests nothing: it RETIRES the node its own reporting key resolves to — never another node, a child or the linked Asset — and acks with `retired: true`; 404 when no live node carries that key. Returns a minimal ack.',
+      'Ingest a server reporting-agent inventory report (ADR-0074). MACHINE-intended: authenticated by the agent Service Account holding infra:report. Upserts on (reportingSource, externalId) — a new host lands in the PENDING review tray (no Asset yet) with its kind PROPOSED from the reported virtualization/chassis (#1139; a report with no evidence falls back to PHYSICAL_HOST); a known host refreshes its inventory + liveness without touching human curation, and is never re-kinded. A report carrying host.containers[] also reconciles CONTAINER child nodes joined to the host by an active RUNS_ON edge — absent means the collector never probed (nothing is touched), [] means it probed and found none (existing children go OFFLINE, never deleted). Rate-limited per service account, and a NEW host or child is refused once that account has enrolled its per-window quota — already-known hosts keep refreshing regardless, and a budget spent mid-list never fails the host report. A report carrying `decommissioning: true` (sent by `lazyit-agent decommission` when the installer uninstalls the agent, #1701) ingests nothing: it RETIRES the node its own reporting key resolves to — never another node, a child or the linked Asset — and acks with `retired: true`; 404 when no live node carries that key. Returns a minimal ack.',
   })
   @ApiOkResponse({ type: AgentReportAckDto })
   // FORWARD-COMPATIBLE (#1138): the contract root is no longer `strictObject`, so a report from a
@@ -693,7 +694,8 @@ export class InfraController {
     @Param('id') id: string,
     @Body() dto: SnoozeInfraNodeAlertsDto,
   ) {
-    return this.infra.snoozeNodeAlerts(id, dto.until);
+    const body: SnoozeInfraNodeAlerts = dto;
+    return this.infra.snoozeNodeAlerts(id, body.until);
   }
 
   @Delete('nodes/:id/snooze')
