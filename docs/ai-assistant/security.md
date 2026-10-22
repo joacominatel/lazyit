@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-10-15
+updated: 2026-10-21
 ---
 
 # AI Assistant — Security & Threat Model
@@ -518,8 +518,12 @@ the **exfiltration leg** and the **consequential-action leg**.
   `/authorize` is "has a valid lazyit web session", whatever the mode (§11 Q-6, resolved).
 - **Clients.** **Decided (R7): DCR + CIMD.** Every current client supports DCR, and CIMD is the spec
   direction [E].
-  - DCR is rate-limited, capped, unused registrations expire, and a registration is never treated as
-    trusted: the consent page labels it "self-declared, unverified".
+  - DCR is rate-limited (per IPv4 address or per IPv6 /64, so one host cannot rotate addresses inside
+    its own prefix), capped, unused registrations expire, and a registration is never treated as
+    trusted: the consent page labels it "self-declared, unverified". At the cap of pending
+    registrations the oldest **unused** one (no grant, no authorization code) is evicted instead of
+    refusing new clients, so a flood from many addresses cannot lock registration out; 429 only when
+    nothing is evictable (#1683, [[ai-assistant/mcp-and-oauth|MCP]] §16).
   - **Trust policy (resolved, §11 Q-7):** an admin-configurable client allowlist, pre-seeded with the
     well-known clients — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13. A private-use
     redirect scheme (`cursor://`, `vscode://`, reverse-domain) is accepted **only on an explicit
@@ -535,7 +539,10 @@ the **exfiltration leg** and the **consequential-action leg**.
     wants the curated list only switches the toggle off. Loopback and private-use redirects still need an
     explicit entry.
   - CIMD fetches go through `guardedFetch`: HTTPS only, no internal allowlist, small size cap,
-    short timeout, cached.
+    short timeout, cached. A document that cannot be fetched for a network reason (or past the per-user
+    fetch limit) and has no bundled copy is refused as `CLIENT_METADATA_UNREACHABLE`, a definitive answer
+    as `INVALID_CLIENT`. An egress-guard refusal reads exactly like a host that is down, so the distinct
+    refusal is no oracle for internal name resolution (#1683).
 - **Authorize and consent.**
   - Exact redirect-URI matching, with only the localhost port excepted [E: RFC 9700 §2.1].
   - Never redirect on an invalid client or redirect URI; render an error page instead.
@@ -565,6 +572,12 @@ the **exfiltration leg** and the **consequential-action leg**.
     snapshot is kept as information only).
   - Access tokens live 1 hour. This note recommended ≤ 15 minutes; the reconciled value relies on the
     DB-first check of every request, which already makes revocation immediate (synthesis §8).
+  - Authorization codes are single use and carry the user's `mcpCredentialEpoch` at consent: the
+    exchange is refused when it moved (#1683). A redeemed code is linked to the grant it produced, and an
+    **otherwise valid replay of the code revokes that grant** (`code_replay`, audited
+    `CODE_REUSE_DETECTED`); a replay with a wrong verifier, client or redirect is refused but revokes
+    nothing, so a leaked code alone cannot disconnect the legitimate client (RFC 6749 §4.1.2; OAuth 2.1
+    "Reuse of Authorization Codes"). Code rows are kept 15 minutes past expiry for this.
   - Refresh tokens rotate on every use. **Reusing a rotated refresh token revokes the whole grant.**
     Refresh tokens live 30 days from their last use; there is no absolute cap in v1 (reconciled —
     this note recommended an absolute 30 days).
@@ -705,6 +718,8 @@ These are recommended defaults; the numbers are tunable.
 - Per-principal daily token budget and a per-instance monthly cap. Fail closed once exhausted.
 - Concurrency: at most 3 active runs per principal (reconciled with the runtime note), a per-SA rate
   limit, and a wall-clock timeout per run.
+- Over MCP: per-connection limits (per grant or SA) and, for a human, a per-user overall cap across all
+  their connections — 1,200 requests, 600 tool calls, 120 writes per minute (CEO Q8 on #1344, #1683).
 - Streaming uses deadlines from the egress guard.
 - The in-memory limiter is per replica [R] and that is accepted. **Budgets must be persisted**, since
   spend has to survive a restart.
@@ -1163,7 +1178,8 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   Bearer-authenticated; `frame-ancestors 'none'` confirmed.
 - **Scopes:** `lazyit.admin` is never preselected and needs step-up.
 - **Abuse:** login rate limits are reused on `/oauth/authorize`; a newly connected client triggers a
-  notification.
+  notification; `/mcp` is limited per connection and per user across connections (#1683); DCR per IPv4
+  address or IPv6 /64, with evict-oldest-unused at the pending cap.
 
 **G4 — Frontend (chat UI, preview and approval cards, consent page)**
 - Chat output renders only through the chat renderer `apps/web/components/ai/ai-markdown.tsx` (as built,

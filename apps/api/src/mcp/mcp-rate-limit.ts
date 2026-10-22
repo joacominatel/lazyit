@@ -4,6 +4,9 @@ import {
   MCP_AUTH_FAILURE_RATE_LIMIT,
   MCP_CALL_RATE_LIMIT,
   MCP_REQUEST_RATE_LIMIT,
+  MCP_USER_CALL_RATE_LIMIT,
+  MCP_USER_REQUEST_RATE_LIMIT,
+  MCP_USER_WRITE_RATE_LIMIT,
   MCP_WRITE_RATE_LIMIT,
 } from './mcp.constants';
 
@@ -17,6 +20,10 @@ import {
  *   - `call`        every `tools/call` → `isError` `RATE_LIMITED` (the model can wait and retry);
  *   - `write`       every mutating `tools/call` on top of `call` → `isError` `RATE_LIMITED`;
  *   - `authFailure` refused authentications per client IP → HTTP 429 (each one costs a DB lookup).
+ *
+ * A human caller is ALSO counted per user (`userRequest`, `userCall`: the same three budgets at twice one
+ * connection's size, keyed `user:<id>` across every grant and personal token the user owns — CEO decision
+ * Q8 on #1344, #1683). A Service Account is counted per SA only.
  */
 @Injectable()
 export class McpRateLimiter {
@@ -31,6 +38,18 @@ export class McpRateLimiter {
   private readonly writes = new FixedWindowRateLimiter(
     MCP_WRITE_RATE_LIMIT.max,
     MCP_WRITE_RATE_LIMIT.windowMs,
+  );
+  private readonly userRequests = new FixedWindowRateLimiter(
+    MCP_USER_REQUEST_RATE_LIMIT.max,
+    MCP_USER_REQUEST_RATE_LIMIT.windowMs,
+  );
+  private readonly userCalls = new FixedWindowRateLimiter(
+    MCP_USER_CALL_RATE_LIMIT.max,
+    MCP_USER_CALL_RATE_LIMIT.windowMs,
+  );
+  private readonly userWrites = new FixedWindowRateLimiter(
+    MCP_USER_WRITE_RATE_LIMIT.max,
+    MCP_USER_WRITE_RATE_LIMIT.windowMs,
   );
   private readonly authFailures = new FixedWindowRateLimiter(
     MCP_AUTH_FAILURE_RATE_LIMIT.max,
@@ -49,6 +68,17 @@ export class McpRateLimiter {
   call(key: string, mutation: boolean, now?: number): boolean {
     if (!this.calls.hit(key, now)) return false;
     return mutation ? this.writes.hit(key, now) : true;
+  }
+
+  /** Count one authenticated HTTP request against the user's overall budget; false when over it. */
+  userRequest(userKey: string, now?: number): boolean {
+    return this.userRequests.hit(userKey, now);
+  }
+
+  /** {@link call} against the user's overall budget, across every connection they own. */
+  userCall(userKey: string, mutation: boolean, now?: number): boolean {
+    if (!this.userCalls.hit(userKey, now)) return false;
+    return mutation ? this.userWrites.hit(userKey, now) : true;
   }
 
   /** Count one refused authentication from an address; false once the address is over the limit. */

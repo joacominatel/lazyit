@@ -188,6 +188,7 @@ tarjeta. Mirá
 | --- | --- | --- |
 | **Esta app no está permitida** | La app no está registrada o no está en la lista de permitidas: un callback con esquema de app o de loopback que no está en la lista, **Aceptar cualquier cliente con callback https://** desactivado, o un cliente incluido que un administrador quitó. | Empezá la conexión de nuevo desde la app; si no, un administrador [agrega el cliente](/help/ai-assistant-setup#clientes-permitidos) por su URL de metadatos o su dirección de callback. |
 | **No se puede confiar en esta solicitud** | La app pidió mandarte a una dirección que no registró. | Empezá de nuevo desde la app. Si se repite, el callback de la app no es el de la lista. |
+| **lazyit no pudo obtener la descripción de esta app** | La app se identifica con una dirección web, y el servidor no pudo descargarla ahora: no tiene acceso a internet, el sitio de la app no responde, o hubo demasiados intentos en poco tiempo. | Esperá unos minutos y empezá de nuevo desde la app. Si se repite, un administrador revisa el acceso a internet saliente del servidor. |
 | **El inicio de sesión de apps no está disponible aquí** | La instancia no tiene un `WEB_ORIGIN` HTTPS. | Usá un token personal. |
 | **Las conexiones de apps de IA están desactivadas** | MCP está desactivado. | Un administrador lo activa. |
 | **Tu cuenta no puede conectar apps de IA** | Tu rol no tiene **Conectar agentes de IA externos (MCP)**. | Consultá a un administrador. |
@@ -198,8 +199,10 @@ un administrador agregue su callback fijo.
 
 **Una app que se identifica con una dirección HTTPS** necesita que lazyit pueda descargar esa dirección.
 Sin acceso a internet en el servidor, solo Claude Code se sigue conectando (lazyit trae una copia de su
-descripción); las demás apps de ese tipo se rechazan hasta que el servidor pueda llegar a ellas. lazyit
-además limita cuántas de esas descargas puede provocar una persona en poco tiempo.
+descripción); las demás apps de ese tipo se rechazan —con **lazyit no pudo obtener la descripción de esta
+app**— hasta que el servidor pueda llegar a ellas. lazyit además limita cuántas de esas descargas puede
+provocar una persona en poco tiempo. Si la dirección responde que la app no existe, la pantalla dice
+**Esta app no está permitida**.
 
 ### "Demasiados intentos" en la pantalla de consentimiento
 
@@ -212,6 +215,15 @@ administración** y permití el resto.
 **Causa:** tu cuenta inicia sesión sin contraseña de lazyit, así que las acciones de administración no
 se pueden otorgar. **Solución:** permití el resto; hacé los cambios de nivel administrador vos mismo en la
 app.
+
+### Un agente informa "Too many tool calls" o "Too many changes"
+
+**Causa:** lazyit limita qué tan rápido pueden trabajar los agentes de IA por vos: por conexión (300
+llamadas a herramientas y 60 cambios por minuto) y para **todas tus conexiones juntas** (600 llamadas y
+120 cambios por minuto). El mensaje dice *"through this connection"* (por esta conexión) o *"across all
+your AI connections"* (entre todas tus conexiones). Una ráfaga de solicitudes también puede recibir HTTP
+429. **Solución:** esperá un minuto; el agente puede reintentar solo. Si varios agentes trabajan por vos a
+la vez, comparten el límite total: usá menos en paralelo.
 
 ### Una app conectada dejó de funcionar
 

@@ -187,18 +187,30 @@ export class AuthorizationService {
       state,
       iss: config.issuer,
     });
-    await this.prisma.oAuthAuthorizationCode.create({
-      data: {
-        codeHash: code.hash,
-        userId: user.id,
-        clientRefId: client.id,
-        redirectUri,
-        codeChallenge: request.codeChallenge,
-        scopes: granted,
-        resource: config.resource,
-        expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
-      },
-    });
+    try {
+      await this.prisma.oAuthAuthorizationCode.create({
+        data: {
+          codeHash: code.hash,
+          userId: user.id,
+          clientRefId: client.id,
+          redirectUri,
+          codeChallenge: request.codeChallenge,
+          scopes: granted,
+          resource: config.resource,
+          expiresAt: new Date(Date.now() + AUTHORIZATION_CODE_TTL_MS),
+          // The exchange is refused if this moved in between (a password change during the code's 60 s).
+          mcpCredentialEpoch: user.mcpCredentialEpoch,
+        },
+      });
+    } catch (err) {
+      // The client row vanished between the checks above and this insert: a DCR registration evicted at
+      // the pending cap (#1683) or swept. The FK refuses the code (P2003) — answer as an unknown client,
+      // never a 500, and issue nothing.
+      if ((err as { code?: unknown }).code === 'P2003') {
+        throw new OAuthAuthorizeRefusedException('INVALID_CLIENT');
+      }
+      throw err;
+    }
     return { redirectTo };
   }
 
@@ -303,16 +315,25 @@ export class AuthorizationService {
 
     // 1. The client: known, and admitted by the instance's allowlist (never by its name). An https
     //    `client_id` is a CIMD Client Identifier URL: its metadata document is fetched (egress guard),
-    //    cached or served from a bundled copy; any other id is a DCR registration.
+    //    cached or served from a bundled copy; any other id is a DCR registration. A document that could
+    //    not be fetched right now (network failure, no bundled copy) is its own refusal, so the page can
+    //    explain an offline instance instead of calling the client unknown (#1683).
     if (!params.client_id) return refuse('INVALID_CLIENT');
-    const client = looksLikeClientIdUrl(params.client_id)
-      ? await this.cimd.resolve(params.client_id, {
-          userId: user.id,
-          ip: ctx.ip,
-        })
-      : await this.prisma.oAuthClient.findUnique({
-          where: { clientId: params.client_id },
-        });
+    let client: OAuthClient | null;
+    if (looksLikeClientIdUrl(params.client_id)) {
+      const resolved = await this.cimd.resolveOutcome(params.client_id, {
+        userId: user.id,
+        ip: ctx.ip,
+      });
+      if (!resolved.ok && resolved.unreachable) {
+        return refuse('CLIENT_METADATA_UNREACHABLE');
+      }
+      client = resolved.ok ? resolved.client : null;
+    } else {
+      client = await this.prisma.oAuthClient.findUnique({
+        where: { clientId: params.client_id },
+      });
+    }
     if (!client || !isClientAllowed(client, settings)) {
       return refuse('INVALID_CLIENT');
     }

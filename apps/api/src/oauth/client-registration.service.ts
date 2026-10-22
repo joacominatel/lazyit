@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -12,6 +12,7 @@ import { OAuthProtocolError } from './oauth-errors';
 import { OAuthAuditService } from './oauth-audit.service';
 import { OAuthPolicyService } from './oauth-policy.service';
 import {
+  DCR_EVICTION_ATTEMPTS,
   DCR_MAX_PENDING_REGISTRATIONS,
   DCR_MAX_REDIRECT_URIS,
   DCR_UNUSED_CLIENT_TTL_MS,
@@ -56,9 +57,20 @@ function optionalStringArray(value: unknown, field: string): string[] | null {
  * — for https only — the "any HTTPS client" toggle. Plain http off loopback and browser-interpreted
  * schemes (`javascript:`, `data:` …) are refused outright; a private-use scheme (`cursor://…`) needs an
  * explicit entry. `client_name` never takes part in the decision.
+ *
+ * Pending registrations (DCR rows of the last 24 h that never obtained a grant) are capped globally. At
+ * the cap a new registration EVICTS the oldest UNUSED one instead of being refused (#1683), so a flood
+ * cannot lock every new client out until the sweeper runs. "Unused" is the sweeper's own rule: never
+ * exchanged a code (`lastUsedAt` null), no grant row at all, and no authorization code — so a client
+ * that ever got a grant, or whose user already approved consent (a code exists), is never evicted. One
+ * whose user has not approved consent yet (no code) can be: under a flood it is displaced, the consent
+ * decision then answers `INVALID_CLIENT`, and the client registers again. Only when nothing is evictable
+ * does registration answer 429.
  */
 @Injectable()
 export class ClientRegistrationService {
+  private readonly logger = new Logger(ClientRegistrationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: OAuthPolicyService,
@@ -129,22 +141,7 @@ export class ClientRegistrationService {
       );
     }
 
-    const pending = await this.prisma.oAuthClient.count({
-      where: {
-        kind: 'dcr',
-        createdAt: { gt: new Date(Date.now() - DCR_UNUSED_CLIENT_TTL_MS) },
-        lastUsedAt: null,
-      },
-    });
-    if (pending >= DCR_MAX_PENDING_REGISTRATIONS) {
-      throw new HttpException(
-        {
-          error: 'temporarily_unavailable',
-          error_description: 'Too many pending registrations. Try again later.',
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    await this.makeRoomForPendingRegistration();
 
     const name = sanitizeClientName(request.client_name);
     const clientUri = sanitizeClientUri(request.client_uri);
@@ -196,5 +193,53 @@ export class ClientRegistrationService {
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
     };
+  }
+
+  /**
+   * Below the pending cap: nothing to do. At it: hard-delete the oldest unused pending registration (the
+   * sweeper's rule, re-checked in the delete itself so a client that got a code or a grant in between is
+   * kept), retrying a few times when a concurrent registration evicted the same row. 429 only when no
+   * pending registration is evictable.
+   */
+  private async makeRoomForPendingRegistration(): Promise<void> {
+    const pendingWhere = {
+      kind: 'dcr',
+      createdAt: { gt: new Date(Date.now() - DCR_UNUSED_CLIENT_TTL_MS) },
+      lastUsedAt: null,
+    } satisfies Prisma.OAuthClientWhereInput;
+    const pending = await this.prisma.oAuthClient.count({
+      where: pendingWhere,
+    });
+    if (pending < DCR_MAX_PENDING_REGISTRATIONS) return;
+
+    const unused = {
+      ...pendingWhere,
+      grants: { none: {} },
+      codes: { none: {} },
+    } satisfies Prisma.OAuthClientWhereInput;
+    for (let attempt = 0; attempt < DCR_EVICTION_ATTEMPTS; attempt += 1) {
+      const oldest = await this.prisma.oAuthClient.findFirst({
+        where: unused,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, clientId: true },
+      });
+      if (!oldest) break;
+      const evicted = await this.prisma.oAuthClient.deleteMany({
+        where: { ...unused, id: oldest.id },
+      });
+      if (evicted.count === 1) {
+        this.logger.warn(
+          `Pending DCR registrations at the cap (${DCR_MAX_PENDING_REGISTRATIONS}): evicted the oldest unused one, ${oldest.clientId}.`,
+        );
+        return;
+      }
+    }
+    throw new HttpException(
+      {
+        error: 'temporarily_unavailable',
+        error_description: 'Too many pending registrations. Try again later.',
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 }

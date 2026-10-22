@@ -75,6 +75,8 @@ export class FakeOAuthPrisma {
   );
   readonly oAuthAuthorizationCode = this.model('oAuthAuthorizationCode', {
     usedAt: null,
+    mcpCredentialEpoch: null,
+    grantId: null,
   });
   readonly oAuthToken = this.model('oAuthToken', { usedAt: null });
   readonly oAuthAuditLog = this.model('oAuthAuditLog', {
