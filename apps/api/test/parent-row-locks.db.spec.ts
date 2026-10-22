@@ -617,6 +617,15 @@ describe('parent row locks against Postgres (#1604)', () => {
       expect(row.modelId).toBeNull();
     });
 
+    // Known exception (#1703), already on dev before #1678: a write that sets a model locks the asset (or line)
+    // and reaches the model only through its FK, while the model delete holds the model and waits for that row.
+    // Repro: a1 on model M and a2 with none, a line mapped to M; queued('assets', a1, link [a1, a2] with
+    // apply ['modelId'], models.remove(M)) → 40P01. Same shape for applyToLinked, purchase-from-assets and
+    // updateLine onto a model.
+    it.todo(
+      'a link applying modelId to assets while their model is deleted: both commit (#1703)',
+    );
+
     it('a location delete and a model delete over the same purchase and asset: both commit', async () => {
       const loc = await liveLocation();
       const model = await models.create({ name: name('m'), manufacturer: TAG });
