@@ -230,7 +230,8 @@ serial, asset tag, and its model's name or manufacturer — so searching a model
 - **Category** and **Location** — narrow to one model category or one place.
 - **Company** — narrow to one company (the grouping label above). Only companies in use appear.
 - **Owner** — show only the assets currently assigned to a specific person. Start typing a name to
-  pick them; the list then shows just that person's live assignments.
+  pick them; the list then shows just that person's live assignments. Offered only if your role can
+  view the user directory.
 - **Ownership** — filter by whether an asset has any current owner at all (*Has owners* /
   *No owners*), regardless of who.
 - **Warranty** — narrow to assets whose **warranty is about to lapse** (*Expiring ≤ 90d*) or has
@@ -248,7 +249,7 @@ else is this exact model" versus "what else is in this category."
 
 ### Exporting the inventory
 
-The **Export CSV** button at the top of the Assets page downloads a **CSV** of the inventory
+The **Export** button at the top of the Assets page downloads a **CSV** or an **Excel (.xlsx)** file of the inventory
 that matches your **current filters** — the whole result set, not just the page in front of you. Set
 the status, category, location, company, owner or search you care about first (for example *all the
 Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
@@ -259,7 +260,10 @@ company, purchase and warranty dates, current owners, notes, the created/updated
 asset's **supplier**, **purchase reference** and **invoice numbers**, as the last columns. Without that
 permission those three columns are left out of the file entirely. It is safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
 the *Show archived* view open, the export is that archived slice instead.
-Limits, the audit trail and opening the file in Excel are covered in [Exporting data](/help/notifications-activity-data-export).
+Choose **CSV** to edit the inventory and bring it back through the [bulk import](/help/assets-bulk-import);
+the **Excel** file has typed cells (numbers, amounts and real dates) for reading and sorting, but it cannot
+be imported. Limits, the audit trail and the differences between the two files are covered in
+[Exporting data](/help/notifications-activity-data-export).
 
 ### Choosing which columns to show
 

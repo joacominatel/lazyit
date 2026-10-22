@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # RolePermission
@@ -100,6 +100,13 @@ became configurable is the *permissions* each role grants. There are no custom r
     asset's owners, return `email: null` without `user:read` ([[infra-node]]).
   - So granting a role `user:read` from the matrix reveals server owners' emails to it; revoking
     it does not hide asset owners' emails from an `asset:read` holder.
+  - **The rest of an asset owner's record needs `user:read` (#1685).** Without it, an owner on any
+    asset read is only id, name, email and `deletedAt` — never role, `legajo`, `username` or
+    `directoryAttrs`.
+- **`user:read` gates the by-person filters (#1685).** `GET /assets?assignedToUserId=` (and the
+  export's), `GET /asset-assignments?userId=` and the AI `asset_search` tool's `assignedToUserId` answer
+  `403` without it: listing what a named person holds is a directory lookup, whatever the domain of the
+  route. `GET /assets/mine` (the caller's own assets) is a self-read and needs neither.
 - **Default grants are applied once per instance; revocations are durable** (issue #1314). The seed
   runs on every deploy, but it grants a default pair only when the seed-once ledger
   (`AppliedRolePermissionDefault`, below) has never recorded it, and it records the pair in the same

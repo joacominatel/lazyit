@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Security invariants — auth & authorization
@@ -308,8 +308,16 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   to answer, and seeing it does not enumerate the directory that `user:read` protects. The #1627 gate
   stays on the infra reads, which only borrow the linked asset's owners. This is a decided posture,
   not a residual: a sweep must not re-file it. Reasoning in [[asset]]; scope in [[role-permission]].
-  Scope: name and email only; the other owner fields and the by-person filters are the #1685 residual
-  (decided, not built).
+  Scope: name and email only; the other owner fields and the by-person filters are #1685, below.
+- **2026-10-22 (#1685) — built.** Without `user:read`, an owner on the asset detail, the restore
+  response and `GET /assets/:id/assignments` is selected as id, name, email and `deletedAt` only (an
+  explicit `select` chosen per caller, fail-closed with no principal); the list row and the export (CSV or
+  XLSX) already were. The by-person filters — `GET /assets?assignedToUserId=`, the export (CSV or XLSX),
+  `GET /asset-assignments?userId=`, and the AI `asset_search` tool through the list route — answer `403`
+  without `user:read`. `/assets/mine` is unaffected. Covered by
+  `apps/api/src/assets/assets.owner-fields.authz.spec.ts` (real controllers, services and guard; VIEWER
+  vs MEMBER/ADMIN), `assets.service.spec.ts`, `asset-assignments.service.spec.ts` and
+  `ai/tools/assets.tools.spec.ts`.
 
 ## INV-SA-1 — A service-account token is verified DB-first; the stored secret is a hash, compared in constant time
 
@@ -752,8 +760,9 @@ side door around field gating and soft-delete scoping, and without an audit row 
 of the user directory, or of the audit logs themselves — leaves no trace.
 
 **Where enforced** (2026-10-16; paths relative to `apps/api/src/`).
-- `common/export/export.service.ts` — `exportCsv()` writes the audit row through `recordExport()` after
-  the cap check and before streaming; `sanitizeExportFilters()` flattens what is stored.
+- `common/export/export.service.ts` — `exportFile()` (which `exportCsv()` delegates to, and which the
+  XLSX routes call with `format: 'xlsx'`, ADR-0103 §11) writes the audit row through `recordExport()`
+  after the cap check and before streaming; `sanitizeExportFilters()` flattens what is stored.
 - `common/export/export-column.ts` — `ExportColumn<T>`: a resource can only emit the columns it lists.
 - `prisma/migrations/20261016140000_add_data_export_log` — the table, and the at-most-one-actor CHECK.
 - Tests: `common/export/export.service.spec.ts` (one audit row with the pre-count, nothing written on a

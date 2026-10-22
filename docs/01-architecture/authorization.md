@@ -137,7 +137,8 @@ three roles **except** two tighter tiers:
   to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
   see purchases and suppliers** (it gets 403). `user:read` guards the directory, not every email: an
   asset's owners keep their emails for any `asset:read` holder (decided, #1636), while the servers
-  reads hide them without `user:read` (#1627) — see [[role-permission]]. `GET /search` queries only the indexes whose own
+  reads hide them without `user:read` (#1627); the owner's other user fields, and filtering assets or
+  assignments by a person, need `user:read` (#1685) — see [[role-permission]]. `GET /search` queries only the indexes whose own
   `<domain>:read` the caller holds (`INDEX_READ_PERMISSION` in `search.service.ts`: `asset:read`,
   `article:read`, `user:read`, `location:read`, `application:read`, `infra:read`, `consumable:read`, and
   `purchaseOrder:read` for purchases and suppliers), so a caller lacking one gets no hits from that

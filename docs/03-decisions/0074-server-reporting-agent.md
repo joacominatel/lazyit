@@ -1463,7 +1463,7 @@ additive migration, so every existing row reads as before:
     a token can retire only what it could already refresh. For a host whose machine-id collided (§3,
     #1141), the same corroboration the ingest path runs picks the clone's own derived-key node, never
     its peer, and refuses when it cannot name one. The decommissioning report ingests **nothing else**:
-    no facts, no liveness, no children, no Asset. An unknown host is a `404`, and nothing is created.
+    no facts, no liveness, no Asset. An unknown host is a `404`, and nothing is created.
     The ack carries `retired: true`. `retiredById` stays null.
 
   **A retired node that reports again is un-retired automatically.** A node that reports is, by
@@ -1480,8 +1480,9 @@ additive migration, so every existing row reads as before:
 - **`alertsSnoozedUntil` — a maintenance window.** While the instant is in the future, the sweeper
   **still flips** the node `OFFLINE` (the map must stay true), but it emits **no**
   `infra.agent_offline` notification, so neither the bell nor the email fires. The nudge is per
-  transition, so an outage that began inside the window is **not** re-announced when the window ends:
-  the node is already `OFFLINE` and no longer a candidate. A past value is inert, so expiry needs no
+  transition, and what decides it is **when the flip happens**: a node flipped while the window is
+  open is never announced, not even when the window ends, because it is already `OFFLINE` and no longer
+  a candidate. A node first flipped after the window ended is announced as usual. A past value is inert, so expiry needs no
   job. Set by `PUT /infra/nodes/:id/snooze { until }` and cleared by `DELETE …/snooze`, both under
   `infra:manage` and human-only. `until` must be in the future and at most
   `INFRA_NODE_SNOOZE_MAX_DAYS` (90) days ahead: a host that should never alert again is retired, which
@@ -1505,9 +1506,33 @@ amendment never sends the field.
   its history.
 - An admin cannot keep a host that is still reporting retired. The next report undoes the retire by
   design, and silencing a host that is still reporting is what snooze is for.
-- A decommissioned host's container and guest children are **not** retired with it. The decision
-  scopes the decommissioning report to the host's own node. Once their host stops listing them, they
-  go stale on their own clock and are announced like any other node, until someone retires them.
+- ~~A decommissioned host's container and guest children are **not** retired with it.~~ **Changed
+  2026-10-22 (CEO decision, #1701 follow-up):** they are. See the amendment below.
+
+**Amendment (2026-10-22, #1701 follow-up) — a decommission also retires the host's children.** As
+first shipped, the decommissioning report retired only the host's own node. Its container and guest
+children then went stale on their own clock once the host stopped listing them, and each was
+announced as an outage, which is the tray full of ghosts that retire exists to prevent. The CEO
+decided the uninstall retires them too:
+
+- **Which children.** Every live child whose `source` is `AGENT` and that sits under the resolved
+  node's **own** key (`<key>/container/…` and `<key>/guest/…`) in the same reporting source. These are
+  the rows the ingest path's own reconcile touches. A clone's decommission therefore uses its derived
+  key and can never reach its peer's children, and a hand-drawn node is never retired.
+- **When none are retired.** The ingest path's refusals apply here too: a key that cannot scope child
+  keys unambiguously, and a clone node on which a second machine has been seen (#1158, sticky), retire
+  the host only.
+- **Recording and cost.** Each child retired is recorded as its own `node.lifecycle` row, within the
+  per-node hourly cap, so a 500-guest hypervisor costs a handful of statements, not a thousand.
+- **Even when the host was already retired.** The sweep runs then too, so a second uninstall picks up
+  a child the first one missed. It never fails the report: a failure is a warning, and the host stays
+  retired.
+- **Coming back.** A child its host lists again is un-retired by the ordinary refresh, as before.
+
+The installers were tightened in the same change. On Windows, `-Uninstall` stops a running
+scheduled-task instance before unregistering the task, so a report that was already in flight cannot
+land after the decommission and un-retire the node. It also gives the decommission step an overall
+two-minute cap, the same as the Linux installer's `timeout 120`.
 
 ### §5 — Auth & permission
 

@@ -72,9 +72,10 @@ export const INFRA_AGENT_SWEEP_INTERVAL_MS_DEFAULT = 15 * 60 * 1000; // 15 minut
  *
  * SNOOZED NODES ARE FLIPPED BUT NOT ANNOUNCED (#1701, epic #1146 Q15). While `alertsSnoozedUntil` is in
  * the future the node still goes OFFLINE — the map must stay true — but no `infra.agent_offline` nudge
- * (bell or email) is emitted for that transition. The nudge is per TRANSITION, so an outage that began
- * inside the window is not re-announced when the window ends: the node is already OFFLINE and is no
- * longer a candidate. A node that recovers and goes silent again after the window is announced normally.
+ * (bell or email) is emitted for that transition. The nudge is per TRANSITION, so what decides it is WHEN
+ * THE FLIP HAPPENS: a node flipped inside the window is not announced when the window ends either — it
+ * is already OFFLINE and no longer a candidate — while a node first flipped after the window (or one that
+ * recovers and goes silent again) is announced normally.
  *
  * ponytail: the bulk flip is ONE `updateMany`; it does NOT re-index each flipped node into search (that
  * would be an N-query fan-out). The search `status` is cosmetic drift that the node's next report

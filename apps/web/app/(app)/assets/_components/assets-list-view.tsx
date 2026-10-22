@@ -104,7 +104,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useMounted } from "@/lib/hooks/use-mounted";
-import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
+import { useCan, useMyPermissions, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
@@ -207,6 +207,11 @@ export function AssetsListView() {
   // when the caller can't populate it, which also skips the doomed `/users` fetch entirely.
   const canReadUsers = useCan("user:read");
   const canReadInfra = useCan("infra:read");
+  // Filtering by a person needs `user:read` on the API too (#1685): without it a shared `?owner=` link
+  // is ignored rather than 403ing the whole list. While permissions load the filter is kept, so a
+  // privileged caller's first key still matches the server prefetch.
+  const { can, isLoading: permissionsLoading } = useMyPermissions();
+  const canFilterByOwner = permissionsLoading || can("user:read");
   const {
     q,
     sort,
@@ -243,7 +248,8 @@ export function AssetsListView() {
   const modelFilter = filters.model;
   const locationFilter = filters.location;
   const companyFilter = filters.company; // "ALL" = unset; otherwise an exact company value.
-  const ownerFilter = filters.owner; // "" = unset; otherwise a User uuid (server-side filter)
+  // "" = unset; otherwise a User uuid (server-side filter). Dropped without `user:read` (#1685).
+  const ownerFilter = canFilterByOwner ? filters.owner : "";
   const ownershipFilter = filters.ownership as OwnershipFilter;
   // Warranty window (#955), deep-linked from the dashboard's "Needs attention" tile. Like the model
   // filter it's URL-only (no picker): the chip is its sole surface + clear.
@@ -268,7 +274,7 @@ export function AssetsListView() {
   // instead of double-fetching. The SAME derived filters drive the CSV export (#872).
   const assetFilters = deriveAssetFilters(
     { q, sort, dir, offset, limit, filters },
-    { isAdmin },
+    { isAdmin, canFilterByOwner },
   );
   const { data: page, isLoading, isFetching, isError, error, refetch } =
     useAssets(assetFilters);
@@ -741,6 +747,7 @@ export function AssetsListView() {
               total={page?.total}
               filename="assets"
               permission="asset:read"
+              resource="ASSETS"
             />
             {/* Discoverable entry to the bulk Migrator (#950): register many assets from a CSV
                 without hunting through Settings. Gated on `import:run` like the wizard itself. */}

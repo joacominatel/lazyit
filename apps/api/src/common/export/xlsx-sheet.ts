@@ -94,6 +94,12 @@ const HEX4 = (code: number) => code.toString(16).toUpperCase().padStart(4, '0');
 // XML 1.0 forbids C0 controls other than tab/LF; CR survives only escaped. Lone surrogates are not text.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const ESCAPED_CONTROL = /[\u0000-\u0008\u000B\u000C\u000D\u000E-\u001F]/g;
+// The `_` of a literal `_xHHHH_`, or of a `_xHHHH` whose next character is an escaped control: that
+// escape supplies the closing `_`. A lookahead, not a capture: `_x0041_x0042_` shares an underscore.
+/* eslint-disable no-control-regex -- matching control characters is the point */
+const LITERAL_ESCAPE_START =
+  /_(?=x[0-9A-Fa-f]{4}(?:_|[\u0000-\u0008\u000B-\u001F]))/g;
+/* eslint-enable no-control-regex */
 const NOT_XML_CHAR =
   /[\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
@@ -113,7 +119,7 @@ function truncateCell(value: string): string {
 export function xlsxText(value: string): string {
   return escapeXml(
     truncateCell(value)
-      .replace(/_(x[0-9A-Fa-f]{4}_)/g, '_x005F_$1')
+      .replace(LITERAL_ESCAPE_START, '_x005F_')
       .replace(ESCAPED_CONTROL, (c) => `_x${HEX4(c.charCodeAt(0))}_`)
       .replace(NOT_XML_CHAR, '\uFFFD'),
   );

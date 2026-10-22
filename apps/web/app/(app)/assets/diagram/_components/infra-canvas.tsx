@@ -62,6 +62,7 @@ import {
 } from "@/lib/infra/canvas";
 import { edgeFlowEnabled, edgeFlows } from "@/lib/infra/edge-flow";
 import { edgesBetweenVisible, partitionEndpoints } from "@/lib/infra/endpoints";
+import { nodeLifecycle } from "@/lib/infra/lifecycle";
 import { cn } from "@/lib/utils";
 import {
   type GraphTruncationNotice,
@@ -363,6 +364,18 @@ function CanvasBoard({
   const kindLabel = (kind: InfraNode["kind"]) => t(`kind.${kind}`);
   const statusLabel = (status: InfraNode["status"]) => t(`status.${status}`);
   const edgeKindLabel = (kind: InfraEdgeKind) => t(`edgeKind.${kind}`);
+  const lifecycleData = (node: {
+    retiredAt?: string | null;
+    alertsSnoozedUntil?: string | null;
+  }) => {
+    const { retired, snoozedUntil } = nodeLifecycle(node);
+    return {
+      retired,
+      snoozed: snoozedUntil !== null,
+      retiredLabel: t("lifecycle.retired"),
+      snoozedLabel: t("lifecycle.snoozed"),
+    };
+  };
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node<InfraNodeData>>(
     [],
@@ -452,6 +465,9 @@ function CanvasBoard({
               spotlightNeighbourhood !== null &&
               !spotlightNeighbourhood.has(node.id),
             focusPulse: node.id === focusPulseId,
+            // The retire / snooze badges (#1701). `nodeLifecycle` treats a field an older API
+            // omits as active and unsnoozed.
+            ...lifecycleData(node),
           },
         };
       });

@@ -34,7 +34,10 @@ import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import {
+  ASSET_OWNER_USER_SELECT,
+  PUBLIC_USER_SELECT,
+} from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
@@ -253,13 +256,27 @@ const ASSET_RELATIONS = {
     orderBy: { assignedAt: 'desc' },
     // The owner through the PUBLIC column allowlist (SEC-085) — a whole-row `user: true` put the
     // owner's passwordHash and session epochs on GET /assets/:id for every `asset:read` holder.
+    // This full allowlist is for a caller holding `user:read` only (#1685); see ASSET_RELATIONS_OWNER_ONLY.
     include: { user: { select: PUBLIC_USER_SELECT } },
   },
 } satisfies Prisma.AssetInclude;
 
-type AssetWithIncludes = Prisma.AssetGetPayload<{
-  include: typeof ASSET_RELATIONS;
-}>;
+/**
+ * {@link ASSET_RELATIONS} for a caller WITHOUT `user:read` (#1685): each owner carries only its id,
+ * name, email and `deletedAt` — the inventory record every `asset:read` holder sees (#1636). Role,
+ * `legajo`, `username`, `directoryAttrs` and the rest of the directory columns are never read.
+ */
+const ASSET_RELATIONS_OWNER_ONLY = {
+  ...ASSET_RELATIONS,
+  assignments: {
+    ...ASSET_RELATIONS.assignments,
+    include: { user: { select: ASSET_OWNER_USER_SELECT } },
+  },
+} satisfies Prisma.AssetInclude;
+
+type AssetWithIncludes =
+  | Prisma.AssetGetPayload<{ include: typeof ASSET_RELATIONS }>
+  | Prisma.AssetGetPayload<{ include: typeof ASSET_RELATIONS_OWNER_ONLY }>;
 
 /**
  * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
@@ -608,6 +625,34 @@ export class AssetsService {
     };
   }
 
+  /**
+   * Whether an asset read may inline its owners' directory columns (role, `legajo`, `username`,
+   * `directoryAttrs`, …) for this caller (#1685) — the `user:read` the directory itself requires. Without
+   * it an owner is only id, name, email and `deletedAt`. Public because the controller asks it for the
+   * assignment read, which AssetAssignmentsService builds.
+   */
+  canReadOwnerDetails(principal?: Principal): Promise<boolean> {
+    return this.holds(principal, 'user:read');
+  }
+
+  /**
+   * Authorize the by-person filter (`assignedToUserId`) for `principal` (#1685): 403 unless it holds
+   * `user:read`. Listing the assets a NAMED person holds is a directory-relational lookup, like
+   * `GET /users/:id/assignments`, so `asset:read` alone does not grant it. The `/assets/mine` self-read
+   * does not come through here: it filters by the caller's own id, taken from the principal.
+   */
+  async authorizePersonFilter(
+    assignedToUserId: string | undefined,
+    principal?: Principal,
+  ): Promise<void> {
+    if (assignedToUserId === undefined) return;
+    if (!(await this.holds(principal, 'user:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by person needs user:read',
+      );
+    }
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -848,12 +893,22 @@ export class AssetsService {
     };
   }
 
-  /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */
-  async findOne(id: string) {
-    const asset = await this.prisma.asset.findFirst({
-      where: { id },
-      include: ASSET_RELATIONS,
-    });
+  /**
+   * A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. Each active
+   * owner carries the full public user columns only for a caller holding `user:read`, otherwise only its
+   * id, name, email and `deletedAt` (#1685). No principal → the trimmed owner (fail-closed).
+   */
+  async findOne(id: string, principal?: Principal) {
+    const full = await this.canReadOwnerDetails(principal);
+    const asset = full
+      ? await this.prisma.asset.findFirst({
+          where: { id },
+          include: ASSET_RELATIONS,
+        })
+      : await this.prisma.asset.findFirst({
+          where: { id },
+          include: ASSET_RELATIONS_OWNER_ONLY,
+        });
     if (!asset) {
       throw new NotFoundException(`Asset ${id} not found`);
     }
@@ -1315,7 +1370,7 @@ export class AssetsService {
     }
     if (existing.deletedAt === null) {
       // Already live — return the expanded view; no RESTORED event for a no-op.
-      return this.findOne(id);
+      return this.findOne(id, principal);
     }
     const restored = await this.prisma.$transaction(async (tx) => {
       const row = await tx.asset.update({
@@ -1332,7 +1387,7 @@ export class AssetsService {
     // Re-index the restored asset (ADR-0035).
     this.search.upsert('assets', projectAsset(restored));
     // Return the expanded relation graph (same shape as findOne), consistent with the no-op branch.
-    return this.findOne(id);
+    return this.findOne(id, principal);
   }
 
   // --- batch (bulk) actions (ADR-0030 amendment) ---------------------------

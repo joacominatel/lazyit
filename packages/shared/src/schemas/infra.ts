@@ -1584,8 +1584,9 @@ export const AgentReportSchema = z.object({
   /**
    * "This host is being uninstalled" (#1701, epic #1146 Q11). `lazyit-agent decommission`, which the
    * installers' uninstall runs, sends one last report carrying `true` BEFORE the token is destroyed, and the server RETIRES the node that report's
-   * own `(reportingSource, externalId)` resolves to — never another node, never a container or guest
-   * child, never the linked Asset. The report's facts are NOT ingested: the host is leaving, so its
+   * own `(reportingSource, externalId)` resolves to, plus the live agent-reported container and guest
+   * children keyed under that same node — never another node, never a peer's children, never a linked
+   * Asset. The report's facts are NOT ingested: the host is leaving, so its
    * last snapshot stays the one it reported while it was in service. An unknown host is a 404 (nothing
    * to retire, and nothing is created).
    *
