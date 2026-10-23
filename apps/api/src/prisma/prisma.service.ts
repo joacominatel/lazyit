@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '../../generated/prisma/client';
+import { PRISMA_GLOBAL_OMIT, type PrismaGlobalOmit } from './prisma-omit';
 import { withSoftDeleteFilter } from './soft-delete.extension';
 
 /**
@@ -15,10 +16,15 @@ import { withSoftDeleteFilter } from './soft-delete.extension';
  * a soft-deletable model is scoped to `deletedAt: null` without services carrying per-query guards.
  * Lifecycle methods stay on the base instance, and the extended client shares this instance's
  * single connection/pool.
+ *
+ * Global omit (ADR-0105): the client is built with {@link PRISMA_GLOBAL_OMIT}, so secret and gated
+ * columns are left out of every result unless a query opts back in (`omit: { col: false }` or an
+ * explicit `select`). The class is typed with that config, so the omitted columns are also absent
+ * from the result types. Use `AppTransactionClient` (not `Prisma.TransactionClient`) for `tx`.
  */
 @Injectable()
 export class PrismaService
-  extends PrismaClient
+  extends PrismaClient<{ adapter: PrismaPg; omit: PrismaGlobalOmit }>
   implements OnModuleInit, OnModuleDestroy
 {
   constructor() {
@@ -26,7 +32,10 @@ export class PrismaService
     if (!connectionString) {
       throw new Error('DATABASE_URL is not set');
     }
-    super({ adapter: new PrismaPg({ connectionString }) });
+    super({
+      adapter: new PrismaPg({ connectionString }),
+      omit: PRISMA_GLOBAL_OMIT,
+    });
 
     const extended = this.$extends(
       Prisma.defineExtension({

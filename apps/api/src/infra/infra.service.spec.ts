@@ -30,6 +30,7 @@ import {
   INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
   INFRA_NODE_ASSET_REPOINT_ERROR,
   INFRA_NODE_ASSET_SHARED_ERROR,
+  isUniqueContainerScope,
 } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -120,6 +121,7 @@ interface PrismaMock {
     create: Mock;
     update: Mock;
     updateMany: Mock;
+    updateManyAndReturn: Mock;
   };
   infraEdge: {
     findFirst: Mock;
@@ -133,7 +135,12 @@ interface PrismaMock {
   infraNodeSecretRef: { findMany: Mock; upsert: Mock; deleteMany: Mock };
   // The #1143 append-only fact history. `count` backs the per-node write cap, `createMany` is the
   // ONE write path, `findMany` serves the Changes tab.
-  infraNodeFactChange: { count: Mock; createMany: Mock; findMany: Mock };
+  infraNodeFactChange: {
+    count: Mock;
+    createMany: Mock;
+    findMany: Mock;
+    groupBy: Mock;
+  };
   asset: { findFirst: Mock; update: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
@@ -239,6 +246,7 @@ describe('InfraService', () => {
         update: jest.fn(),
         // Default: a conditional write still matches its row (the confirm claim, AUD-059).
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        updateManyAndReturn: jest.fn().mockResolvedValue([]),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -260,6 +268,7 @@ describe('InfraService', () => {
         count: jest.fn().mockResolvedValue(0),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
         findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
       },
       asset: { findFirst: jest.fn(), update: jest.fn() },
       // Two call shapes, because the service uses both: the interactive form (a callback handed a tx
@@ -5574,30 +5583,22 @@ describe('InfraService', () => {
       ).rejects.toMatchObject({ code: 'P2002' });
     });
 
-    // ── The container gap the collision branch deliberately leaves (#1158) ────
+    // ── Containers under a collision are keyed on the clone's NODE (#1158) ────
     //
-    // READ THIS BEFORE WIRING CONTAINER RECONCILIATION INTO THE COLLISION BRANCH.
+    // READ THIS BEFORE CHANGING HOW A CONTAINER KEY IS DERIVED.
     //
-    // A container child's dedup key is `containerExternalId(hostExternalId, name)` — derived from
-    // the host's REPORTED `externalId` (#1139). A colliding host's NODE gets a disambiguated key
-    // (`<externalId>#<discriminator>`, #1141), but the report it sent still carries the machine-id
-    // its peer is reporting too, so both clones compute IDENTICAL container keys. If the collision
-    // branch reconciled containers, each clone's report would claim its peer's children, and the
-    // retire sweep — which selects children by `containerExternalIdPrefix(report.externalId)` —
-    // would flip the peer's still-running containers to OFFLINE. Every cadence tick, in both
-    // directions, forever.
+    // A container child's dedup key is `containerExternalId(hostKey, name)`. Until #1158 `hostKey` was
+    // the REPORTED `externalId`, which two clones share, so the collision branch could not reconcile
+    // containers at all: each clone's report would have claimed its peer's children and the retire
+    // sweep would have flipped the peer's running containers OFFLINE every tick, both ways. Since
+    // #1158 `hostKey` is the NODE's `externalId`. A clone's node is `<externalId>#<discriminator>`, so
+    // its children are `<externalId>#<discriminator>/container/<name>` and the two prefixes can never
+    // select each other's rows.
     //
-    // So `ingestCollidingHost` returns WITHOUT calling `reconcileContainers`, at the cost of a
-    // narrower gap: a colliding host's containers are not tracked at all until its machine-id is
-    // fixed, at which point it takes the ordinary unknown-key path and tracking resumes by itself.
-    // Re-deriving the container key from the NODE's `externalId` is the proper fix and is DEFERRED
-    // (#1158) — it re-keys every existing container child, which is a data migration over the
-    // partial unique index or an operator-visible one-time re-enrolment, neither of them free.
-    //
-    // These two tests pin the ONE guarantee that makes that deferral safe to revisit: **a colliding
-    // host's report never retires its peer's container children.** If you change the derivation, or
-    // wire reconciliation in without changing it, this is the guarantee you are touching.
-    describe("containers: a colliding host's report never retires its peer's children (#1158)", () => {
+    // The guarantee these tests pin is unchanged: **a colliding host's report never retires its
+    // peer's container children** — now with reconciliation RUNNING, against an in-memory store whose
+    // `findMany` honours the prefix exactly like Postgres does, so a wrong prefix retires real rows.
+    describe("containers: a colliding host's children are its OWN, and never its peer's (#1158)", () => {
       /** The same clone report as above, now carrying a container list. */
       const reportWithContainersFrom = (
         hostname: string,
@@ -5621,47 +5622,154 @@ describe('InfraService', () => {
           },
         });
 
+      const CLONE_KEY = 'machine-id-baked#SN-BETA';
+
       /** The peer's children, keyed under the machine-id BOTH clones report. */
       const PEER_CHILDREN = [
         { id: 'node-peer-c1', externalId: 'machine-id-baked/container/redis' },
         { id: 'node-peer-c2', externalId: 'machine-id-baked/container/api' },
+      ];
+      /** The clone's own children, as a post-#1158 report would have left them. */
+      const CLONE_CHILDREN = [
+        { id: 'node-clone-c1', externalId: `${CLONE_KEY}/container/redis` },
+        { id: 'node-clone-c2', externalId: `${CLONE_KEY}/container/old` },
       ];
 
       const STORED_PEER_IDENTITY = [
         { kind: 'serial', value: 'SN-ALPHA' },
         { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
       ];
+      const STORED_CLONE_IDENTITY = [
+        { kind: 'serial', value: 'SN-BETA' },
+        { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+      ];
 
-      /** Everything the container reconcile would have done, had it run. */
-      function expectNoContainerReconcile(): void {
-        // It never even LOOKS for children — `applyContainerTopology`'s prefix query is the first
-        // thing it does, so a silent findMany is the earliest evidence that reconciliation ran.
-        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
-        // …so nothing is retired. This is the assertion the whole deferral rests on.
-        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
-        // …and the peer's children are not re-parented onto the clone either.
-        expect(prisma.infraEdge.create).not.toHaveBeenCalled();
+      /**
+       * Every container child in the database, behind a `findMany` that applies the `startsWith`
+       * filter the way Postgres does (after undoing the LIKE escaping). A blanket `mockResolvedValue`
+       * would hand the clone its peer's rows whatever prefix it asked for, and prove nothing.
+       */
+      function seedChildren(
+        rows: Array<{ id: string; externalId: string }>,
+      ): void {
+        prisma.infraNode.findMany.mockImplementation(
+          (args: { where?: { externalId?: { startsWith?: string } } }) => {
+            const escaped = args.where?.externalId?.startsWith;
+            if (escaped === undefined) return Promise.resolve([]);
+            const prefix = escaped.replace(/\\([\\%_])/g, '$1');
+            return Promise.resolve(
+              rows
+                .filter((r) => r.externalId.startsWith(prefix))
+                .map((r) => ({ ...r, specs: {}, assetId: null })),
+            );
+          },
+        );
+        prisma.infraEdge.findMany.mockResolvedValue([]);
       }
 
-      it("a clone's FIRST report enrols its own node and leaves the peer's children alone", async () => {
+      /** The prefix every container query asked for. */
+      const queriedPrefixes = (): string[] =>
+        (
+          prisma.infraNode.findMany.mock.calls as Array<
+            [{ where?: { externalId?: { startsWith?: string } } }]
+          >
+        ).flatMap(([args]) => {
+          const p = args.where?.externalId?.startsWith;
+          return p === undefined ? [] : [p];
+        });
+
+      /** The ids every retire sweep flipped OFFLINE. */
+      const retiredIds = (): string[] =>
+        (
+          prisma.infraNode.updateMany.mock.calls as Array<
+            [{ where: { id?: { in?: string[] } }; data: { status?: string } }]
+          >
+        ).flatMap(([args]) =>
+          args.data.status === 'OFFLINE' ? (args.where.id?.in ?? []) : [],
+        );
+
+      /** The clone's FIRST report: the peer owns the reported key, the clone has no node yet. */
+      function firstReport(): void {
         prisma.infraNode.findFirst
-          .mockResolvedValueOnce(ORIGINAL) // the peer owns the reported key
-          .mockResolvedValueOnce(null); // the clone has no node of its own yet
+          .mockResolvedValueOnce(ORIGINAL)
+          .mockResolvedValueOnce(null);
         prisma.$queryRaw.mockResolvedValue(
           storedHost('web-01', STORED_PEER_IDENTITY),
         );
-        prisma.infraNode.create.mockResolvedValue({
+        prisma.infraNode.create
+          .mockResolvedValueOnce({ id: 'node-2', state: 'PENDING' })
+          .mockResolvedValue({ id: 'node-clone-new' });
+      }
+
+      /** A STEADY-STATE report: the clone already has its node, last written by this same machine. */
+      function steadyReport(storedCloneIdentity = STORED_CLONE_IDENTITY): void {
+        prisma.infraNode.findFirst
+          .mockResolvedValueOnce(ORIGINAL)
+          .mockResolvedValueOnce({
+            id: 'node-2',
+            assetId: null,
+            ipAddressSource: 'AGENT',
+          });
+        prisma.$queryRaw
+          .mockResolvedValueOnce(storedHost('web-01', STORED_PEER_IDENTITY)) // the peer's identity
+          .mockResolvedValueOnce([{ detectedAt: '2026-07-30T00:00:00.000Z' }]) // the marker
+          .mockResolvedValueOnce(storedHost('web-02', storedCloneIdentity)) // the clone's own node
+          .mockResolvedValue([]);
+        prisma.infraNode.update.mockResolvedValue({
           id: 'node-2',
           state: 'PENDING',
         });
-        // Seeded so the retire sweep would have something to retire if it ran — without this the
-        // test would pass against a version that reconciles and simply finds nothing.
-        prisma.infraNode.findMany.mockResolvedValue(PEER_CHILDREN);
-        prisma.infraEdge.findMany.mockResolvedValue([]);
+        prisma.infraNode.create.mockResolvedValue({ id: 'node-clone-new' });
+      }
 
-        // `[]` is the maximally dangerous shape: a positive "the probe ran and this host runs none",
-        // which is exactly what retires every child under the prefix.
+      it("a clone's FIRST report enrols its containers under ITS key and leaves the peer's children alone", async () => {
+        firstReport();
+        seedChildren(PEER_CHILDREN);
+
         const ack = await service.ingestReport(
+          reportWithContainersFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02', [
+            { name: 'redis', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        expect(ack.nodeId).toBe('node-2');
+        expect(ack.accepted).toBe(true);
+        expect(queriedPrefixes()).toEqual([`${CLONE_KEY}/container/`]);
+        // The clone's `redis` is a NEW child under the clone's key — not the peer's `redis`.
+        const created = (
+          prisma.infraNode.create.mock.calls as Array<
+            [{ data: { externalId: string; kind: string; state: string } }]
+          >
+        ).map(([args]) => args.data);
+        expect(created).toHaveLength(2);
+        expect(created[1]).toMatchObject({
+          externalId: `${CLONE_KEY}/container/redis`,
+          kind: 'CONTAINER',
+          state: 'PENDING',
+        });
+        // Parented on the CLONE's node.
+        expect(prisma.infraEdge.create).toHaveBeenCalledTimes(1);
+        expect(firstArg(prisma.infraEdge.create)).toMatchObject({
+          data: {
+            sourceId: 'node-clone-new',
+            targetId: 'node-2',
+            kind: 'RUNS_ON',
+          },
+        });
+        // Nothing of the peer's is retired, refreshed, or re-parented.
+        expect(retiredIds()).toEqual([]);
+        expect(prisma.infraNode.update).not.toHaveBeenCalled();
+        // A host under suspicion is for a human: its children are not offered to the rules.
+        expect(autoConfirm.resolve).not.toHaveBeenCalled();
+      });
+
+      it("`[]` from a clone retires only the clone's OWN children — never the peer's", async () => {
+        steadyReport();
+        seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
+
+        // `[]` is the maximally dangerous shape: a positive "the probe ran and this host runs none".
+        await service.ingestReport(
           reportWithContainersFrom(
             'web-02',
             'SN-BETA',
@@ -5671,35 +5779,14 @@ describe('InfraService', () => {
           AGENT_SA,
         );
 
-        expectNoContainerReconcile();
-        // The clone still lands — the report is accepted, only its containers go untracked.
-        expect(prisma.infraNode.create).toHaveBeenCalledTimes(1);
-        expect(ack.nodeId).toBe('node-2');
-        expect(ack.accepted).toBe(true);
+        expect(queriedPrefixes()).toEqual([`${CLONE_KEY}/container/`]);
+        expect(retiredIds().sort()).toEqual(['node-clone-c1', 'node-clone-c2']);
       });
 
-      it("a clone's STEADY-STATE report does not retire them either, list or no list", async () => {
-        // The second and every later report take the refresh branch, which is the one that runs
-        // every cadence tick forever — the branch where a thrash would actually live.
-        prisma.infraNode.findFirst
-          .mockResolvedValueOnce(ORIGINAL)
-          .mockResolvedValueOnce({
-            id: 'node-2',
-            assetId: null,
-            ipAddressSource: 'AGENT',
-          });
-        prisma.$queryRaw.mockResolvedValue(
-          storedHost('web-01', STORED_PEER_IDENTITY),
-        );
-        prisma.infraNode.update.mockResolvedValue({
-          id: 'node-2',
-          state: 'PENDING',
-        });
-        prisma.infraNode.findMany.mockResolvedValue(PEER_CHILDREN);
-        prisma.infraEdge.findMany.mockResolvedValue([]);
+      it("a clone's STEADY-STATE report refreshes its own child and retires its own vanished one", async () => {
+        steadyReport();
+        seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
 
-        // A NON-empty list this time: the clone runs a container of its own, whose key would be
-        // `machine-id-baked/container/redis` — byte-identical to the peer's first child.
         await service.ingestReport(
           reportWithContainersFrom('web-02', 'SN-BETA', 'aa:bb:cc:dd:ee:02', [
             { name: 'redis', state: 'running' },
@@ -5707,13 +5794,325 @@ describe('InfraService', () => {
           AGENT_SA,
         );
 
-        expectNoContainerReconcile();
-        // Only the clone's OWN node is written — never the peer's child, and never the peer.
-        expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
-        const updateArg = firstArg<{ where: { id: string } }>(
-          prisma.infraNode.update,
+        const updatedIds = (
+          prisma.infraNode.update.mock.calls as Array<
+            [{ where: { id: string } }]
+          >
+        ).map(([args]) => args.where.id);
+        // The clone's own host node and its own `redis` — the peer's `redis` is a different row.
+        expect(updatedIds.sort()).toEqual(['node-2', 'node-clone-c1']);
+        expect(retiredIds()).toEqual(['node-clone-c2']);
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+      });
+
+      it("the PEER's report never retires the clone's children either", async () => {
+        // The other direction: the peer reports `[]` with the clone's children in the store.
+        prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+        prisma.$queryRaw.mockResolvedValue(
+          storedHost('web-01', STORED_PEER_IDENTITY),
         );
-        expect(updateArg.where).toEqual({ id: 'node-2' });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+        seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
+
+        await service.ingestReport(
+          reportWithContainersFrom(
+            'web-01',
+            'SN-ALPHA',
+            'aa:bb:cc:dd:ee:01',
+            [],
+          ),
+          AGENT_SA,
+        );
+
+        expect(queriedPrefixes()).toEqual(['machine-id-baked/container/']);
+        expect(retiredIds().sort()).toEqual(['node-peer-c1', 'node-peer-c2']);
+      });
+
+      it('a SECOND machine landing on the same derived key keeps the pre-#1158 behaviour: nothing reconciled', async () => {
+        // Two clones sharing a first serial resolve to ONE clone node; their MACs alternate on it.
+        // Reconciling there would bring the cross-retire thrash straight back.
+        steadyReport([
+          { kind: 'serial', value: 'SN-BETA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:77' },
+        ]);
+        seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
+
+        const ack = await service.ingestReport(
+          reportWithContainersFrom(
+            'web-03',
+            'SN-BETA',
+            'aa:bb:cc:dd:ee:02',
+            [],
+          ),
+          AGENT_SA,
+        );
+
+        expect(ack.accepted).toBe(true);
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        expect(retiredIds()).toEqual([]);
+      });
+
+      // ── The shared-derived-key mark is STICKY (#1158 review) ──────────────
+      //
+      // Two clones sharing a first serial land on ONE clone node. A guard that only compared a report
+      // with the PREVIOUS one forgot the second machine as soon as it reported twice in a row (B, C,
+      // C): the second C matched the MACs C itself had just written, reconciled, and retired B's
+      // children — then B did the same back. These tests run whole SEQUENCES against a store that
+      // carries the clone node's blob from one report to the next, exactly as the database does.
+      describe('a second machine on the derived key is remembered, not re-guessed per report', () => {
+        const MACHINES = {
+          B: { hostname: 'web-02', mac: 'aa:bb:cc:dd:ee:02' },
+          C: { hostname: 'web-03', mac: 'aa:bb:cc:dd:ee:03' },
+        } as const;
+        type Machine = keyof typeof MACHINES;
+
+        const hostOf = (m: Machine) => ({
+          hostname: MACHINES[m].hostname,
+          identifiers: [
+            { kind: 'serial', value: 'SN-BETA' },
+            { kind: 'mac', value: MACHINES[m].mac },
+          ],
+        });
+        const MARKER = {
+          reportedExternalId: 'machine-id-baked',
+          peerNodeId: 'node-1',
+          peerLabel: 'web-01',
+          discriminator: 'SN-BETA',
+          detectedAt: '2026-07-30T00:00:00.000Z',
+        };
+
+        /** The clone node's stored `specs`, rewritten by every refresh that writes one. */
+        let cloneSpecs: Record<string, unknown>;
+
+        function wireStore(initial: Record<string, unknown>): void {
+          cloneSpecs = initial;
+          prisma.infraNode.findFirst.mockImplementation(
+            (args: { where?: { externalId?: string } }) => {
+              const key = args.where?.externalId;
+              if (key === 'machine-id-baked') return Promise.resolve(ORIGINAL);
+              if (key === CLONE_KEY) {
+                return Promise.resolve({
+                  id: 'node-2',
+                  assetId: null,
+                  ipAddressSource: 'AGENT',
+                });
+              }
+              return Promise.resolve(null);
+            },
+          );
+          // Both raw reads the ingest path makes, answered from the store by node id.
+          prisma.$queryRaw.mockImplementation(
+            (sql: { strings: readonly string[]; values: unknown[] }) => {
+              const text = sql.strings.join('?');
+              const specs =
+                sql.values[0] === 'node-2'
+                  ? cloneSpecs
+                  : {
+                      host: {
+                        hostname: 'web-01',
+                        identifiers: STORED_PEER_IDENTITY,
+                      },
+                    };
+              if (text.includes("'detectedAt'")) {
+                const marker = specs.identityConflict as
+                  { detectedAt?: string } | undefined;
+                return Promise.resolve([
+                  { detectedAt: marker?.detectedAt ?? null },
+                ]);
+              }
+              if (text.includes('AS host')) {
+                const rest = { ...specs };
+                delete rest.software;
+                return Promise.resolve([
+                  { host: specs.host, rest, hasSoftware: false },
+                ]);
+              }
+              return Promise.resolve([]);
+            },
+          );
+          prisma.infraNode.update.mockImplementation(
+            (args: { where: { id: string }; data: { specs?: unknown } }) => {
+              if (args.where.id === 'node-2' && args.data.specs !== undefined) {
+                cloneSpecs = args.data.specs as Record<string, unknown>;
+              }
+              return Promise.resolve({ id: args.where.id, state: 'PENDING' });
+            },
+          );
+          prisma.infraNode.create.mockResolvedValue({ id: 'node-clone-new' });
+          seedChildren([...PEER_CHILDREN, ...CLONE_CHILDREN]);
+        }
+
+        /** One report from `m`, carrying `[]` — the shape that retires everything under the prefix. */
+        async function reportFrom(
+          m: Machine,
+        ): Promise<{ reconciled: boolean; retired: string[] }> {
+          prisma.infraNode.findMany.mockClear();
+          prisma.infraNode.updateMany.mockClear();
+          const ack = await service.ingestReport(
+            reportWithContainersFrom(
+              MACHINES[m].hostname,
+              'SN-BETA',
+              MACHINES[m].mac,
+              [],
+            ),
+            AGENT_SA,
+          );
+          expect(ack.accepted).toBe(true);
+          return {
+            reconciled: prisma.infraNode.findMany.mock.calls.length > 0,
+            retired: retiredIds(),
+          };
+        }
+
+        const seenAt = (): unknown =>
+          (cloneSpecs.identityConflict as Record<string, unknown> | undefined)
+            ?.sharedKeySeenAt;
+
+        it('B, C, C, B: only the first report (one machine seen so far) reconciles', async () => {
+          wireStore({ host: hostOf('B'), identityConflict: MARKER });
+
+          const results = [];
+          for (const m of ['B', 'C', 'C', 'B'] as const) {
+            results.push(await reportFrom(m));
+          }
+
+          expect(results.map((r) => r.reconciled)).toEqual([
+            true,
+            false,
+            false,
+            false,
+          ]);
+          // Nothing after C appeared retires anything — not B's children, not C's.
+          expect(results.slice(1).flatMap((r) => r.retired)).toEqual([]);
+          // The mark was stamped once, by C's first report, and carried unchanged ever after.
+          expect(typeof seenAt()).toBe('string');
+          // `detectedAt` still says when the COLLISION started.
+          expect(
+            (cloneSpecs.identityConflict as { detectedAt: string }).detectedAt,
+          ).toBe(MARKER.detectedAt);
+        });
+
+        it('C, B, B: the newcomer reporting first marks the key, and B never reconciles again', async () => {
+          wireStore({ host: hostOf('B'), identityConflict: MARKER });
+
+          const results = [];
+          for (const m of ['C', 'B', 'B'] as const) {
+            results.push(await reportFrom(m));
+          }
+
+          expect(results.map((r) => r.reconciled)).toEqual([
+            false,
+            false,
+            false,
+          ]);
+          expect(results.flatMap((r) => r.retired)).toEqual([]);
+          expect(typeof seenAt()).toBe('string');
+        });
+
+        it('the mark survives re-stamps: a stored mark keeps the node unreconciled even on matching MACs', async () => {
+          const mark = '2026-08-01T00:00:00.000Z';
+          wireStore({
+            host: hostOf('C'),
+            identityConflict: { ...MARKER, sharedKeySeenAt: mark },
+          });
+
+          const result = await reportFrom('C');
+
+          expect(result.reconciled).toBe(false);
+          expect(result.retired).toEqual([]);
+          expect(seenAt()).toBe(mark);
+        });
+
+        it('it CLEARS with the marker: a node whose marker was dropped (merge) or never had the mark reconciles again', async () => {
+          // A merge deletes `identityConflict` from the adopting node; a pre-#1158 marker never had
+          // the field. Either way the node starts unmarked, and one machine reporting reconciles.
+          wireStore({ host: hostOf('B') });
+
+          const result = await reportFrom('B');
+
+          expect(result.reconciled).toBe(true);
+          expect(seenAt()).toBeUndefined();
+          // …and the second machine re-marks it on its first report, as on any fresh node.
+          expect((await reportFrom('C')).reconciled).toBe(false);
+          expect(typeof seenAt()).toBe('string');
+          expect((await reportFrom('B')).reconciled).toBe(false);
+        });
+      });
+
+      it('a derived key that cannot scope child keys unambiguously reconciles nothing', async () => {
+        // A serial ending in `/container` keeps its slash (AUD-102 only swaps a FULL separator), and
+        // `<key>/container/<name>` would then parse back to `machine-id-baked#SN`.
+        firstReport();
+        seedChildren(PEER_CHILDREN);
+
+        await service.ingestReport(
+          reportWithContainersFrom(
+            'web-02',
+            'SN/container',
+            'aa:bb:cc:dd:ee:02',
+            [],
+          ),
+          AGENT_SA,
+        );
+
+        expect(firstArg(prisma.infraNode.create)).toMatchObject({
+          data: { externalId: 'machine-id-baked#SN/container' },
+        });
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        expect(retiredIds()).toEqual([]);
+      });
+
+      it('isUniqueContainerScope: a key is safe exactly when its child keys parse back to it', () => {
+        // Every key an ordinary host or a clone can hold today, round-tripping…
+        expect(isUniqueContainerScope('machine-id-baked')).toBe(true);
+        expect(isUniqueContainerScope(CLONE_KEY)).toBe(true);
+        expect(isUniqueContainerScope('machine-id-baked#SN/1')).toBe(true);
+        expect(isUniqueContainerScope('machine-id-baked#SN/containerX')).toBe(
+          true,
+        );
+        // …and the one partial separator AUD-102 cannot see, which would nest under a shorter key.
+        expect(isUniqueContainerScope('machine-id-baked#SN/container')).toBe(
+          false,
+        );
+      });
+
+      it('an ORDINARY host keeps byte-identical container keys (the upgrade promise)', async () => {
+        // Every existing child was written under the REPORTED key. For a host that is not in
+        // collision, the node was found by exact equality on that key, so nothing may move.
+        prisma.infraNode.findFirst.mockResolvedValue(ORIGINAL);
+        prisma.$queryRaw.mockResolvedValue(
+          storedHost('web-01', STORED_PEER_IDENTITY),
+        );
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.create.mockResolvedValue({ id: 'node-peer-c3' });
+        seedChildren(PEER_CHILDREN);
+
+        await service.ingestReport(
+          reportWithContainersFrom('web-01', 'SN-ALPHA', 'aa:bb:cc:dd:ee:01', [
+            { name: 'redis', state: 'running' },
+            { name: 'api', state: 'running' },
+            { name: 'worker', state: 'running' },
+          ]),
+          AGENT_SA,
+        );
+
+        // Spelled out as a literal rather than through the helper, so a change to the helper cannot
+        // move this assertion with it.
+        expect(queriedPrefixes()).toEqual(['machine-id-baked/container/']);
+        // Both existing children matched and were refreshed in place — no duplicate minted for them.
+        const created = (
+          prisma.infraNode.create.mock.calls as Array<
+            [{ data: { externalId: string } }]
+          >
+        ).map(([args]) => args.data.externalId);
+        expect(created).toEqual(['machine-id-baked/container/worker']);
+        expect(retiredIds()).toEqual([]);
       });
     });
   });
@@ -9314,6 +9713,692 @@ describe('InfraService', () => {
       // The wire still got the projected shape.
       expect(ack.policy?.collect).not.toHaveProperty('hypervisor');
       expect(ack.policy?.revision).toBe(9);
+    });
+  });
+
+  // ── Retire + snooze (#1701, epic #1146 Q11/Q15) ─────────────────────────────────────────────────
+
+  describe('retire lifecycle — the report path (#1701)', () => {
+    const report = (over: Record<string, unknown> = {}) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.12.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-10-22T12:00:00.000Z',
+        host: { hostname: 'web-01' },
+        ...over,
+      });
+    const RETIRED_AT = new Date('2026-10-20T00:00:00.000Z');
+    const lifecycleRows = () =>
+      (prisma.infraNodeFactChange.createMany.mock.calls as unknown[][]).flatMap(
+        (call) =>
+          (
+            call[0] as {
+              data: {
+                fact: string;
+                previousValue: string;
+                currentValue: string;
+              }[];
+            }
+          ).data.filter((row) => row.fact === 'node.lifecycle'),
+      );
+
+    describe('decommissioning: true — the uninstaller retires its OWN node', () => {
+      it('retires the node its own key resolves to, ingests nothing, and acks `retired`', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+          retiredAt: null,
+        });
+
+        const ack = await service.ingestReport(
+          report({ decommissioning: true }),
+          AGENT_SA,
+        );
+
+        expect(
+          firstArg<{ where: unknown }>(prisma.infraNode.findFirst).where,
+        ).toEqual({
+          reportingSource: 'agent:abc123',
+          externalId: 'machine-id-xyz',
+        });
+        expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+          where: { id: 'node-1', retiredAt: null },
+          data: { retiredAt: expect.any(Date) as Date, retiredById: null },
+        });
+        // Nothing else: no refresh, no liveness, no create, no Asset.
+        expect(prisma.infraNode.update).not.toHaveBeenCalled();
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+        expect(prisma.asset.update).not.toHaveBeenCalled();
+        expect(prisma.asset.findFirst).not.toHaveBeenCalled();
+        expect(assets.remove).not.toHaveBeenCalled();
+        expect(agentPolicy.resolveForReport).not.toHaveBeenCalled();
+        expect(lifecycleRows()).toEqual([
+          expect.objectContaining({
+            previousValue: 'active',
+            currentValue: 'retired',
+          }),
+        ]);
+        expect(ack).toMatchObject({
+          nodeId: 'node-1',
+          state: 'CONFIRMED',
+          accepted: true,
+          retired: true,
+        });
+      });
+
+      it('is idempotent: an already-retired node keeps its stamp and records nothing', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+          retiredAt: RETIRED_AT,
+        });
+
+        const ack = await service.ingestReport(
+          report({ decommissioning: true }),
+        );
+
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        expect(lifecycleRows()).toEqual([]);
+        expect(ack.retired).toBe(true);
+      });
+
+      it('two racing uninstall reports record ONE transition', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+          retiredAt: null,
+        });
+        prisma.infraNode.updateMany.mockResolvedValue({ count: 0 }); // the other one won
+
+        await service.ingestReport(report({ decommissioning: true }));
+
+        expect(lifecycleRows()).toEqual([]);
+      });
+
+      it('an UNKNOWN host is a 404 — a decommission never creates a node', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.ingestReport(report({ decommissioning: true }), AGENT_SA),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(prisma.infraNode.create).not.toHaveBeenCalled();
+        expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+        expect(enrollment.assertWithinBudget).not.toHaveBeenCalled();
+      });
+
+      describe('a host whose machine-id collided (#1141) retires its own node, never its peer', () => {
+        const cloneReport = (identifiers: unknown[]) =>
+          report({
+            reportingSource: 'agent:clone',
+            externalId: 'machine-id-baked',
+            decommissioning: true,
+            host: { hostname: 'web-02', identifiers },
+          });
+        const PEER = { id: 'node-peer', state: 'CONFIRMED', retiredAt: null };
+
+        beforeEach(() => {
+          // The peer's stored evidence: a different serial AND a different MAC.
+          prisma.$queryRaw.mockResolvedValue([
+            {
+              host: {
+                hostname: 'web-01',
+                identifiers: [
+                  { kind: 'serial', value: 'SN-ALPHA' },
+                  { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+                ],
+              },
+            },
+          ]);
+        });
+
+        it('resolves the derived key and retires THAT node', async () => {
+          prisma.infraNode.findFirst
+            .mockResolvedValueOnce(PEER)
+            .mockResolvedValueOnce({
+              id: 'node-clone',
+              state: 'PENDING',
+              retiredAt: null,
+            });
+
+          const ack = await service.ingestReport(
+            cloneReport([
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: 'SN-BETA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+            ]),
+          );
+
+          const lookups = prisma.infraNode.findFirst.mock.calls as unknown[][];
+          expect((lookups[1][0] as { where: unknown }).where).toEqual({
+            reportingSource: 'agent:clone',
+            externalId: 'machine-id-baked#SN-BETA',
+          });
+          expect(prisma.infraNode.updateMany).toHaveBeenCalledTimes(1);
+          expect(
+            firstArg<{ where: { id: string } }>(prisma.infraNode.updateMany)
+              .where.id,
+          ).toBe('node-clone');
+          expect(ack.nodeId).toBe('node-clone');
+        });
+
+        it('a clone with no node of its own yet is a 404 — the PEER is never retired', async () => {
+          prisma.infraNode.findFirst
+            .mockResolvedValueOnce(PEER)
+            .mockResolvedValueOnce(null);
+
+          const outcome = service.ingestReport(
+            cloneReport([
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: 'SN-BETA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+            ]),
+          );
+          await expect(outcome).rejects.toBeInstanceOf(NotFoundException);
+          // The message names what actually happened: a node DOES exist under the key — its peer's.
+          await expect(outcome).rejects.toThrow(/shares its machine id/);
+          expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+          expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+          expect(prisma.infraNode.create).not.toHaveBeenCalled();
+        });
+      });
+    });
+
+    describe('a retired node that reports again is un-retired automatically', () => {
+      it('clears retiredAt/retiredById on the refresh and RECORDS the transition', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+          label: 'web-01',
+          agentPolicy: null,
+          policyRevision: null,
+          retiredAt: RETIRED_AT,
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+
+        await service.ingestReport(report(), AGENT_SA);
+
+        const update = firstArg<{ data: Record<string, unknown> }>(
+          prisma.infraNode.update,
+        );
+        expect(update.data).toMatchObject({
+          status: 'ONLINE',
+          retiredAt: null,
+          retiredById: null,
+        });
+        expect(lifecycleRows()).toEqual([
+          expect.objectContaining({
+            kind: 'FACT_CHANGED',
+            previousValue: 'retired',
+            currentValue: 'active',
+          }),
+        ]);
+      });
+
+      it('an ordinary check-in of an active node writes no lifecycle column and records nothing', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-1',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+          label: 'web-01',
+          agentPolicy: null,
+          policyRevision: null,
+          retiredAt: null,
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-1',
+          state: 'CONFIRMED',
+        });
+
+        await service.ingestReport(report(), AGENT_SA);
+
+        const update = firstArg<{ data: Record<string, unknown> }>(
+          prisma.infraNode.update,
+        );
+        expect(update.data).not.toHaveProperty('retiredAt');
+        expect(update.data).not.toHaveProperty('retiredById');
+        expect(lifecycleRows()).toEqual([]);
+      });
+
+      it('a retired CONTAINER child its host lists again is un-retired too', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue({
+          id: 'node-host',
+          assetId: null,
+          ipAddressSource: 'AGENT',
+          retiredAt: null,
+        });
+        prisma.infraNode.update.mockResolvedValue({
+          id: 'node-host',
+          state: 'CONFIRMED',
+        });
+        prisma.infraNode.findMany.mockResolvedValue([
+          {
+            id: 'node-c1',
+            externalId: 'machine-id-xyz/container/redis',
+            specs: null,
+            assetId: null,
+            retiredAt: RETIRED_AT,
+          },
+        ]);
+        prisma.infraEdge.findMany.mockResolvedValue([
+          { id: 'edge-1', sourceId: 'node-c1', target: { deletedAt: null } },
+        ]);
+
+        await service.ingestReport(
+          report({
+            host: {
+              hostname: 'web-01',
+              containers: [{ name: 'redis', state: 'running' }],
+            },
+          }),
+          AGENT_SA,
+        );
+
+        const childUpdate = (
+          prisma.infraNode.update.mock.calls as unknown[][]
+        ).find(
+          (call) =>
+            (call[0] as { where: { id: string } }).where.id === 'node-c1',
+        );
+        expect(
+          (childUpdate?.[0] as { data: Record<string, unknown> }).data,
+        ).toMatchObject({ retiredAt: null, retiredById: null });
+        expect(lifecycleRows()).toEqual([
+          expect.objectContaining({
+            previousValue: 'retired',
+            currentValue: 'active',
+          }),
+        ]);
+      });
+    });
+  });
+
+  describe('retire / snooze — the human actions (#1701)', () => {
+    const NODE = {
+      id: 'node-1',
+      retiredAt: null,
+      retiredById: null,
+      alertsSnoozedUntil: null,
+    };
+
+    it('retire stamps now and the acting human', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(NODE);
+      prisma.infraNode.update.mockResolvedValue({ ...NODE });
+
+      await service.retireNode('node-1', HUMAN);
+
+      expect(prisma.infraNode.update).toHaveBeenCalledWith({
+        where: { id: 'node-1' },
+        data: { retiredAt: expect.any(Date) as Date, retiredById: 'u-1' },
+      });
+      // A human retire is curation, not an ingest fact.
+      expect(prisma.infraNodeFactChange.createMany).not.toHaveBeenCalled();
+      // The linked Asset is never touched.
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+      expect(assets.remove).not.toHaveBeenCalled();
+    });
+
+    it('retire is idempotent — the original stamp is kept', async () => {
+      const retired = { ...NODE, retiredAt: new Date('2026-10-01T00:00:00Z') };
+      prisma.infraNode.findFirst.mockResolvedValue(retired);
+
+      await expect(service.retireNode('node-1', HUMAN)).resolves.toBe(retired);
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('retire on a missing or discarded node is a 404', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue(null);
+      await expect(service.retireNode('gone', HUMAN)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('un-retire clears both columns; a node that is not retired is a no-op', async () => {
+      prisma.infraNode.findFirst.mockResolvedValueOnce({
+        ...NODE,
+        retiredAt: new Date('2026-10-01T00:00:00Z'),
+        retiredById: 'u-1',
+      });
+      prisma.infraNode.update.mockResolvedValue(NODE);
+      await service.unretireNode('node-1');
+      expect(prisma.infraNode.update).toHaveBeenCalledWith({
+        where: { id: 'node-1' },
+        data: { retiredAt: null, retiredById: null },
+      });
+
+      prisma.infraNode.update.mockClear();
+      prisma.infraNode.findFirst.mockResolvedValueOnce(NODE);
+      await service.unretireNode('node-1');
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    describe('snooze', () => {
+      const inHours = (h: number) =>
+        new Date(Date.now() + h * 60 * 60 * 1000).toISOString();
+
+      it('stores a future instant', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(NODE);
+        prisma.infraNode.update.mockResolvedValue(NODE);
+        const until = inHours(4);
+
+        await service.snoozeNodeAlerts('node-1', until);
+
+        expect(prisma.infraNode.update).toHaveBeenCalledWith({
+          where: { id: 'node-1' },
+          data: { alertsSnoozedUntil: new Date(until) },
+        });
+      });
+
+      it('refuses a past instant and one beyond the cap — retire is the answer to "never"', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(NODE);
+        await expect(
+          service.snoozeNodeAlerts('node-1', inHours(-1)),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        await expect(
+          service.snoozeNodeAlerts('node-1', inHours(91 * 24)),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      });
+
+      it('accepts exactly the cap', async () => {
+        prisma.infraNode.findFirst.mockResolvedValue(NODE);
+        prisma.infraNode.update.mockResolvedValue(NODE);
+        await service.snoozeNodeAlerts('node-1', inHours(90 * 24 - 1));
+        expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('unsnooze clears it; a node that is not snoozed is a no-op', async () => {
+        prisma.infraNode.findFirst.mockResolvedValueOnce({
+          ...NODE,
+          alertsSnoozedUntil: new Date(Date.now() + 1000),
+        });
+        prisma.infraNode.update.mockResolvedValue(NODE);
+        await service.unsnoozeNodeAlerts('node-1');
+        expect(prisma.infraNode.update).toHaveBeenCalledWith({
+          where: { id: 'node-1' },
+          data: { alertsSnoozedUntil: null },
+        });
+
+        prisma.infraNode.update.mockClear();
+        prisma.infraNode.findFirst.mockResolvedValueOnce(NODE);
+        await service.unsnoozeNodeAlerts('node-1');
+        expect(prisma.infraNode.update).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("decommissioning retires the host's container and guest children too (#1701 follow-up)", () => {
+    const report = (over: Record<string, unknown> = {}) =>
+      AgentReportSchema.parse({
+        agentVersion: '1.12.0',
+        reportingSource: 'agent:abc123',
+        externalId: 'machine-id-xyz',
+        reportedAt: '2026-10-22T12:00:00.000Z',
+        host: { hostname: 'web-01' },
+        decommissioning: true,
+        ...over,
+      });
+    type ChildQuery = {
+      where: {
+        reportingSource: string;
+        source: string;
+        retiredAt: null;
+        OR: { externalId: { startsWith: string } }[];
+      };
+    };
+    const lifecycleRows = () =>
+      (prisma.infraNodeFactChange.createMany.mock.calls as unknown[][]).flatMap(
+        (call) =>
+          (
+            call[0] as {
+              data: { nodeId: string; fact: string; currentValue: string }[];
+            }
+          ).data.filter((row) => row.fact === 'node.lifecycle'),
+      );
+
+    beforeEach(() => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-host',
+        state: 'CONFIRMED',
+        retiredAt: null,
+      });
+      prisma.infraNode.findMany.mockResolvedValue([
+        { id: 'node-c1' },
+        { id: 'node-g1' },
+      ]);
+      prisma.infraNode.updateManyAndReturn.mockResolvedValue([
+        { id: 'node-c1' },
+        { id: 'node-g1' },
+      ]);
+    });
+
+    it("selects only LIVE, AGENT-reported, active children under the host's OWN key", async () => {
+      await service.ingestReport(report(), AGENT_SA);
+
+      const query = firstArg<ChildQuery>(prisma.infraNode.findMany);
+      expect(query.where).toMatchObject({
+        reportingSource: 'agent:abc123',
+        source: 'AGENT',
+        retiredAt: null,
+      });
+      expect(query.where.OR.map((c) => c.externalId.startsWith)).toEqual([
+        'machine-id-xyz/container/',
+        'machine-id-xyz/guest/',
+      ]);
+    });
+
+    it('retires them in one conditional write and records one lifecycle row each', async () => {
+      const ack = await service.ingestReport(report(), AGENT_SA);
+
+      expect(prisma.infraNode.updateManyAndReturn).toHaveBeenCalledWith({
+        where: { id: { in: ['node-c1', 'node-g1'] }, retiredAt: null },
+        data: { retiredAt: expect.any(Date) as Date, retiredById: null },
+        select: { id: true },
+      });
+      expect(lifecycleRows()).toEqual([
+        expect.objectContaining({
+          nodeId: 'node-host',
+          currentValue: 'retired',
+        }),
+        expect.objectContaining({ nodeId: 'node-c1', currentValue: 'retired' }),
+        expect.objectContaining({ nodeId: 'node-g1', currentValue: 'retired' }),
+      ]);
+      // Never an Asset.
+      expect(prisma.asset.update).not.toHaveBeenCalled();
+      expect(assets.remove).not.toHaveBeenCalled();
+      expect(ack.retired).toBe(true);
+    });
+
+    it('a child already at its hourly fact cap is retired but gets no row', async () => {
+      prisma.infraNodeFactChange.groupBy.mockResolvedValue([
+        { nodeId: 'node-g1', _count: { _all: 500 } },
+      ]);
+
+      await service.ingestReport(report(), AGENT_SA);
+
+      expect(lifecycleRows().map((r) => r.nodeId)).toEqual([
+        'node-host',
+        'node-c1',
+      ]);
+    });
+
+    it('still sweeps children when the host was ALREADY retired (a second uninstall)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-host',
+        state: 'CONFIRMED',
+        retiredAt: new Date('2026-10-01T00:00:00Z'),
+      });
+
+      await service.ingestReport(report(), AGENT_SA);
+
+      expect(prisma.infraNode.updateMany).not.toHaveBeenCalled();
+      expect(prisma.infraNode.updateManyAndReturn).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failure retiring children never fails the decommission — the host stays retired', async () => {
+      prisma.infraNode.updateManyAndReturn.mockRejectedValue(
+        new Error('db hiccup'),
+      );
+
+      const ack = await service.ingestReport(report(), AGENT_SA);
+
+      expect(ack.retired).toBe(true);
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    describe('a clone retires ITS children, never its peer’s', () => {
+      const cloneReport = () =>
+        report({
+          reportingSource: 'agent:clone',
+          externalId: 'machine-id-baked',
+          host: {
+            hostname: 'web-02',
+            identifiers: [
+              { kind: 'machine-id', value: 'baked' },
+              { kind: 'serial', value: 'SN-BETA' },
+              { kind: 'mac', value: 'aa:bb:cc:dd:ee:02' },
+            ],
+          },
+        });
+      const peerHost = {
+        hostname: 'web-01',
+        identifiers: [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ],
+      };
+
+      beforeEach(() => {
+        prisma.infraNode.findFirst
+          .mockResolvedValueOnce({
+            id: 'node-peer',
+            state: 'CONFIRMED',
+            retiredAt: null,
+          })
+          .mockResolvedValueOnce({
+            id: 'node-clone',
+            state: 'PENDING',
+            retiredAt: null,
+          });
+      });
+
+      it('scopes the children to the DERIVED key', async () => {
+        prisma.$queryRaw.mockResolvedValue([{ host: peerHost }]);
+
+        await service.ingestReport(cloneReport(), AGENT_SA);
+
+        const query = firstArg<ChildQuery>(prisma.infraNode.findMany);
+        expect(query.where.OR.map((c) => c.externalId.startsWith)).toEqual([
+          'machine-id-baked#SN-BETA/container/',
+          'machine-id-baked#SN-BETA/guest/',
+        ]);
+      });
+
+      it('retires no child once a second machine has been seen on the clone node (#1158, sticky)', async () => {
+        prisma.$queryRaw
+          .mockResolvedValueOnce([{ host: peerHost }]) // the peer's evidence
+          .mockResolvedValueOnce([
+            {
+              host: { hostname: 'web-02' },
+              rest: {
+                identityConflict: {
+                  reportedExternalId: 'machine-id-baked',
+                  sharedKeySeenAt: '2026-10-01T00:00:00.000Z',
+                },
+              },
+            },
+          ]); // the clone node's own blob
+
+        const ack = await service.ingestReport(cloneReport(), AGENT_SA);
+
+        expect(ack.nodeId).toBe('node-clone');
+        expect(prisma.infraNode.findMany).not.toHaveBeenCalled();
+        expect(prisma.infraNode.updateManyAndReturn).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('a retired GUEST child its hypervisor lists again is un-retired (#1701)', () => {
+    it('clears the lifecycle columns on the refresh and records the transition', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-hv',
+        assetId: null,
+        ipAddressSource: 'AGENT',
+        label: 'pve-01',
+        agentPolicy: null,
+        policyRevision: null,
+        retiredAt: null,
+      });
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-hv',
+        state: 'CONFIRMED',
+      });
+      prisma.infraNode.findMany.mockResolvedValue([
+        {
+          id: 'node-g1',
+          externalId: 'machine-id-pve1/guest/101',
+          specs: null,
+          assetId: null,
+          deletedAt: null,
+          retiredAt: new Date('2026-10-20T00:00:00.000Z'),
+        },
+      ]);
+      prisma.infraEdge.findMany.mockResolvedValue([
+        { id: 'edge-1', sourceId: 'node-g1', target: { deletedAt: null } },
+      ]);
+
+      await service.ingestReport(
+        AgentReportSchema.parse({
+          agentVersion: '1.12.0',
+          reportingSource: 'agent:pve',
+          externalId: 'machine-id-pve1',
+          reportedAt: '2026-10-22T12:00:00.000Z',
+          host: {
+            hostname: 'pve-01',
+            hypervisor: {
+              platform: 'proxmox',
+              version: '8.4',
+              nodeName: 'pve1',
+            },
+            guests: [
+              { ref: '101', name: 'db-vm', kind: 'qemu', state: 'running' },
+            ],
+          },
+        }),
+        AGENT_SA,
+      );
+
+      const childUpdate = (
+        prisma.infraNode.update.mock.calls as unknown[][]
+      ).find(
+        (c) => (c[0] as { where: { id: string } }).where.id === 'node-g1',
+      )?.[0] as { data: Record<string, unknown> };
+      expect(childUpdate.data).toMatchObject({
+        retiredAt: null,
+        retiredById: null,
+      });
+      const rows = (
+        prisma.infraNodeFactChange.createMany.mock.calls as unknown[][]
+      ).flatMap(
+        (call) =>
+          (
+            call[0] as {
+              data: { nodeId: string; fact: string; previousValue: string }[];
+            }
+          ).data,
+      );
+      expect(rows).toEqual([
+        expect.objectContaining({
+          nodeId: 'node-g1',
+          fact: 'node.lifecycle',
+          previousValue: 'retired',
+          currentValue: 'active',
+        }),
+      ]);
     });
   });
 });

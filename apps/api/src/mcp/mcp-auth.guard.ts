@@ -16,7 +16,7 @@ import {
   type AiToolClass,
 } from '@lazyit/shared';
 import type { Request, Response } from 'express';
-import type { User } from '../../generated/prisma/client';
+import type { UserRow } from '../prisma/prisma-omit';
 import {
   AI_REFUSED_SA_PERMISSION,
   AiRunPrincipals,
@@ -36,7 +36,7 @@ import { McpRateLimiter } from './mcp-rate-limit';
 export type McpRequest = Request & {
   auth?: ReturnType<typeof toAuthInfo>;
   mcpCaller?: McpCaller;
-  user?: User;
+  user?: UserRow;
 };
 
 /** The scopes a client should ask for, advertised in the 401 challenge (RFC 6750 §3). */
@@ -87,7 +87,8 @@ const TOKEN_REFUSED = 'The access token is invalid, expired or revoked.';
  *
  * On success it sets `req.auth` (the SDK's `AuthInfo`, carrying the verified {@link McpCaller} — never
  * the bearer), `req.mcpCaller`, and `req.user` for a human (request-log attribution only); counts the
- * caller's request rate (429 past it); and announces a connection's first use to its owner
+ * caller's request rate, and a human's overall rate across all their connections (429 past either); and
+ * announces a connection's first use to its owner
  * ({@link McpConnectionNoticeService}).
  */
 @Injectable()
@@ -156,7 +157,7 @@ export class McpAuthGuard implements CanActivate {
       );
     }
 
-    let verified: { caller: McpCaller; expiresAt?: Date; user?: User };
+    let verified: { caller: McpCaller; expiresAt?: Date; user?: UserRow };
     try {
       verified = await this.verify(bearer, config);
     } catch (err) {
@@ -174,6 +175,12 @@ export class McpAuthGuard implements CanActivate {
 
     const { caller, expiresAt, user } = verified;
     if (!this.rateLimiter.request(caller.rateKey)) throw tooManyRequests();
+    if (
+      caller.userRateKey &&
+      !this.rateLimiter.userRequest(caller.userRateKey)
+    ) {
+      throw tooManyRequests();
+    }
     req.auth = toAuthInfo(caller, expiresAt);
     req.mcpCaller = caller;
     if (user) req.user = user;
@@ -186,7 +193,7 @@ export class McpAuthGuard implements CanActivate {
   private async verify(
     bearer: string,
     config: OAuthServerConfig | null,
-  ): Promise<{ caller: McpCaller; expiresAt?: Date; user?: User }> {
+  ): Promise<{ caller: McpCaller; expiresAt?: Date; user?: UserRow }> {
     if (bearer.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) {
       if (!config) {
         throw new McpAuthRefusal(
@@ -212,6 +219,7 @@ export class McpAuthGuard implements CanActivate {
           grant: result.grant,
           ceiling: scopesToCeiling(result.grant.scopes),
           rateKey: `grant:${result.grant.id}`,
+          userRateKey: `user:${user.id}`,
         },
         expiresAt: result.expiresAt,
         user,
@@ -247,6 +255,7 @@ export class McpAuthGuard implements CanActivate {
           },
           ceiling: scopesToCeiling(result.grant.scopes),
           rateKey: `grant:${result.grant.id}`,
+          userRateKey: `user:${user.id}`,
         },
         expiresAt: result.expiresAt,
         user,

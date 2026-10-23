@@ -413,8 +413,12 @@ En Windows, desde una PowerShell elevada:
 & ([scriptblock]::Create((irm https://tu-instancia/install.ps1))) -Uninstall
 ```
 
-Detiene y elimina lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea
-programada en Windows — y después el binario, el estado local del agente y su archivo de
+Detiene lo que ejecuta al agente — el timer y ambas unidades de systemd en Linux, la tarea programada
+en Windows —, después **le avisa a lazyit que esta máquina se va**, para que su nodo quede **retirado**
+en vez de quedar fuera de línea unos minutos más tarde y disparar una alerta (ver **Servidores retirados
+y alertas pausadas** más abajo). La desinstalación muestra si lazyit lo confirmó. Si no pudo llegar a
+lazyit, o tu instancia es anterior a esta función, lo dice y sigue, y podés retirar el nodo a mano.
+Después elimina el binario, el estado local del agente y su archivo de
 configuración, incluido **el token**, que se destruye con cualquiera de las opciones. En Windows
 también saca su directorio del PATH de la máquina, para que no quede nada apuntando a una carpeta
 que ya no existe. Es seguro ejecutarlo dos veces, y seguro sobre una instalación a medias.
@@ -428,10 +432,57 @@ debería sobrevivir en una máquina que acabás de dar de baja. (`--keep-token`,
 operación opuesta y pertenece a una *instalación*: combinarla con `--uninstall` se rechaza en vez de
 ignorarse, para que nadie termine una desinstalación creyendo que la credencial sobrevivió.)
 
-Dos cosas que desinstalar **no** hace, deliberadamente. La entrada del servidor en lazyit queda tal
-como está: descartala desde la vista de Servidores si querés sacarla del mapa. Y el token solo se
-elimina *de ese host* — si ninguna otra máquina lo usa, revocá la cuenta de servicio en
-[Cuentas de servicio](/help/users-permissions-service-accounts).
+Los contenedores y las máquinas virtuales que reportaba el servidor se retiran con él, para que no
+disparen cada uno una alerta de desconexión cuando el servidor deja de listarlos. Los nodos que
+dibujaste a mano nunca se tocan.
+
+Dos cosas que desinstalar **no** hace, deliberadamente. El nodo del servidor en lazyit queda retirado,
+no borrado: conserva su historial y su activo, y podés descartarlo desde la vista de Servidores si
+querés sacarlo del mapa. Y el token solo se elimina *de ese host* — si ninguna otra máquina lo usa, revocá la
+cuenta de servicio en [Cuentas de servicio](/help/users-permissions-service-accounts).
+
+## Servidores retirados y alertas pausadas
+
+"Fuera de línea" y "dado de baja" son cosas distintas. Un servidor que se cayó y uno que diste de baja
+dejan de reportar los dos, y los dos quedaban en el mapa como **Fuera de línea** para siempre, después de
+disparar una notificación de **Agente sin conexión**. Dos acciones le dicen a lazyit cuál de los dos
+está viendo.
+
+**Retirá** un servidor que se fue para siempre. Un nodo retirado:
+
+- sigue en el mapa, en la vista de Servidores y en la vista de Agentes, con una insignia de
+  **Retirado** y con su historial, sus conexiones y su activo vinculado intactos. Retirar un servidor no
+  da de baja el hardware: el activo no se toca.
+- deja de vigilarse. Nunca se marca como fuera de línea ni se avisa, así que deja de llenar la campana.
+- queda fuera de los conteos de la vista de Agentes (no está "atrasado" ni "sin reportar", está dado de
+  baja) y tiene su propio filtro de **retirados**. También queda fuera de los resultados de la lista de
+  software vigilado.
+- **vuelve solo si reporta de nuevo.** Si la máquina en realidad no se había ido, su siguiente reporte
+  la reactiva, y la pestaña **Cambios** del nodo registra cuándo pasó.
+
+Desinstalar el agente retira el nodo por vos (ver **Desinstalar el agente** más arriba), así que solo
+tenés que retirar a mano un servidor cuyo agente no pudiste desinstalar, o uno que nunca reportó un
+agente.
+
+**Pausá las alertas de desconexión** durante un mantenimiento planificado: una ventana de reinicio, un
+cambio de hardware, una mudanza de datacenter. Mientras un nodo está en pausa igual pasa a
+**Fuera de línea** cuando deja de reportar (el mapa sigue siendo fiel), pero no se avisa a nadie, ni en
+la campana ni por correo. Podés pausar por 4 horas, 1 día, 3 días, 1 semana o 30 días (lo máximo que
+acepta lazyit son 90 días), y terminar una pausa antes cuando quieras. Dos cosas para tener en cuenta:
+
+- Lo que cuenta es **cuándo lazyit marca el servidor como Fuera de línea**, no cuándo dejó de
+  reportar. Si eso pasa mientras la pausa está en curso, no se avisa a nadie, y tampoco se avisa después,
+  cuando termina la ventana: el estado Fuera de línea ya está en el mapa. Si el servidor recién se marca
+  como Fuera de línea después de que terminó la ventana, el aviso sale como siempre.
+- Una pausa no es un silenciador permanente. Si un servidor no debería volver a avisar nunca, retiralo.
+
+**Dónde encontrarlas.** Cada nodo tiene un menú de **Ciclo de vida**: en los detalles del nodo en el
+mapa (sección **Ciclo de vida**), en cada fila de la bandeja de **Revisión pendiente** y en cada fila de
+la vista de **Agentes**. Tiene **Retirar** (o **Volver a activar**), **Pausar alertas de desconexión**
+y, mientras haya una pausa en curso, **Terminar la pausa ahora**. Al retirar aparece enseguida un
+**Deshacer**. Estas acciones requieren el permiso **Gestionar topología** (`infra:manage`), y solo una
+persona puede hacerlas, nunca una cuenta de servicio. La única excepción es el agente que retira su
+propio nodo cuando se lo desinstala.
 
 ## Revisión pendiente
 
@@ -700,6 +751,16 @@ Cuando se detectan dos máquinas:
 - Recibís **una sola notificación** en la campana (no una por cada reporte). El título nombra a los dos
   hosts; el resumen arranca con el comando que lo soluciona (la campana recorta los resúmenes largos a
   una línea: pasá el mouse por encima para leerlo completo). La fila enlaza al mapa de topología.
+- Los **contenedores del host nuevo se registran bajo su propia entrada**. Llegan a Revisión pendiente
+  como cualquier contenedor, agrupados bajo el host nuevo, y **nunca tocan los contenedores del
+  servidor que ya estaba**. Tus reglas **no** los confirman automáticamente, aunque alguna coincida:
+  un host que lazyit sospecha que es un clon es para que lo mires vos. Una excepción: si dos clones
+  además comparten el **número de serie**, terminan en una sola entrada, y una vez que lazyit vio una
+  segunda máquina ahí deja de registrar los contenedores de esa entrada hasta que se corrija la
+  identidad, en lugar de dejar que las dos máquinas se marquen por turnos los contenedores como fuera
+  de línea.
+- Un host **hipervisor** en esta situación **no** reporta sus máquinas virtuales ni sus invitados LXC
+  hasta que se corrija su identidad.
 
 La solución está en las máquinas, no en lazyit, y **el comando cambia según la plataforma**: por eso
 la notificación nombra el que corresponde al host que reportó.
@@ -712,7 +773,9 @@ la notificación nombra el que corresponde al host que reportó.
 
 Corregí también la plantilla, o cada clon futuro repite el problema. Una vez que el clon tiene un ID
 propio, simplemente reporta como un host nuevo: confirmalo, o usá **Unificar con…** para plegarlo
-sobre la entrada que lazyit le creó mientras tanto.
+sobre la entrada que lazyit le creó mientras tanto. Sus contenedores también vuelven a reportarse bajo
+el host nuevo. La entrada que lazyit creó para el clon, y los contenedores que cuelgan de ella, dejan
+de reportar y quedan **fuera de línea**; descartalos una vez que confirmaste o unificaste el host nuevo.
 
 Todo esto necesita los datos de hardware que envía un agente **actual**, y necesita que ese agente
 efectivamente los tenga. Dos cosas dejan a un host fuera del control, y ambas son silenciosas:
@@ -967,7 +1030,10 @@ Lo que podés configurar ahí, en tres grupos:
   máquina), el segundo cuánto espera lazyit antes de marcarlo fuera de línea. El segundo valor tiene que
   ser mayor que el primero, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
   propios reportes — el editor no te deja guardar un valor que provoque eso, y lo aclara debajo de la
-  frase en lugar de después de que presiones Guardar.
+  frase en lugar de después de que presiones Guardar. Esa espera también se cuenta desde la última vez
+  que arrancó lazyit: después de una actualización, un reinicio o una caída de lazyit, ningún host se
+  marca fuera de línea hasta que tuvo ese tiempo para volver a informar, así que la vuelta no deja todo
+  el mapa fuera de línea ni llena la campana de falsas alarmas.
 - **Qué recolectan los agentes** — una grilla de casillas, una por recolector: hardware, discos,
   interfaces de red, software instalado, contenedores e invitados del hipervisor, más un tope estricto
   de cuántos paquetes puede informar un host. **Un recolector
@@ -1152,6 +1218,10 @@ distribución completa vive en una tabla porque una tabla que abriste vos no te 
 
 La vista es de solo lectura en el sentido más fuerte: **lazyit nunca le envía nada a un host.** Te
 dice lo que sabe y te da un comando para que lo ejecutes vos.
+
+La vista tiene una segunda sección, **Software vigilado**, en el selector de arriba: los mismos hosts,
+contados por los paquetes que tienen en vez de por la versión del agente. Tiene su propia sección más
+abajo: [Software vigilado](#software-vigilado).
 
 ### El comando de actualización
 
@@ -1356,6 +1426,77 @@ desaparecer al servidor de tu inventario y parecería una caída, mientras que u
 nunca lo hace. Ojo con el "a partir de esta versión": las instancias anteriores a esta release siguen
 rechazando un reporte que mencione algo que no reconocen, así que si vas a correr agentes que se
 actualizan por su cuenta, actualizá primero la instancia.
+
+## Software vigilado
+
+Cada agente envía la lista de paquetes instalados en su host, y la pestaña **Software** de cada host
+muestra esa lista. El **software vigilado** responde la pregunta que no se puede responder de a un host
+por vez: *en todo el parque, ¿qué versiones de `openssl` hay, y dónde falta?*
+
+Abrí **Activos › Topología › Agentes** y cambiá a **Software vigilado** arriba de la vista. Agregá los
+paquetes que tu equipo sigue de cerca —normalmente los 10 a 30 que revisás cada Patch Tuesday— y cada
+uno tiene su tarjeta:
+
+> **openssl** — sobre 17 hosts con agente: 11 en `3.0.13`, 2 en `1.1.1w`, 1 sin el paquete, 3
+> desconocidos.
+
+- **Las versiones**, cada una con cuántos hosts la tienen. Un host con dos versiones instaladas (dos
+  kernels, dos runtimes lado a lado) cuenta en ambas, así que las versiones pueden sumar más que los
+  hosts que tienen el paquete. Un paquete que el agente listó sin versión tiene su propia línea, *Sin
+  versión reportada*.
+- **No lo tienen** — hosts cuya última lista de paquetes **no** nombra el paquete.
+- **Desconocidos** — hosts de los que lazyit no puede decir nada. Se cuentan aparte de los que no lo
+  tienen a propósito (ver más abajo).
+
+Cada número abre los hosts que tiene detrás, de a una página, cada uno con un enlace a su nodo en el
+mapa. La fila de cada host dice además qué tan vieja es la lista de paquetes con la que se lo evalúa: un
+host sin reportar sigue contando, según su última lista. Un host **retirado** no cuenta para nada: está
+dado de baja, así que ni tiene una versión ni le falta una (ver
+[Servidores retirados y alertas pausadas](#servidores-retirados-y-alertas-pausadas)).
+
+**Es una distribución, nada más.** lazyit cuenta versiones; no las juzga. No hay "desactualizado", ni
+marca de fin de soporte, ni cruce con vulnerabilidades: lazyit no tiene contra qué fuente compararlas, y
+funciona completamente sin conexión. Las versiones se listan por **cuántos hosts tienen cada una**, no
+por número de versión: la primera línea es la versión más común, no la más nueva.
+
+**Los nombres se comparan exactos.** Escribí el nombre del paquete tal como lo reporta el agente. Los
+espacios y las mayúsculas no importan (`OpenSSL` y `openssl` son el mismo paquete vigilado), pero no se
+junta nada más: no hay comodines, y `libssl3` y `libssl3:amd64`, o un programa de Windows cuyo nombre
+incluye su versión, son nombres distintos. Ante la duda, copiá el nombre de la pestaña **Software** de
+un host.
+
+### No tenerlo no es lo mismo que desconocido
+
+**No lo tiene** solo se dice de un host cuyo agente efectivamente listó sus paquetes y este no estaba. Un
+host del que lazyit no puede decir nada es **desconocido**, con el motivo en su fila:
+
+- **Sin lista de paquetes** — el host no tiene ninguna lista guardada. Eso es lo que deja **desactivar
+  la recolección de software**: en **Configuración → Agentes de inventario**, o en el propio host
+  (`LAZYIT_COLLECT_SOFTWARE=false`). También es el estado de un host que todavía no envió una lista.
+- **Excluido por la configuración de agentes** — el nombre coincide con un patrón de exclusión de
+  paquetes de la configuración de agentes, así que al agente se le pidió no reportarlo.
+
+Así, desactivar la recolección de software para un grupo de hosts nunca hace que todos los paquetes
+vigilados parezcan faltar en ellos: simplemente pasan a desconocidos.
+
+Hay cosas que todavía pueden hacer que un host figure **sin el paquete** aunque lo tenga: un **límite
+de paquetes** lo bastante bajo como para dejarlo afuera de la lista, o una exclusión configurada solo
+en el archivo de configuración del propio host o para una sola cuenta de servicio, que lazyit no ve. Si
+un host sin el paquete te sorprende, abrí su pestaña **Software**.
+
+### Quién lo ve y quién lo cambia
+
+- **Verlo** requiere el mismo permiso que ver la topología: la lista solo suma lo que la pestaña
+  **Software** de cada host ya les muestra a esas mismas personas.
+- **Agregar y quitar** un paquete requiere permiso para administrar la topología, y lo tiene que hacer
+  una persona que inició sesión en lazyit: el token de una cuenta de servicio no puede cambiar la lista.
+  Quitar un paquete solo lo saca de la lista: nada cambia en ningún host, y podés volver a agregarlo
+  cuando quieras. La lista admite hasta 100 paquetes.
+
+> **Tratá esta vista como sensible.** Una lista de qué versiones corren en qué máquinas es justo el
+> mapa que buscaría un atacante. La ve cualquiera que pueda ver la topología. Si un grupo de hosts
+> tiene que quedar afuera, desactivá la recolección de software para ellos en la configuración de
+> agentes: sus paquetes dejan de recolectarse y guardarse, y aquí aparecen como desconocidos.
 
 ## Qué sigue
 

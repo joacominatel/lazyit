@@ -179,6 +179,61 @@ describe("filterAgentFleetNodes", () => {
   });
 });
 
+describe("retired hosts (#1701) — rows, but outside every other view", () => {
+  const RETIRED = "2026-10-20T00:00:00.000Z";
+  const rows = [
+    node({
+      id: "gone",
+      label: "gone-01",
+      versionBucket: "majorBehind",
+      status: "OFFLINE",
+      degraded: true,
+      retiredAt: RETIRED,
+    }),
+    node({ id: "live", label: "live-01", versionBucket: "majorBehind" }),
+    node({ id: "quiet", label: "quiet-01", versionBucket: "current", status: "OFFLINE" }),
+  ];
+
+  test("ALL still shows a retired host; `retired` shows only retired hosts", () => {
+    expect(filterAgentFleetNodes(rows, { q: "", filter: "ALL" }).map((n) => n.id)).toEqual([
+      "gone",
+      "live",
+      "quiet",
+    ]);
+    expect(filterAgentFleetNodes(rows, { q: "", filter: "retired" }).map((n) => n.id)).toEqual([
+      "gone",
+    ]);
+  });
+
+  test("every other view leaves it out, and agrees with the summary's count", () => {
+    const summary = summarizeAgentFleet(rows);
+    expect(summary.retired).toBe(1);
+    for (const bucket of ["majorBehind", "behind", "unknown", "current"] as const) {
+      expect(filterAgentFleetNodes(rows, { q: "", filter: bucket })).toHaveLength(summary[bucket]);
+    }
+    expect(filterAgentFleetNodes(rows, { q: "", filter: "notReporting" }).map((n) => n.id)).toEqual([
+      "quiet",
+    ]);
+    expect(filterAgentFleetNodes(rows, { q: "", filter: "degraded" })).toHaveLength(summary.degraded);
+    expect(filterAgentFleetNodes(rows, { q: "", filter: "retired" })).toHaveLength(summary.retired ?? 0);
+  });
+
+  test("a retired host is never offered an update", () => {
+    expect(isAgentUpdatable(rows[0])).toBe(false);
+    expect(isAgentUpdatable(rows[1])).toBe(true);
+    const hosts = agentFleetUpdateGroups(rows, "https://lazyit.example.com").flatMap((group) =>
+      group.hosts.map((host) => host.label),
+    );
+    expect(hosts).toContain("live-01");
+    expect(hosts).not.toContain("gone-01");
+  });
+
+  test("an unknown `retired` param still degrades to ALL on an older build's bookmark", () => {
+    expect(agentFleetFilterFromParam("retired")).toBe("retired");
+    expect(agentFleetFilterFromParam("retird")).toBe("ALL");
+  });
+});
+
 describe("isAgentUpdatable — the only gate on the update affordance (ADR-0094 §8)", () => {
   test("behind and a MAJOR behind, and nothing else", () => {
     expect(isAgentUpdatable({ versionBucket: "majorBehind" })).toBe(true);

@@ -238,7 +238,8 @@
       "unknown": "versión desconocida",
       "current": "al día",
       "notReporting": "sin reportar",
-      "degraded": "reportando incompleto"
+      "degraded": "reportando incompleto",
+      "retired": "retirados"
     },
     "columns": {
       "host": "Host",
@@ -312,6 +313,84 @@
       "verify": "Después, revisá el host sin esperar a que reporte:",
       "rerunSafe": "Volver a ejecutar el instalador es seguro en un host que ya tiene el agente: la descarga se verifica por checksum, el binario se prueba antes de activar nada, tu configuración existente se combina en vez de reemplazarse, y el host mantiene su identidad en lazyit. En un host que ya está al día, no hace nada.",
       "close": "Cerrar"
+    }
+  },
+  "fleetSection": {
+    "aria": "Sección de la vista Agentes",
+    "agents": "Agentes",
+    "software": "Software vigilado"
+  },
+  "software": {
+    "title": "Software vigilado",
+    "intro": "Los paquetes que tu equipo sigue de cerca, cada uno contado en todos los hosts que ejecutan el agente de reporte: qué versiones están instaladas y en cuántos hosts, qué hosts no lo tienen y de qué hosts lazyit no puede decir nada. Es solo una distribución: lazyit no juzga si una versión es vieja, está fuera de soporte o es vulnerable.",
+    "sensitive": "Esta vista es sensible: un mapa de qué versiones corren dónde es justo lo que buscaría un atacante. La ve cualquiera que pueda ver Topología. Para dejar afuera un grupo de hosts, desactivá la recolección de software para ellos en la configuración de agentes: a partir de ahí aparecen aquí como desconocidos. <link>Más información en el Manual.</link>",
+    "refresh": "Actualizar",
+    "loadError": "No se pudo cargar el software vigilado.",
+    "empty": {
+      "title": "Todavía no hay paquetes vigilados",
+      "description": "Agregá el nombre exacto de un paquete que te importe —openssl, openssh-server, curl— y lazyit lo cuenta en todos los hosts con agente.",
+      "descriptionReadOnly": "Nadie agregó un paquete todavía. Alguien que pueda administrar la topología puede agregar los paquetes que tu equipo quiere seguir."
+    },
+    "add": {
+      "label": "Agregar un paquete",
+      "placeholder": "openssl",
+      "submit": "Agregar",
+      "help": "El nombre exacto del paquete tal como lo reporta el agente: sin comodines, y un sufijo de arquitectura como :amd64 es otro nombre. {count} de {limit} en uso.",
+      "normalized": "Se guardará como <code>{name}</code>.",
+      "duplicate": "{name} ya está en la lista.",
+      "invalid": "Ese nombre es demasiado largo para un nombre de paquete.",
+      "limit": "La lista está completa ({limit} paquetes). Quitá uno para agregar otro.",
+      "added": "{name} se agregó a la lista.",
+      "error": "No se pudo agregar el paquete.",
+      "forbidden": "Solo una persona que haya iniciado sesión con permiso para administrar la topología puede cambiar la lista."
+    },
+    "remove": {
+      "label": "Quitar {name} de la lista",
+      "removed": "{name} se quitó de la lista.",
+      "error": "No se pudo quitar el paquete."
+    },
+    "presence": {
+      "INSTALLED": "lo tienen",
+      "MISSING": "no lo tienen",
+      "UNKNOWN": "desconocidos"
+    },
+    "watch": {
+      "addedBy": "Agregado por {name} · {date}",
+      "added": "Agregado el {date}",
+      "hostsTotal": "{count, plural, one {Sobre # host con agente} other {Sobre # hosts con agente}}",
+      "noHosts": "Todavía ningún host ejecuta el agente de reporte, así que no hay nada que contar.",
+      "unknownNote": "{count, plural, one {# host es desconocido, no faltante:} other {# hosts son desconocidos, no faltantes:}} lazyit no tiene una lista de paquetes de ellos (la recolección de software está desactivada o nunca enviaron una), o la configuración de agentes excluye este nombre. Abrí la lista para ver el motivo de cada host.",
+      "versionsTitle": "Versiones",
+      "versionsNote": "Ordenadas por cuántos hosts tienen cada versión, no por número de versión. Un host con dos versiones instaladas cuenta en ambas.",
+      "noVersion": "Sin versión reportada",
+      "hosts": "{count, plural, one {# host} other {# hosts}}",
+      "showAll": "Mostrar las {count} versiones",
+      "showFewer": "Mostrar menos"
+    },
+    "hosts": {
+      "bucket": {
+        "INSTALLED": "hosts que lo tienen",
+        "MISSING": "hosts que no lo tienen",
+        "UNKNOWN": "hosts de los que lazyit no puede decir nada"
+      },
+      "bucketVersion": "versión {version}",
+      "bucketNoVersion": "listado sin versión",
+      "description": "{count, plural, =0 {Ningún host} one {# host} other {# hosts}}, por nombre. Abrí uno para verlo en el mapa.",
+      "loadError": "No se pudieron cargar estos hosts.",
+      "empty": "Ya no hay hosts en este grupo: puede que hayan reportado desde que se cargó la página.",
+      "missingDetail": "No figura en su última lista de paquetes",
+      "noVersion": "sin versión",
+      "reason": {
+        "NOT_COLLECTED": "Desconocido: no hay lista de paquetes guardada; la recolección de software está desactivada para este host o nunca envió una",
+        "EXCLUDED_BY_POLICY": "Desconocido: la configuración de agentes excluye este nombre, así que el agente no lo reporta"
+      },
+      "collected": "Lista de paquetes recolectada {time}",
+      "lastReport": "Último reporte {time}",
+      "neverReported": "Nunca reportó",
+      "flags": {
+        "pending": "Revisión pendiente",
+        "offline": "Sin reportar"
+      }
     }
   },
   "tidy": {
@@ -529,7 +608,8 @@
       "hostDisksCount": "Cantidad de discos",
       "hostHardwareSerial": "Número de serie",
       "containerImage": "Imagen del contenedor",
-      "containerImageDigest": "Digest de la imagen"
+      "containerImageDigest": "Digest de la imagen",
+      "nodeLifecycle": "Ciclo de vida"
     }
   },
   "delete": {
@@ -635,5 +715,38 @@
     "authorUnknown": "Autor ya no está en el directorio",
     "lastMatched": "{count, plural, one {Usada # vez} other {Usada # veces}}, la última el {when}",
     "neverMatched": "Todavía no se usó"
+  },
+  "lifecycle": {
+    "retired": "Retirado",
+    "retiredSince": "Retirado el {at}. Ya no se vigila su actividad; vuelve solo si el equipo reporta de nuevo.",
+    "snoozed": "Alertas pausadas",
+    "snoozedUntil": "Alertas de desconexión pausadas hasta el {at}",
+    "menu": "Ciclo de vida",
+    "menuAria": "Retirar o pausar alertas de {label}",
+    "retire": "Retirar",
+    "retireHint": "Dado de baja, no desconectado: sigue en el mapa con su historial, deja de vigilarse y su activo no cambia.",
+    "unretire": "Volver a activar",
+    "snooze": "Pausar alertas de desconexión",
+    "snoozeChange": "Cambiar la pausa",
+    "unsnooze": "Terminar la pausa ahora",
+    "preset": {
+      "4h": "Durante 4 horas",
+      "1d": "Durante 1 día",
+      "3d": "Durante 3 días",
+      "7d": "Durante 1 semana",
+      "30d": "Durante 30 días"
+    },
+    "retiredToast": "{label} retirado",
+    "retiredToastDescription": "No se marcará como desconectado ni se avisará de nuevo. Si vuelve a reportar, se reactiva solo.",
+    "unretiredToast": "{label} vuelve a vigilarse",
+    "snoozedToast": "Alertas de desconexión de {label} pausadas hasta el {at}",
+    "unsnoozedToast": "Las alertas de desconexión de {label} vuelven a estar activas",
+    "undo": "Deshacer",
+    "error": "No se pudo actualizar el nodo",
+    "value": {
+      "active": "activo",
+      "retired": "retirado"
+    },
+    "sectionDescription": "Retira un nodo dado de baja: conserva su historial y su activo, y vuelve solo si reporta de nuevo. Pausa las alertas de desconexión durante un mantenimiento planificado; el estado sigue cambiando."
   }
 }

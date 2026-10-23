@@ -6,6 +6,8 @@ import {
   type AccessRequestStatus,
   type CreateAccessRequest,
   type DenyAccessRequest,
+  type MyAccessRequestListPage,
+  MyAccessRequestListPageSchema,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 
@@ -64,14 +66,15 @@ export async function getAccessRequests(
  * The CALLER's OWN access requests (`GET /access-requests/mine`) — pending + decided history. A
  * SELF-SCOPE read: any authenticated human, no `accessRequest:read` (a VIEWER lacks it), so it powers
  * the self-service `/profile` tracking list and the "already requested?" check on application detail.
+ * An approved request carries the coarse `provisioning` status of its grant (#1700).
  */
 export async function getMyAccessRequests(
   { limit }: { limit?: number } = {},
-): Promise<AccessRequestListPage> {
+): Promise<MyAccessRequestListPage> {
   const params = new URLSearchParams();
   if (limit !== undefined) params.set("limit", String(limit));
   const qs = params.toString();
-  return AccessRequestListPageSchema.parse(
+  return MyAccessRequestListPageSchema.parse(
     await apiFetch<unknown>(qs ? `${BASE}/mine?${qs}` : `${BASE}/mine`),
   );
 }

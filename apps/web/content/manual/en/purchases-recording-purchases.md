@@ -45,9 +45,10 @@ license line changes its application, so it needs **Record & edit purchases** *a
 applications. [Reading a document with AI](#reading-a-document-with-ai) needs **Record & edit purchases**
 *and* the permission to use the AI assistant.
 
-Anyone who can view purchases can download the list with **Export CSV**: one row per purchase matching
-the current search and filters, with its totals and receipt state, for a finance hand-off — see
-[Exporting data](/help/notifications-activity-data-export).
+Anyone who can view purchases can download the list with **Export**, as **CSV** or as an **Excel
+(.xlsx)** workbook: one row per purchase matching the current search and filters, with its totals and
+receipt state, for a finance hand-off. In the Excel file the totals are numbers and the dates are real
+dates — see [Exporting data](/help/notifications-activity-data-export).
 
 ## Recording a purchase
 
@@ -93,6 +94,19 @@ keeps what you typed. The running total is shown under the lines.
 
 After saving, lines are edited, added and removed on the purchase's page. A line can be removed only
 while no asset has been received on it.
+
+**Changing a line's price when assets are linked.** When you save a new unit price on an asset line that
+already has assets, lazyit asks **Update cost on linked assets?** and lists each linked asset with its cost
+now and the new one. The rule is *follow unless overridden*:
+
+- An asset whose cost is still the **old** purchase price — or that has no cost — is **ticked**.
+- An asset whose cost was **changed by hand** is marked **Overridden** and left unticked; tick it if it
+  should follow anyway.
+- Nothing changes until you choose **Update**; **Keep their costs** leaves every asset as it is. The
+  currency label moves with the cost.
+
+Each updated asset records the change in its history, and the purchase's activity log records it once.
+You need permission to edit both purchases and assets to see this step.
 
 ## Currency is a label
 
@@ -180,6 +194,38 @@ serial in it. And a code that won't read can always be typed.
 The camera needs your browser's permission and a secure (HTTPS) connection. Without a camera, or if you
 deny access, the form says so and you type or paste the serials as before.
 
+### Receiving a whole delivery
+
+When one delivery brings units for **several lines** — the laptops and the docks in the same courier run —
+receive it in one go with **Receive delivery**, the main part of the **Receive** button at the top of the
+purchase (its arrow lists the lines one by one, for the full single-line form). On *Pending units*, each
+purchase has its own **Receive delivery** button.
+
+The sheet has one row for each **asset** or **consumable** line still waiting for units that you may
+receive — receiving assets needs permission to edit purchases and assets, and receiving into stock to edit
+purchases and consumables. License and *Other* lines are never in it.
+
+- Every row **starts at 0**: count what actually arrived with **−** and **+** (or type the number). Rows
+  left at 0 are not received.
+- On an asset row with at least one unit, a **Serial numbers** box opens. As in a single receive, the
+  **count follows the serials** you paste or scan. **Scan** opens the camera under that row and fills
+  **that line** — on a phone, scan the line you are on, choose **Done**, then move to the next.
+- A line with **no model** (or a consumable line with no consumable) asks for one in its row; it is saved
+  on the line before its units are received, so the next delivery already has it.
+- **Every unit in this delivery** sets the values all asset units share: the **purchase date** (the
+  invoice date, or today when there is none), the **status** (*In storage*) and the **location** (where the
+  purchase is delivered). The cost, company and warranty come from each line, exactly as when you receive
+  one line, and the warranty end follows the date you choose. Consumable lines only add their count to
+  stock.
+- **Delivery note photo** is optional. On a phone it offers the camera; the photo (or a PDF) is added to the
+  purchase's [documents](#documents) with the type *Delivery note*.
+
+**Receive** then receives each line **on its own**, one after the other, so a delivery can **partly**
+succeed. The result shows every line: the units received, the units that could not be created and why, or
+that the line was not received at all (for example, if it was changed meanwhile) — fix that line and receive
+it again; nothing else is undone. Receiving more than a line expects shows the usual warning and
+**Raise the line** offer in its row.
+
 ## Receiving into stock
 
 A **consumable** line is received into its consumable's stock, not as assets. Choose **Receive** on the
@@ -232,8 +278,12 @@ Assets bought before you started recording purchases — or registered by hand �
 purchase line afterwards. There are three ways in:
 
 - On the purchase, **Link existing assets** in a line's menu: search and tick the assets. The list starts
-  filtered to the line's model and to assets **not linked to a purchase**; remove a chip to widen it (an
-  asset already on another purchase can still be moved here, see below).
+  filtered to the line's model, to assets **not linked to a purchase**, and to assets **dated near the
+  order** — within 90 days either side of the order date (or the invoice date, or the day the purchase was
+  recorded, when there is no order date). An asset's date here is its purchase date, or the day it was
+  added to lazyit when it has none. (Opened from **Pending units**, the chip does not look at the invoice
+  date: with no order date it uses the day the purchase was recorded.) Remove a chip to widen the list (an asset already on another purchase can
+  still be moved here, see below).
 - On an asset that is not linked, **Link to purchase** in its **Purchase** panel.
 - On the **Assets** list, select several rows and choose **Purchase › Link to purchase** in the selection bar. Then
   pick the purchase and the line — lines of the same model come first.
@@ -304,16 +354,27 @@ and leaves *Pending units*; when it was the last pending line, the purchase read
 
 The **Pending units** tab lists every line still waiting for units, **grouped by purchase, oldest order
 first** — the weekly check, and the screen to open at the warehouse door. Draft and cancelled purchases,
-*Other* lines and lines whose remainder was cancelled are not there. Filter it by supplier.
+*Other* lines and lines whose remainder was cancelled are not there. Filter it by supplier, or switch on
+**Overdue only** to keep just the purchases whose expected delivery date has passed. The address of the
+filtered tab can be bookmarked or shared.
 
 Each line shows "x of y received" and what is still pending, with **Receive** and, in its menu, **Link
 existing assets** and **Cancel remaining units**. On a consumable line, **Receive** opens
 [Receive into stock](#receiving-into-stock), and there is nothing to link. A license line offers
 [Apply license](#applying-a-license) instead. A purchase whose **expected delivery** date has passed is
-marked **Overdue**.
+marked **Overdue**. **Receive delivery** on a purchase receives several of its lines at once — see
+[Receiving a whole delivery](#receiving-a-whole-delivery).
 
-**Export CSV** on the tab downloads every pending line, filtered by supplier when one is set — see
-[Exporting data](/help/notifications-activity-data-export).
+A purchase is overdue from the day **after** its expected delivery date, counted on your own calendar day:
+a purchase due today is not late yet, and one without an expected date never is.
+
+**Export CSV** on the tab downloads every pending line, with the same supplier and *Overdue only* filters
+as the tab — see [Exporting data](/help/notifications-activity-data-export).
+
+**On the dashboard.** People who can view purchases also see a **Pending deliveries** row in the
+dashboard's *Needs attention* list while anything is waiting: "Pending deliveries: 3 purchases · 7 units",
+adding "· 1 overdue" when some are late. It opens this tab — already on *Overdue only* when something is
+overdue. Like the other rows, you can dismiss it from your dashboard.
 
 ## Documents
 
@@ -332,9 +393,9 @@ asset; changing it is recorded in the activity log.
 The documents are **shared, not copied**: every asset linked to the purchase lists the same files in its
 **Purchase** panel.
 
-> **Backups.** Uploaded files are stored on the server's file volume, which is **not yet covered by the
-> database backup** — the Documents section says so too. Until backup support ships, keep your own copy of
-> any invoice, order or delivery note you need to keep.
+> **Backups.** Uploaded files are stored on the server's file volume. lazyit's backup archives that volume
+> together with every database backup (unless your administrator has switched that archive off), so a restore brings invoices, orders and delivery notes back with
+> their purchases — see [Backups & restore](/help/deployment-operations-backups-restore).
 
 ## Reading a document with AI
 
@@ -421,7 +482,10 @@ handy for a warranty claim — and the purchase's documents, ready to download.
   the asset's own cost, currency and dates stay visible in *Details*, as before.
 - **Differs from purchase** marks the price when the asset's own purchase cost is different — another
   amount, or another currency label. Only the cost is compared: dates legitimately differ per delivery.
-  lazyit never corrects the cost on its own; edit the asset if it should match.
+  lazyit never corrects the cost on its own. If the asset should match, **Apply purchase value** next to the
+  marker copies the purchase's price — with its currency label — onto the asset after you confirm; the
+  asset's history and the purchase's activity log both record it. It is offered to people who can edit both
+  purchases and assets, while the purchase is not archived.
 - If the purchase was **archived**, the panel still says where the asset came from, marked as archived,
   without its documents.
 - An asset that is not linked shows the panel only to someone who can link it, with **Link to purchase**.
@@ -433,7 +497,8 @@ added, edited or removed a line — with a price or quantity change shown as *be
 linked, moved or unlinked units, who received stock on a consumable line, who applied seats from a license
 line, who cancelled remaining units (with the reason), who added or removed a document or changed its type,
 who read a document with AI (and with which provider — never the values read), whether the purchase was
-created from selected assets, and whether its supplier was merged into another one. It cannot be edited or
+created from selected assets, who updated linked assets from the purchase's values (after a price change, or
+with *Apply purchase value*), and whether its supplier was merged into another one. It cannot be edited or
 deleted.
 
 ## Suppliers
@@ -445,6 +510,18 @@ is on the application).
 A supplier needs only a **name**. It can also hold a **tax ID**, a **website**, a **sales contact** and a
 separate **support / RMA contact** — handy when a warranty claim comes up — and notes. Its page lists the
 purchases made from it.
+
+**Spend per year.** The supplier's page also shows how much was spent with it each year, one row per
+**currency label** — amounts in different currencies are never converted or added together, and amounts
+with no currency are shown apart as *No currency*. What counts:
+
+- the year of the purchase's **order date**, or of the day the purchase was recorded when it has none;
+- ordered and received purchases — **not** drafts or cancelled ones, and not archived ones;
+- each line's units that were **not cancelled**, times its unit price. Lines with no price add nothing; when
+  a year has some, its total is marked **partial** with how many lines have no price.
+
+A total too large to hold reads *Too large to display*. The purchase count next to each total says how many
+purchases it covers.
 
 Names and tax IDs are not unique, so lazyit never refuses a duplicate; it suggests instead. Typing a
 tax ID that another supplier already has tells you whose it is.

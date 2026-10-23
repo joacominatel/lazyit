@@ -3,7 +3,7 @@ title: "Purchases — pre-implementation technical analysis"
 tags: [purchases, research, architecture, data-model]
 status: draft
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-22
 ---
 
 # Purchase Orders: pre-implementation technical analysis
@@ -55,7 +55,7 @@ updated: 2026-10-02
 - **Missing pieces:**
   - **Reading a PO from a file.** There is no PDF or OCR library in the repo.
   - **AI chat cannot take files.** It is text-only (`packages/shared/src/schemas/ai-run.ts:203-206`, `apps/api/src/ai/providers/aisdk-chat-model.ts:109-110`), and file attachments in chat are an explicit v1 non-goal (`docs/ai-assistant/_synthesis.md:670`).
-  - **Uploaded files are not backed up.** The attachments volume is outside every backup (`docs/05-runbooks/backups.md:33,83-92`).
+  - **Uploaded files are not backed up.** The attachments volume is outside every backup (`docs/05-runbooks/backups.md:33,83-92`). *Historical — closed 2026-10-21 (#1467): the backup sidecar now archives the volume ([[backups]] item 7).*
 - **Recommendation:**
   - **Data model:** a thin PO with three new tables: `Supplier`, `PurchaseOrder`, `PurchaseOrderLine`. Add one nullable `Asset.purchaseOrderLineId` and an append-only `PurchaseOrderEvent` log.
   - **Asset fields stay the source of truth.** PO values are copied onto an asset (a snapshot) when it is generated from or linked to a PO, after the user confirms. Nothing that reads asset purchase fields today has to change.
@@ -115,7 +115,7 @@ Brand and model are modelled as `AssetModel` (a free-text `manufacturer` plus a 
 | ADR-0040/0046, `docs/01-architecture/authorization.md` | Permissions are catalog-as-code `domain:action` strings, resolved from the database, enforced by `@RequirePermission`. Reads are seeded to all roles except the tighter tiers (`VIEWER_DENIED_READS`, `ADMIN_ONLY_READS`; §4). **There is no field-level authorization.** `Asset.purchaseCost` is visible to anyone with `asset:read`, VIEWERs included. |
 | Seed-once ledger | A new permission gets its role defaults exactly once on deploy (`schema.prisma:292-305`, `AppliedRolePermissionDefault`), so the permission side of the upgrade is safe with no data migration. |
 | ADR-0029 | Store text as written and sanitize when rendering. PO notes, supplier text and extracted text are untrusted wherever they are displayed. |
-| ADR-0082 | Attachments: one polymorphic model, file type detected from the bytes against an allowlist (SVG/HTML rejected), served only from the API behind the parent record's permission, 25 MB per document, 5 GB total budget. **Not backed up** (accepted gap). |
+| ADR-0082 | Attachments: one polymorphic model, file type detected from the bytes against an allowlist (SVG/HTML rejected), served only from the API behind the parent record's permission, 25 MB per document, 5 GB total budget. **Not backed up** (accepted gap at the time; closed 2026-10-21, #1467). |
 | INVARIANTS INV-1/8, INV-SA-2/4 | Authorization comes from the database. Service accounts are fail-closed. Every audited row records the actor in exactly one of the human or service-account columns, enforced by a CHECK constraint. Any new PO log table must copy this pattern (`authorization.md` §7). |
 | AI INV-AI-2/3/4 (`docs/ai-assistant/security.md:866-884`) | AI tools run through the same pipeline as the HTTP routes. A chat mutation needs a single-use human approval. **Stored content is data, never authority.** A supplier's PDF is untrusted content. |
 | AI tool coverage | `apps/api/src/ai/core/tool-coverage.spec.ts` fails CI if **any** registered controller method is not decided in a toolset ("leaves no handler undecided"). Every new PO route needs an exposed or excluded decision. |
@@ -136,7 +136,7 @@ Brand and model are modelled as `AssetModel` (a free-text `manufacturer` plus a 
   - Uploads streamed to disk (multer `diskStorage`), type detected from the bytes, and raster images re-encoded with sharp in a sandboxed worker.
   - Serving from the API only, with hardened headers; a daily cleanup sweep for orphaned files.
 - **Extending to POs:** add a `PURCHASE_ORDER` value to `AttachmentEntityType` (the schema comment already plans for new types), a new `SURFACE` entry reusing the ASSET allowlist, and a controller guarded by `purchaseOrder:read/write`.
-- **Gap:** the volume is **not backed up** (`docs/05-runbooks/backups.md:33, 83-92`). PO documents are financial evidence, which raises the stakes of that gap.
+- **Gap:** the volume is **not backed up** (`docs/05-runbooks/backups.md:33, 83-92`). PO documents are financial evidence, which raises the stakes of that gap. *Historical — closed 2026-10-21 (#1467).*
 - **No antivirus scanning**, by decision (ADR-0082, alternatives section).
 
 ### 3.2 Making the feature optional
@@ -347,7 +347,7 @@ Adds `orderNumber?` and `supplier?` free-text columns to `Asset` (Snipe-IT style
 
 1. **Scope creep into procurement** (approvals, budgets, invoices, 3-way match, supplier portals) against the IT-native positioning (`vision.md:24-33`). The ADR has to set hard limits.
 2. **int4 money overflow** for currencies with large nominal amounts. Per-unit amounts already share the asset limit; header amounts (tax, shipping) are at risk; stored totals would overflow. Mitigation: derive totals in the app. A BigInt or Decimal type would be a second money convention, which ADR-0088 rejected.
-3. **Attachments not backed up.** A disk loss loses every PO document while the PO rows survive with broken links.
+3. **Attachments not backed up.** A disk loss loses every PO document while the PO rows survive with broken links. *Historical — closed 2026-10-21 (#1467): the attachments tarball is backed up beside each DB dump.*
 4. **Extraction quality and trust.** Models can invent or misread values; cost and token use grow with page count; capability differs per provider (compatible and local models). Mitigation: draft only, human review, no tools during extraction.
 5. **Prompt injection through supplier documents.** With no tools during extraction, the worst case is wrong field values. In chat, the untrusted marker forces per-action approval (INV-AI-4).
 6. **Financial documents leave the instance** to the configured provider. The AI settings card has to disclose it, as is already done for web search (`security.md:827-831`).
@@ -409,6 +409,7 @@ Adds `orderNumber?` and `supplier?` free-text columns to `Asset` (Snipe-IT style
     - **Recommendation: the second.** Smaller, reuses the attachment security model, avoids re-sending the PDF on every turn and the extra conversation-retention work.
 15. **Backup gap for PO documents.**
     - Options: ship with the existing accepted gap and a loud warning / raise the priority of the deferred attachments backup sidecar first.
+    - *Outcome:* the epic shipped with the warning; the backup followed on 2026-10-21 (#1467).
     - **Recommendation: raise the sidecar's priority** so it lands before or alongside Phase 1. At minimum, a Manual warning on the PO page.
 16. **Backfill of existing assets.**
     - Options: none / manual linking only / a helper that groups assets into a PO.

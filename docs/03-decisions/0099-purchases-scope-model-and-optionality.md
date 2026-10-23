@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-05
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -212,11 +212,17 @@ assets:
   value" switch checks them all;
 - cost and its currency always move together;
 - **unlinking never clears values**, and editing a line price afterwards only *proposes* updates to linked
-  assets (pre-checked only where the asset still holds the old purchase value). *Not built — deferred
-  (2026-10-02, #1489):* a price edit changes no linked asset and proposes nothing; the asset's *Purchase*
-  panel marks the line price *Differs from purchase*, and an ordinary asset edit changes the cost
+  assets (pre-checked only where the asset still holds the old purchase value). *Deferred on 2026-10-02
+  (#1489)* — until #1502, a price edit changed no linked asset and proposed nothing
   ([[#Decisions while building (Phase 1 flows web, #1475)]]). The rule that nothing is ever overwritten
-  silently holds either way.
+  silently holds throughout. *Built (API), 2026-10-21, #1502:* the proposal's routes —
+  `POST /purchase-orders/:id/lines/:lineId/linked-preview` (pre-checked only where the asset still holds the
+  previous price the caller names) and `…/apply-to-linked` (one transaction, the link's lock order, audited
+  on both sides). Not exposed to the AI ([[purchase-order-line]]). *Built (web), 2026-10-22, #1502:* saving a
+  new unit price on an asset line with linked assets opens *Update cost on linked assets?* — each asset current
+  → new, pre-checked per the preview, a hand-changed cost marked *overridden*; the apply is chunked to the
+  200-id cap. The asset's *Purchase* panel offers *Apply purchase value* beside *Differs from purchase*, through
+  the same route, after a confirmation. Both need `purchaseOrder:write` + `asset:write`.
 
 A divergence between an asset's cost and its line is shown ("differs from purchase"); it is never
 corrected silently.
@@ -371,6 +377,14 @@ Until it does, the purchase's documents panel says plainly that files are not in
 deferred by the CEO; the purchase's documents panel warns that the files are not in the backup, and
 [[backups]] item 7 carries the manual workaround.
 
+*Delivered (2026-10-21, #1467):* the backup sidecar archives the attachments volume on every run, right
+after the app DB dump and under the same timestamp, with the dump's schedule and offsite hook and its own
+7-day retention
+([[backups]] item 7, [[0082-attachments-storage]] amendment 2026-10-21). Purchase documents are in the
+backup from the first run after an update. The documents panel's notice now says the files are in the scheduled
+backup, unless an administrator has switched the attachments archive off (#1690); it is a quiet line, no longer a
+warning.
+
 ### 13. Phasing
 
 | Phase | Scope |
@@ -391,12 +405,35 @@ selected assets" (2). They are **not built**; they are tracked as #1495 (sub-iss
 list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
 
 *Since built:* merging suppliers (2026-10-03, #1496) — see [[#Merge duplicate suppliers (2026-10-03, #1496)]].
+*Receive delivery* across lines (2026-10-21, #1497) — see [[#Decisions while building (Receive delivery, #1497)]].
 
 *Built since (2026-10-03, #1499):* **global search for purchases and suppliers**. Both are found in the ⌘K
 palette (a purchase also by its line descriptions) only by a principal holding `purchaseOrder:read` — D-A
 applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
 The design, the projections and the upgrade path are in [[0035-search-architecture]]'s 2026-10-03
 amendment.
+
+*Built since (2026-10-21, #1500, API):* the **supplier's yearly totals**, as the CEO scoped them on #1495 the same
+day. `GET /suppliers/:id` adds `yearlyTotals: [{ year, currency, amount, unpricedLines, purchaseCount }]`: the year
+of the order date, else of when the purchase was recorded; live purchases that are neither draft nor cancelled,
+each line as (quantity − cancelled) × unit price; grouped per label by the shared rule of §5 — never converted,
+`amount: null` beyond `MONEY_MAX`. No migration; the field is optional in the contract. The rules are on
+[[supplier]]. *Built (web), 2026-10-22, #1500:* the supplier page shows them as *Spend per year* — one row per
+year and label, *No currency* apart, a `null` amount as too large to display, unpriced lines as a partial-total
+hint.
+
+*Built (API), 2026-10-21 (#1498, #1503, #1502):* `GET /purchase-orders/pending-summary` (the dashboard's
+*Pending deliveries* counts, over exactly the Pending units rows; `/dashboard/summary` unchanged);
+`expectedBefore` (the viewer's today) on the pending lines, their export and the `purchase_pending_lines`
+tool, for *Overdue only*; `acquiredFrom` / `acquiredTo` on the asset list and export, for the link picker's
+*created near the order date* chip; and the line price follow-up of §2 ([[purchase-order]],
+[[purchase-order-line]], [[asset]]). *Built (web), 2026-10-22 (#1498, #1503, #1502):* the dashboard's *Needs
+attention* row "Pending deliveries: N purchases · M units (· K overdue)", for `purchaseOrder:read`, linking to
+*Pending units* (on *Overdue only* when K > 0); *Overdue only* on *Pending units* (`?overdue=1`, the viewer's
+local day as `expectedBefore`, the export following); the link picker's removable *near the order date* chip,
+on by default — ±90 whole UTC days around the order date, else the invoice date, else the day the purchase was
+recorded (opened from *Pending units*, whose rows carry no invoice date, it falls back straight to the recorded
+day); and the price follow-up of §2.
 
 ### 14. Upgrade safety
 
@@ -440,11 +477,12 @@ amendment.
   - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
   - Viewers keep seeing asset cost while purchases and an asset's purchase provenance are hidden from
     them; there is no field-level authorization.
-  - Purchase documents raise the stakes of the attachments backup gap until §12 ships (#1467, deferred).
+  - Purchase documents raised the stakes of the attachments backup gap until §12 shipped (#1467, delivered
+    2026-10-21).
   - A supplier's PDF goes to the configured AI provider when extraction is on; the disclosure and the
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
-  - The attachments backup sidecar (§12, #1467 — deferred by the CEO).
+  - ~~The attachments backup sidecar (§12, #1467 — deferred by the CEO).~~ Delivered 2026-10-21 (#1467).
   - The items §13 lists as not built (#1495).
   - The four questions left open at acceptance are settled below; none remains open before Phase 1.
 
@@ -751,7 +789,7 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   (not built, #1473). *The label is built in #1476 (below), with its screens (Phase 1b web, below).*
 - **Pending units** is its own tab (`/purchases/pending`): open lines grouped by purchase, oldest order first,
   filtered by supplier, a purchase past its expected date marked *Overdue* (text, not colour alone). The
-  proposal's *Overdue only* toggle is not built — the list has no such filter.
+  proposal's *Overdue only* toggle was not built then; *built 2026-10-22 (#1503)* — §13.
 - **The purchase's activity log** now reads the flows' events (units received, linked, moved, cancelled with
   the reason; documents added and removed), still tolerant of a type it does not know.
 - **Contract gaps, left to a backend follow-up.** (1) Nothing lists the assets linked to a line or purchase,
@@ -896,7 +934,7 @@ None reopens a CEO decision.
   by the list read only, never by the CSV export.
 - **The link picker starts on assets not linked to a purchase** (the UX proposal's chip), removable, beside the
   model chip; without `purchaseOrder:read` the chip does not exist. The proposal's *created within 90 days of
-  the order date* chip is not built — the list has no such filter.
+  the order date* chip was not built then; *built 2026-10-22 (#1503)* as the *near the order date* chip — §13.
 - **The asset panel titles the purchase by the purchase's `createdAt`**, closing #1475's fallback to the line's
   date; a read without it still falls back to the line's.
 - **The activity log reads `STOCK_RECEIVED` and `DOCUMENT_UPDATED`** (set, changed, removed), and the label on
@@ -1447,6 +1485,52 @@ the same gate (`purchaseOrder:write` and the extraction status `available`), the
 pipeline — a `DRAFT` holder purchase, the file attached, the review opened with `?read=1`. Nothing in §11 or in
 [[#Decisions while building (Phase 2 web, #1477)|Phase 2 web]] changes. Web only: no API, contract or CSP change.
 
+## Decisions while building (Receive delivery, #1497)
+
+The UX proposal's *Receive delivery* sheet (§6, persona question 8), scoped by the CEO on 2026-10-21 (#1495):
+web only, asset and consumable lines, shared delivery values, an inline model pick and an optional delivery-note
+photo. CTO decisions taken while building it, under D-D; none reopens a CEO decision.
+
+- **No new API: one request per line, through the existing routes.** An `ASSET` row posts
+  `…/lines/:lineId/receive` with exactly the single receive's body (`buildReceiveFromLinePayload` over the
+  line's prefill), a `CONSUMABLE` row posts `…/lines/:lineId/receive-stock { quantity }`. The rows run one after
+  the other, in line order, so each line keeps its own per-unit loop and asset-tag commits (§4,
+  [[0089-bulk-receiving-and-checkout-acknowledgement]]) and a delivery can partly succeed: the result reads per
+  line — received, partly received with the units that failed and why, or not received with the request's error.
+  Nothing is rolled back; a failed line is fixed and received again. Rejected: a batch route — a second write
+  path for the same units, and an all-or-nothing transaction that would contradict ADR-0089's partial success.
+- **Which lines.** One row per `ASSET` line when the viewer holds `purchaseOrder:write` + `asset:write`, and per
+  `CONSUMABLE` line with `purchaseOrder:write` + `consumable:write` — the routes' own checks — each only while it
+  has pending units, as the per-line *Receive*. License lines (applied, not received), *Other* lines and any kind
+  a newer build writes never appear. The rows are fixed when the sheet opens; each reads its line fresh.
+- **Every row starts at 0**, never at the pending count: a delivery is counted at the door, and a line left at 0
+  is not received (UX proposal §6). The serials box opens on an asset row once it counts a unit, and the count
+  then follows the serials (the stepper is locked while there are any), so a mismatch cannot be sent.
+- **One set of delivery values for every asset unit**: the purchase date (the invoice date, else the viewer's
+  today — never the order date), the status (*In storage*) and the location (the purchase's delivery location,
+  omitted from the body while unchanged so the API applies the purchase's own value). The warranty end is
+  recomputed from the shared date and each line's warranty months; cost, currency label and company come from
+  each line, as in the single receive. Per-line overrides beyond those three stay in the single-line form,
+  reached from the same header button. Consumable rows send only their count; the shared values do not apply.
+- **An unmapped line is not a dead end**, as in #1475 and #1476: an asset line without a model (with *+ New
+  model*) or a consumable line without a consumable asks for one in its row, and it is saved on the line (a
+  logged line update) just before that line is received.
+- **The delivery-note photo** is one optional file, checked on the client against the documents allowlist
+  (images and PDF only in the picker, so a phone offers its camera and hands over a JPEG) and uploaded **first**
+  through the purchase documents upload, with the type label *Delivery note* in the viewer's language (*Remito*
+  in Spanish) — the label is free text (§10). A failed upload never stops the units; the result says so.
+- **Scanning fills the row it was opened for.** *Scan* sits on each asset row and opens the `/assets/scan`
+  camera (`SerialScanner`) inline under it — one row at a time — so on a phone the line being scanned is the one
+  on screen. Rejected: one scanner for the sheet that follows the focused field — focus is lost as soon as the
+  camera's *Done* takes it.
+- **Entry points.** The purchase header's *Receive* is a split button (UX proposal §3.a): its main action opens
+  the sheet, its menu lists the receivable lines for the full single-line forms; it shows only when the viewer
+  can receive at least one line. On *Pending units*, each purchase's header row has *Receive delivery*. The sheet
+  reads the purchase itself, so both pass only its id.
+- **Over-receipt** is warned per row with *Raise the line to n*, as everywhere else (§4).
+- **Upgrade.** Web only: no migration, contract, permission or API change; existing purchases, lines and
+  documents are read as they are.
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1456,4 +1540,4 @@ pipeline — a `DRAFT` holder purchase, the file attached, the review opened wit
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1507 · #1508 · #1516
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1497 · #1507 · #1508 · #1516

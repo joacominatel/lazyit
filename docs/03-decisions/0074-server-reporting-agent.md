@@ -3,7 +3,7 @@ title: "ADR-0074: Server reporting agent — self-installing Linux collector tha
 tags: [adr, infra, topology, agent, inventory, backend, frontend, shared, devops, security]
 status: accepted
 created: 2026-06-27
-updated: 2026-10-15
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -274,6 +274,61 @@ confirm, merge and discard routes are unchanged, so an operator who never opens 
 sees exactly the tray they had, plus a filter bar. Nothing in the report path changes for an instance
 with no rules beyond one indexed read that returns nothing.
 
+**Amendment (2026-10-21, #1684 — epic #1146 item 4) — the software inventory gets one cross-host read:
+a watchlist, distribution only.** §1 made installed software part of what the agent reports, and until
+now the only way to read it was one host at a time. An operator now keeps a short list of package names
+(the [[software-watch]] entity — a normalized name, created and soft-deleted, nothing else, at most 100
+live) and each one is answered with **one fleet-wide distribution** computed on read from the package
+lists agents already store in `InfraNode.specs.software`: package → versions → host counts, the hosts
+**missing** it, and the hosts we cannot speak for. The CEO's call (Q12 on #1146) fixes the scope:
+
+- **Distribution only.** No version comparison, no "outdated", no EOL flag. A version is an opaque
+  string that is counted; the buckets are ordered by host count and then as plain text, never as
+  versions.
+- **No CVE matching** — §6's air-gapped promise rules out the continuously-updated feed it needs — and
+  **no product normalization**: a watch matches by exact name after whitespace-collapse, trim and
+  lower-case, and nothing folds architecture suffixes, versions or vendor spellings together.
+- **MISSING is never a guess.** It is only said of a host that **stores** a package list without the
+  name. A host storing no list is **UNKNOWN** (`NOT_COLLECTED`) — the stored absence is exactly what
+  `collect.software: false` at any of the three #1140 scopes, or a host's local veto, leaves behind,
+  because a report with `softwareState: 'disabled'` clears the list (the §2/§3 #1142 amendment). The
+  read uses that evidence instead of re-resolving the policy, because a node carries no reporter
+  attribution (§8, #1136) and so the service-account layer cannot be resolved per node. A host whose
+  list lacks the name but whose resolvable policy (instance default + node override) excludes it by
+  glob is UNKNOWN too (`EXCLUDED_BY_POLICY`); an exclusion set only at the service-account scope or in
+  the host's local config is the stated residual.
+- **The population** is the fleet view's: live agent-reported hosts, container and guest children
+  excluded, PENDING and OFFLINE included. Retired hosts leave it when #1146 Q11 ships.
+- **Gates.** Reads `infra:read` — the same gate the per-node `specs` drill-in already sits behind, so
+  nothing new is exposed; writes `infra:manage` + human-only, like every other operator-authored infra
+  configuration. The AI tool registry leaves the routes unexposed.
+
+Nothing travels toward a host: no new collector, no policy change, no contract change on the wire. The
+contract change is `@lazyit/shared` read shapes only (in `agent-fleet.ts`, beside the fleet view).
+
+**Rejected.** *An on-demand query by name with no stored list* — it would work, but the point is the
+Patch-Tuesday glance at the same 10–30 packages, and a list everyone on the team shares is the cheap way
+to get it. *Glob or substring watches* — a pattern turns a distribution into a search and reopens the
+normalization question by the back door. *Treating "no list" as "missing"* — it would report every host
+whose operator turned software collection off as lacking every watched package.
+
+**Upgrade safety.** One **additive** migration: a new table (`software_watches`) with a live-only
+partial unique index on the name; no existing table touched, nothing to backfill. An upgraded instance
+has an empty watchlist, and because the distribution is computed on read, the first watch an operator
+adds is complete immediately over every host's already-stored list.
+
+**Web surface (2026-10-22, #1684).** The watchlist is the second section of **Topology › Agents**
+(`?view=agents&fleet=software`), not a fourth Topology view and not a navigation entry: it answers a
+fleet-wide question over the same agent-reported hosts as the fleet view. Each watch shows the presence
+split (installed / missing / unknown — UNKNOWN drawn as its own hatched segment, never merged into
+MISSING) and the version buckets **in the API's host-count order, with a line saying it is not a version
+order**; every count opens a paged drill-in whose rows link to the node and carry the UNKNOWN reason.
+Add and remove render for `infra:manage` (the web session is always a person, so the human-only guard is
+not separately visible; its 403 is still worded). The view states that the inventory is sensitive and
+that turning software collection off moves hosts to unknown. The pure rules (section param, drill-in
+query — the null bucket is sent as `version=`, never as an absent key — and the add-form verdict) live
+in `apps/web/lib/agent/software-watch.ts`; the Manual section is on the reporting-agent page.
+
 ### §2 — The report contract (`@lazyit/shared`)
 
 One zod schema, `AgentReportSchema`, is the single source of truth for the wire — imported by **both**
@@ -472,6 +527,13 @@ hard-400s a report carrying a key it does not know, so a v2 agent reporting to a
 still refused. The property is real and it is the entire point of the change; it simply only protects
 instances from this version forward, which is exactly why the loosening had to land *before* any agent
 ships on its own schedule rather than alongside the first one that does.
+
+**Amendment (2026-10-22, #1701) — `decommissioning`.** The report root gains an optional
+`decommissioning: boolean` (`.catch(undefined)`, so an unreadable value degrades to an ordinary report,
+never to a retirement), and the ack gains an optional `retired: boolean`. The installer's uninstall
+(`install.sh --uninstall`, `install.ps1 -Uninstall`) runs the new `lazyit-agent decommission`, which
+sends `decommissioning: true` once, before the token is destroyed. The server's handling of that report,
+and the version-skew story in both directions, are in the §4 amendment of the same date.
 
 ### §3 — Ingestion & reconciliation
 
@@ -845,6 +907,40 @@ surfacing for repair rather than a state anyone lives in. **The guarantee that m
 to revisit — a colliding host's report never retires its peer's container children — is asserted by
 test** (`infra.service.spec.ts`, `#1158`), not left as a comment. Revisit if
 `infra.identity_conflict` turns out to fire often in practice.
+
+*(2026-10-21, #1158 — the gap is closed:)* the deferral's cost turned out not to exist. On every
+ordinary ingest branch the node is found or created by **exact equality** on the reported key, so the
+node's `externalId` and the reported one are the same string, and deriving the container key from the
+**node** leaves every existing child key byte-identical. And because the collision branch never
+reconciled containers, nothing was ever written under a clone's prefix — there is nothing to re-key.
+So the container key is now derived from the **node's** `externalId` everywhere, and the collision
+branch reconciles containers under the clone's own key, `<externalId>#<discriminator>/container/<name>`.
+The peer's prefix (`<externalId>/container/`) and the clone's cannot select each other's rows, so the
+guarantee above still holds and is still pinned by test — now with reconciliation running. Three
+deliberate limits:
+
+- **Two cases keep the old behaviour** (no reconcile, nothing retired), because the derived key would
+  not be unique to one machine: a discriminator ending in `/container`, whose child keys would parse
+  back to a shorter key (AUD-102 only swaps a full separator); and a clone node on which a **second
+  machine has been seen** — two clones sharing a first serial land on ONE clone node, and reconciling
+  there would bring the thrash back. The second case is **sticky**: the first report whose MACs share
+  nothing with the ones the node held stamps `identityConflict.sharedKeySeenAt`, carried across every
+  re-stamp like `detectedAt`, and while it is present the node reconciles no containers. A per-report
+  comparison is not enough — it forgets the second machine as soon as one machine reports twice in a
+  row, and that report would retire the other's children. The mark clears only with the marker: the
+  machine-id is fixed, the node is merged (a merge drops the marker) or discarded (the next report
+  starts a fresh node). A genuine NIC swap on a lone clone therefore also stops its container tracking
+  until then — deliberately: wrongly untracked is recoverable, a cross-retire thrash is not.
+- **A clone's children are not offered to the auto-confirm rules.** They land PENDING, like the
+  clone's own node: a host under suspicion is for a human to look at.
+- **Guests are unchanged**: the collision branch still reconciles no `/guest/` children and runs no
+  identity join ([[0095-hypervisor-guest-inventory]], "Known limitations").
+
+**What an operator sees on upgrade:** a clone that reports containers gets them as new PENDING
+proposals under the clone's entry on its next report (each one charged to the enrollment budget like
+any new child). Nothing already in the inventory changes. When the clone's machine-id is later fixed it
+reports as a new host, as before, and so do its containers; the clone's old entry and its children stop
+checking in and go OFFLINE through the staleness sweep — discard them, or **Merge into…** the host.
 
 **`identityConflict` is re-stamped on every report**, for as long as the collision lasts, keeping the
 `detectedAt` of the FIRST detection. A marker written only when the node was created would be gone the
@@ -1319,6 +1415,124 @@ channel, and any report whose policy resolution failed — so an instance that c
 behaves exactly as it did. The sweep filters the per-node comparison
 in memory over the candidates already past the shortest possible threshold; that is a deliberate
 bound for a few-dozen-host product, not a claim that it scales indefinitely.
+
+**Amendment (2026-10-21, #1674 — split from #1146 item 8) — no OFFLINE flip for one window after the
+server boots.** While the API is down nobody is listening, so after any outage, upgrade or host reboot
+every agent's `lastReportedAt` is old for a reason that says nothing about the host. Without a grace the
+first sweeps flipped the whole estate `OFFLINE` and broadcast one `infra.agent_offline` per node — every
+one of them a lie, undone by the next report — and a bell that cries wolf on every restart is one nobody
+reads. The sweep now measures a node's silence from **`max(lastReportedAt, process boot)`** instead of
+from `lastReportedAt`: for one staleness window after the API process boots — the node's **own**
+window, the served `policyStaleAfterSeconds` or the `INFRA_AGENT_STALE_AFTER_MS` fallback, so no new
+setting — a node is not flipped, and therefore not announced. The window is long enough by
+construction: an agent's due-ness keys on its last **successful** report (§7), so a host whose report
+failed during the outage retries on its very next tick, well inside its window. The boundary is the
+existing strict comparison — exactly one window after boot is still inside, a millisecond later is not
+— and a node that reported after boot is judged on that report, so the grace never lengthens a
+post-boot silence. Nothing else is suppressed: reports are ingested normally during the grace, and a
+node already `OFFLINE` stays so until it reports. The boot instant is per process, captured when the
+provider is constructed (seconds before the listener opens); that is the right scope for the one-API
+single-host topology ([[0015-deployment-model]]), and it would stay right under replicas — a replica
+that stayed up while another restarted kept receiving reports, so its own sweep is not fooled, while a
+full outage restarts every replica's grace. **Cost:** an agent that genuinely died during the outage,
+or in the window before it, is reported up to one window later than it would have been. The rest of
+#1146 item 8 — per-group routing, snooze windows, digests — remains open and still needs a product
+call.
+
+**Amendment (2026-10-22, #1701 — #1146 Q11 and Q15) — RETIRED is not OFFLINE, and an outage can be
+snoozed.** "Offline" and "gone" are different facts, and until now a decommissioned server was
+indistinguishable from a crashed one: both sat `OFFLINE` forever, and the only way out was a soft
+delete that took the node's history off the map. Two nullable columns were added on `InfraNode`, in one
+additive migration, so every existing row reads as before:
+
+- **`retiredAt` / `retiredById` — retire.** A retired node is **gone, not silent**. The sweeper's
+  candidate read **and** its conditional flip both carry `retiredAt IS NULL`, so a retired node is never
+  flipped `OFFLINE` and never announced, including one retired between the two statements. Its status
+  stays whatever it was, and its history, edges, position and linked Asset are untouched. The Asset is
+  **never** retired, disposed or otherwise written: retiring a server is not disposing of the hardware.
+  There are two ways a node is retired:
+  - **A human** — `POST /infra/nodes/:id/retire`, and `…/unretire` to reverse it. Both are under
+    `infra:manage` and human-only, like every other infra write that changes how a node is treated.
+    `retiredById` records the user.
+  - **The host itself** — the installer's uninstall runs `lazyit-agent decommission`, which sends one
+    last, fully collected report carrying `decommissioning: true` (§2). The installer runs it **after**
+    disarming the timer or scheduled task, because a later tick would report again and un-retire the
+    node. It runs **before** the binary, state and token are removed. The step is best-effort: a
+    failure never stops the uninstall, and it says how to retire the node by hand. The server retires **only** the node that
+    report's own `(reportingSource, externalId)` resolves to: the lookup an ordinary check-in makes, so
+    a token can retire only what it could already refresh. For a host whose machine-id collided (§3,
+    #1141), the same corroboration the ingest path runs picks the clone's own derived-key node, never
+    its peer, and refuses when it cannot name one. The decommissioning report ingests **nothing else**:
+    no facts, no liveness, no Asset. An unknown host is a `404`, and nothing is created.
+    The ack carries `retired: true`. `retiredById` stays null.
+
+  **A retired node that reports again is un-retired automatically.** A node that reports is, by
+  definition, not gone. That includes a container or guest child its host lists again. The refresh
+  that clears the two columns also appends a `FACT_CHANGED` row with fact `node.lifecycle`
+  (`retired → active`) to [[infra-node-fact-change]], so an operator who retired a host can see why it
+  came back. The agent's own decommission is recorded the same way (`active → retired`). A **human**
+  retire is not recorded there: that table belongs to the ingest path, and a human retire is curation,
+  attributed by `retiredById`.
+
+  The fleet read keeps a retired host as a row but counts it only under a new `summary.retired`. It is
+  not in `total`, the version buckets, `notReporting` or `degraded`, and not in the major-behind email
+  count. The software watchlist population excludes it ([[software-watch]]).
+- **`alertsSnoozedUntil` — a maintenance window.** While the instant is in the future, the sweeper
+  **still flips** the node `OFFLINE` (the map must stay true), but it emits **no**
+  `infra.agent_offline` notification, so neither the bell nor the email fires. The nudge is per
+  transition, and what decides it is **when the flip happens**: a node flipped while the window is
+  open is never announced, not even when the window ends, because it is already `OFFLINE` and no longer
+  a candidate. A node first flipped after the window ended is announced as usual. A past value is inert, so expiry needs no
+  job. Set by `PUT /infra/nodes/:id/snooze { until }` and cleared by `DELETE …/snooze`, both under
+  `infra:manage` and human-only. `until` must be in the future and at most
+  `INFRA_NODE_SNOOZE_MAX_DAYS` (90) days ahead: a host that should never alert again is retired, which
+  the map shows, rather than hidden behind a far-off date.
+
+**What was decided against.** Per the CEO's Q15 call, there is still no per-group routing and no digest.
+Retire did not get a new `InfraNodeState` or `InfraNodeStatus` value. Those enums answer "is it
+reviewed" and "is it reporting", and a retired node can be either, so retire is a timestamp beside them,
+not a member of them.
+
+**Version skew.** An API older than this amendment strips `decommissioning` (the report root is loose,
+#1138) and ingests the report as an ordinary check-in. The host then goes `OFFLINE` one window later
+and is announced, which is the pre-#1701 behaviour. That API's ack carries no `retired`, and the
+uninstaller says so, so the operator knows to retire the node by hand. An agent older than this
+amendment never sends the field.
+
+**Costs.**
+- A leaked `infra:report` token can now retire any node whose reporting key it knows. That is no new
+  power: the same token could already keep such a node `ONLINE` with forged check-ins, which hides an
+  outage more thoroughly. The real host's next report un-retires the node, and the transition is in
+  its history.
+- An admin cannot keep a host that is still reporting retired. The next report undoes the retire by
+  design, and silencing a host that is still reporting is what snooze is for.
+- ~~A decommissioned host's container and guest children are **not** retired with it.~~ **Changed
+  2026-10-22 (CEO decision, #1701 follow-up):** they are. See the amendment below.
+
+**Amendment (2026-10-22, #1701 follow-up) — a decommission also retires the host's children.** As
+first shipped, the decommissioning report retired only the host's own node. Its container and guest
+children then went stale on their own clock once the host stopped listing them, and each was
+announced as an outage, which is the tray full of ghosts that retire exists to prevent. The CEO
+decided the uninstall retires them too:
+
+- **Which children.** Every live child whose `source` is `AGENT` and that sits under the resolved
+  node's **own** key (`<key>/container/…` and `<key>/guest/…`) in the same reporting source. These are
+  the rows the ingest path's own reconcile touches. A clone's decommission therefore uses its derived
+  key and can never reach its peer's children, and a hand-drawn node is never retired.
+- **When none are retired.** The ingest path's refusals apply here too: a key that cannot scope child
+  keys unambiguously, and a clone node on which a second machine has been seen (#1158, sticky), retire
+  the host only.
+- **Recording and cost.** Each child retired is recorded as its own `node.lifecycle` row, within the
+  per-node hourly cap, so a 500-guest hypervisor costs a handful of statements, not a thousand.
+- **Even when the host was already retired.** The sweep runs then too, so a second uninstall picks up
+  a child the first one missed. It never fails the report: a failure is a warning, and the host stays
+  retired.
+- **Coming back.** A child its host lists again is un-retired by the ordinary refresh, as before.
+
+The installers were tightened in the same change. On Windows, `-Uninstall` stops a running
+scheduled-task instance before unregistering the task, so a report that was already in flight cannot
+land after the decommission and un-retire the node. It also gives the decommission step an overall
+two-minute cap, the same as the Linux installer's `timeout 120`.
 
 ### §5 — Auth & permission
 
@@ -2384,6 +2598,8 @@ would be a separate ADR and arguably a separate product).
 - Server-driven agent policy (the ack as the config channel, the fixed-tick interval inversion, the
   local veto, the three scopes): §7 Amendment (2026-08-01), issue #1140 — the consumer of contract
   v2's reserved `policyRevision`, with a §4 amendment making the staleness threshold per node.
+- The boot grace (no OFFLINE flip or `infra.agent_offline` nudge for one staleness window after the API
+  process boots): §4 Amendment (2026-10-21), issue #1674 — split from #1146 item 8.
 - A re-run authenticates with the token already on the host (`--keep-token` / `-KeepToken`, an
   explicit flag and a hard error against every other token source): §7 Amendment (2026-08-04), issue
   #1208 — the upgrade path stops needing a secret lazyit structurally cannot re-issue.
@@ -2396,3 +2612,5 @@ would be a separate ADR and arguably a separate product).
   the meaning *unchanged* is only safe once the wire can also say *disabled*. It reconciles #1147's
   raised body limit with #1134's bounded-but-nonzero refresh cost, and closes the gap the #1139
   container work left: `syncAssetSpecs` ran on the host path only.
+- The software watchlist (distribution only, MISSING vs UNKNOWN, `infra:read`): §1 Amendment
+  (2026-10-21), issue #1684 — epic #1146 item 4, CEO decision Q12. Entity: [[software-watch]].

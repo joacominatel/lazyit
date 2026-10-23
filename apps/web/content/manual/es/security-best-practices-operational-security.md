@@ -73,9 +73,14 @@ Cuando una credencial o una cuenta pudo quedar expuesta, trabaja en este orden.
 
 ### Se conectó a tu cuenta una app de IA que no reconocés
 
-lazyit te avisa la primera vez que una app de IA o un token personal nuevo se usa en tu cuenta. Si no
-fuiste vos, [revocala](/help/ai-assistant-connected-apps#revocar) enseguida y cambiá tu contraseña (eso
-también termina todas las demás conexiones), y avisale a un administrador.
+lazyit te avisa la primera vez que una app de IA o un token personal nuevo se usa en tu cuenta —en la
+campana, y por correo siempre que tu instancia envíe correos (este aviso de seguridad no se puede
+desactivar). Si no fuiste vos, [revocala](/help/ai-assistant-connected-apps#revocar) enseguida, o usá
+[Cerrar sesión en todos lados y desconectar las apps de IA](/help/getting-started-your-profile#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia) para terminar todas las sesiones y
+todas las conexiones de una vez —también con inicio de sesión único, donde cierra la sesión de lazyit en
+todos los dispositivos (cerrá sesión también en tu proveedor de inicio de sesión; lazyit no puede cerrar
+esa sesión). Cambiá tu contraseña (con inicio de sesión único, en tu proveedor de inicio de sesión) y
+avisale a un administrador.
 
 ### Un secreto compartido pudo filtrarse
 

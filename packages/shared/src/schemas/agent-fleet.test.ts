@@ -172,7 +172,28 @@ describe("summarizeAgentFleet", () => {
       behindTotal: 0,
       notReporting: 0,
       degraded: 0,
+      retired: 0,
     });
+  });
+
+  test("a RETIRED host is counted under `retired` only — it is gone, not behind or silent (#1701)", () => {
+    const summary = summarizeAgentFleet([
+      node({ versionBucket: "majorBehind", status: "OFFLINE", degraded: true, retiredAt: "2026-10-20T00:00:00.000Z" }),
+      node({ versionBucket: "current" }),
+    ]);
+    expect(summary).toMatchObject({
+      total: 1,
+      majorBehind: 0,
+      current: 1,
+      behindTotal: 0,
+      notReporting: 0,
+      degraded: 0,
+      retired: 1,
+    });
+  });
+
+  test("a row from an API that predates retirement (no `retiredAt`) counts as active", () => {
+    expect(summarizeAgentFleet([node({ retiredAt: undefined })]).total).toBe(1);
   });
 });
 

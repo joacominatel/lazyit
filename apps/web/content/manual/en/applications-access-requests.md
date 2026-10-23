@@ -69,6 +69,9 @@ request filed on someone's behalf, who filed it.
   create by hand (it runs any access workflows and is recorded in the application's access history).
 - **Deny** asks for a **reason**, which is required. The reason is shown to the requester so they know
   why.
+- If the person has been **deactivated or offboarded** since the request was filed, lazyit refuses to
+  approve it and the request stays pending. Deny it with a reason, or reactivate the person first if
+  they should get the access.
 
 Reviewing the queue needs the access-requests read permission; approving or denying needs the same
 permission as granting access. See [Roles & permissions](/help/permissions).
@@ -84,6 +87,9 @@ requests in the selected status.
 
 Open your **Profile** to see **My access requests** — every request you've raised and its current
 status (**Pending**, **Approved** or **Denied**). A denied request shows the reason the approver gave,
-and a request an approver filed for you says so.
+and a request an approver filed for you says so. An approved request whose access is still active also
+shows whether your account in the application has been set up yet — **No automation**, **Setup in progress**, **Set up** or
+**Waiting on IT** (see [Account setup status](/help/getting-started-your-profile#account-setup-status)). Once that
+access is revoked or expires, the request no longer shows a status.
 lazyit also notifies you the moment a decision is made — in your bell, and by email unless you opt out —
 so this list is the full history, not the only way to learn the outcome.

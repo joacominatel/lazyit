@@ -9,7 +9,8 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ChangePasswordResponse } from '@lazyit/shared';
-import type { Prisma, User } from '../../../generated/prisma/client';
+import type { Prisma } from '../../../generated/prisma/client';
+import type { UserRow } from '../../prisma/prisma-omit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { SmtpService } from '../../smtp/smtp.service';
@@ -99,7 +100,7 @@ export class PasswordLifecycleService {
     @Optional() stepUp?: PasswordStepUpVerifier,
   ) {
     this.sessions = sessions ?? new UserSessionStore(prisma);
-    this.stepUp = stepUp ?? new PasswordStepUpVerifier(credentials);
+    this.stepUp = stepUp ?? new PasswordStepUpVerifier(credentials, prisma);
   }
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
@@ -127,7 +128,7 @@ export class PasswordLifecycleService {
    * directoryOnly (handleLocal rejects those). Defensive re-checks are kept fail-closed regardless.
    */
   async changePassword(
-    user: User,
+    user: UserRow,
     currentPassword: string,
     newPassword: string,
     rememberMe = false,
@@ -308,7 +309,7 @@ export class PasswordLifecycleService {
    * non-existent / inactive / directory-only identifier. All the original cap/GC semantics are unchanged;
    * they simply moved here.
    */
-  private async issueResetToken(user: User): Promise<void> {
+  private async issueResetToken(user: UserRow): Promise<void> {
     // Opportunistic GC: drop this user's already-used or expired tokens so the table + the per-account cap
     // stay bounded. Best-effort (a failure never blocks the flow).
     try {
@@ -489,7 +490,7 @@ export class PasswordLifecycleService {
       // Checked BEFORE minting, so a disabled-email instance never accumulates orphan tokens.
       throw new AdminResetLinkError(
         'smtp-not-configured',
-        'Outbound email is not configured, so a reset link cannot be sent. Configure SMTP under Settings → Instance, or hand off a temporary password instead.',
+        'Outbound email is not configured, so a reset link cannot be sent. Configure it under Settings → Email, or hand off a temporary password instead.',
       );
     }
 

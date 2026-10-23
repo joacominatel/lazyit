@@ -23,6 +23,7 @@ import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { ArticlesService } from '../articles/articles.service';
 import { ExportService } from '../common/export';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 
@@ -96,11 +97,17 @@ describe('Application costPerSeat over HTTP — 64-bit minor units (ADR-0100)', 
     ),
     count: jest.fn(() => Promise.resolve(rows.size)),
   };
-  const prisma = {
+  const prisma: Record<string, unknown> = {
     application,
     accessGrant: { findMany: jest.fn().mockResolvedValue([]) },
-    $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    // No category named in these bodies, so the write's category lock (#1604) never runs.
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
+  // A list passes an array of reads; a write passes a callback, run against the same client.
+  prisma.$transaction = jest.fn(
+    (arg: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) =>
+      typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+  );
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -116,6 +123,7 @@ describe('Application costPerSeat over HTTP — 64-bit minor units (ADR-0100)', 
         { provide: AccessGrantsExportService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: ExportService, useValue: {} },
+        { provide: PermissionResolverService, useValue: {} },
         { provide: APP_GUARD, useClass: SignedInGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],

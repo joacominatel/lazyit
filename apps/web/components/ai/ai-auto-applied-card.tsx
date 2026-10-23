@@ -11,8 +11,7 @@ import { isKnownWarning } from "@/lib/ai/error-kinds";
 import { presentPreview } from "@/lib/ai/preview";
 import { localizedText } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
-import { cn } from "@/lib/utils";
-import { ApprovalValue, approvalStage, type ApprovalStage } from "./ai-approval-card";
+import { ApprovalActionSentence, ApprovalValue, approvalStage, type ApprovalStage } from "./ai-approval-card";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 import { AiPreviewTable } from "./ai-preview-table";
 import { useAiSentences } from "./use-ai-sentences";
@@ -74,9 +73,7 @@ export function AiAutoAppliedCard({
         <StatusBadge tone={TONE[stage] ?? "neutral"}>{t(`states.${stage}`)}</StatusBadge>
       </header>
       <div className="space-y-2 px-3 py-2">
-        <p className={cn("text-sm font-medium", model.action?.untrusted && "italic")}>
-          {model.action ? model.action.text : t("noAction")}
-        </p>
+        <ApprovalActionSentence action={model.action} className="text-sm font-medium" />
         {target && targetLabel && (
           <p className="text-muted-foreground">
             {t("target")}:{" "}

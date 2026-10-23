@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # RolePermission
@@ -19,8 +19,14 @@ is the **DB-first authorization source** ([[INVARIANTS]] INV-8) that answers tha
 binds a [[user]] `Role` to one permission literal from the frozen catalog.
 
 The three roles themselves stay **fixed** — `enum Role { ADMIN MEMBER VIEWER }` is unchanged. What
-became configurable is the *permissions* each role grants. This is **not** dynamic custom roles
-(deferred to a future ADR).
+became configurable is the *permissions* each role grants. There are no custom roles in the code.
+
+> [!note] Custom roles are decided, not built
+> [[0104-custom-roles]] (accepted 2026-10-21, #1560) supersedes the fixed-role part of
+> [[0046-roles-permissions-v2]]. Its design is a `roles` table with ADMIN, MEMBER and VIEWER as protected
+> system rows, a `users.role_key`, `role_grants` replacing this table, a new ADMIN-only `role:manage`, and
+> the INV-ROLE-1 subset rule. **The build is deferred** until there is a concrete first custom role.
+> Everything below describes the code as it runs today, and stays true until ADR-0104's U1 ships.
 
 ## Relationships
 
@@ -39,9 +45,16 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   never editable — the resolver short-circuits ADMIN to the whole catalog **without** a DB read, so a
   bad seed can never lock ADMIN out. The config endpoint refuses to write ADMIN rows. This keeps the
   last-admin / first-admin invariants intact (INV-7 + the ADR-0040 last-admin guard).
+- **Write implies read** (#1518, [[0046-roles-permissions-v2]] → *Amendment — write implies read*): a
+  role holding a non-read verb on a domain must hold that domain's `:read` (derived from the catalog as
+  `IMPLIED_READS`; `accessRequest:create`, `secret:fetch` and `infra:report` are exempt). `PUT
+  /config/permissions` refuses a NEW write-without-read with **400** `PERMISSION_READ_REQUIRED`; one the
+  stored rows already held (saved before the rule) is read back as it is and healed on the next save by
+  adding the read, never by dropping the write. The matrix editor turns the read on with the write.
 - **MEMBER + VIEWER are fully configurable** within the catalog. The matrix UI / `PUT /config/permissions`
   may grant MEMBER or VIEWER a `:delete` or a coarse verb (`settings:manage` / `user:manage` /
-  `accessGrant:grant`); the only guardrails are *ADMIN-immutable* + *catalog-membership*. The UI marks
+  `accessGrant:grant`); the guardrails are *ADMIN-immutable*, *catalog-membership* and *write implies
+  read* (above). The UI marks
   these ⚠ "Admin-level" and confirms, but the server does not block — an admin-initiated delegation is
   accepted by design. A delegated `user:manage` is bounded by the **role ceiling** (SEC-088, 2026-10-15):
   the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the
@@ -76,6 +89,24 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   role matrix (`PUT /config/permissions`) — but it is never *seeded* to them. This closed the
   long-standing read-authz gap (the old DEF-001 residual). See [[user]] and
   [[0046-roles-permissions-v2]] §4.
+- **`user:read` guards the directory, not every email.** It gates listing and browsing people
+  (`/users`, the users search facet, the user-keyed nested reads) and, per surface, a few embedded
+  emails. It is **not** a rule that a person's email is visible only with `user:read`:
+  - **Asset owners — visible with `asset:read` (decided 2026-10-21, #1636).** The asset list,
+    detail and assignment reads carry each active owner's email to every `asset:read` holder,
+    VIEWER included. The holder of an asset is part of the inventory record; see [[asset]] for the
+    reasoning.
+  - **Server owners — need `user:read` (#1627).** The infra node reads, which only borrow the linked
+    asset's owners, return `email: null` without `user:read` ([[infra-node]]).
+  - So granting a role `user:read` from the matrix reveals server owners' emails to it; revoking
+    it does not hide asset owners' emails from an `asset:read` holder.
+  - **The rest of an asset owner's record needs `user:read` (#1685).** Without it, an owner on any
+    asset read is only id, name, email and `deletedAt` — never role, `legajo`, `username` or
+    `directoryAttrs`.
+- **`user:read` gates the by-person filters (#1685).** `GET /assets?assignedToUserId=` (and the
+  export's), `GET /asset-assignments?userId=` and the AI `asset_search` tool's `assignedToUserId` answer
+  `403` without it: listing what a named person holds is a directory lookup, whatever the domain of the
+  route. `GET /assets/mine` (the caller's own assets) is a self-read and needs neither.
 - **Default grants are applied once per instance; revocations are durable** (issue #1314). The seed
   runs on every deploy, but it grants a default pair only when the seed-once ledger
   (`AppliedRolePermissionDefault`, below) has never recorded it, and it records the pair in the same
@@ -160,5 +191,5 @@ matrix. The `can()` infra (`useMyPermissions`/`useCan` over `/config/my-permissi
 all write/delete affordances ([[0046-roles-permissions-v2]] P6b/P7).
 
 Related: [[user]] · [[permission-audit-log]] · [[service-account-permission]] · [[shared-package]] ·
-[[0046-roles-permissions-v2]] · [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] ·
+[[0046-roles-permissions-v2]] · [[0104-custom-roles]] · [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] ·
 [[0006-soft-delete-and-auditing]] · [[INVARIANTS]]

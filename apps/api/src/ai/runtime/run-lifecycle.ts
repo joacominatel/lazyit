@@ -12,8 +12,13 @@ import {
   type AiToolErrorCode,
   type AiUsage,
 } from '@lazyit/shared';
-import type { AiRun, Prisma } from '../../../generated/prisma/client';
+import type {
+  AiConversation,
+  AiRun,
+  Prisma,
+} from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AppTransactionClient } from '../../prisma/prisma-omit';
 import { AiToolService } from '../core/ai-tool.service';
 import { toPendingAction } from '../core/pending-action';
 import {
@@ -32,8 +37,12 @@ import { AiInputRequests } from './input-requests';
 import { capToolOutput } from './limits';
 import {
   AI_MESSAGE_FORMAT_MODEL,
+  AI_MESSAGE_FORMAT_RUN,
   AI_MESSAGE_FORMAT_STEP,
+  AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
+  readRunRecord,
   readStepRecord,
+  readSystemPrompt,
   roleOf,
   type StepOutcome,
   type StepRecord,
@@ -144,7 +153,7 @@ export class AiRunLifecycle {
 
   /** Append rows after the conversation's last `seq` (append-only; `@@unique(conversationId, seq)`). */
   async append(
-    tx: Prisma.TransactionClient,
+    tx: AppTransactionClient,
     conversationId: string,
     runId: string | null,
     rows: readonly AppendRow[],
@@ -184,12 +193,55 @@ export class AiRunLifecycle {
   }
 
   /**
+   * The conversation's frozen system prompt: the `systemPrompt` column (#1675), else — on a conversation
+   * created before it, whose column is null — its legacy `lazyit-system-prompt-v1` row (never backfilled).
+   * Null when neither is readable: the conversation cannot continue on this build.
+   */
+  async frozenSystemPrompt(
+    conversation: Pick<AiConversation, 'id' | 'systemPrompt'>,
+  ): Promise<string | null> {
+    if (conversation.systemPrompt) return conversation.systemPrompt;
+    const legacy = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: conversation.id,
+        format: AI_MESSAGE_FORMAT_SYSTEM_PROMPT,
+      },
+      orderBy: { seq: 'asc' },
+      select: { content: true },
+    });
+    return legacy ? readSystemPrompt(legacy.content) : null;
+  }
+
+  /**
+   * The chat session epoch a human run is delegated under: the run's `sessionEpoch` column (#1675), else —
+   * on a run created before it, whose column is null — its legacy `lazyit-run-v1` row (never backfilled).
+   * Null when neither holds one (a service account's run, or a record this build cannot read).
+   */
+  async runSessionEpoch(
+    run: Pick<AiRun, 'id' | 'conversationId' | 'sessionEpoch'>,
+  ): Promise<number | null> {
+    if (typeof run.sessionEpoch === 'number') return run.sessionEpoch;
+    if (!run.conversationId) return null;
+    const legacy = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId: run.conversationId,
+        runId: run.id,
+        format: AI_MESSAGE_FORMAT_RUN,
+      },
+      select: { content: true },
+    });
+    return legacy
+      ? (readRunRecord(legacy.content)?.sessionEpoch ?? null)
+      : null;
+  }
+
+  /**
    * The conversation's open step: the latest step record when the latest provider message is the
    * assistant message it describes (its calls not answered yet); null when there is nothing to answer.
    */
   async openStep(
     conversationId: string,
-    db: Prisma.TransactionClient = this.prisma,
+    db: AppTransactionClient = this.prisma,
   ): Promise<StepRecord | null> {
     const rows = await db.aiMessage.findMany({
       where: { conversationId },
@@ -219,7 +271,7 @@ export class AiRunLifecycle {
   async outcomesOf(
     record: StepRecord,
     fallback: FallbackAnswer = NOT_EXECUTED,
-    db: Prisma.TransactionClient = this.prisma,
+    db: AppTransactionClient = this.prisma,
   ): Promise<ChatModelToolOutcome[]> {
     const byCall = new Map<string, StepOutcome>();
     for (const outcome of record.outcomes) {
@@ -278,9 +330,9 @@ export class AiRunLifecycle {
     conversationId: string,
     runId: string | null,
     fallback: FallbackAnswer = NOT_EXECUTED,
-    tx?: Prisma.TransactionClient,
+    tx?: AppTransactionClient,
   ): Promise<boolean> {
-    const answer = async (db: Prisma.TransactionClient): Promise<boolean> => {
+    const answer = async (db: AppTransactionClient): Promise<boolean> => {
       await db.$queryRaw`SELECT "id" FROM "ai_conversations" WHERE "id" = ${conversationId} FOR UPDATE`;
       const record = await this.openStep(conversationId, db);
       if (!record) return false;

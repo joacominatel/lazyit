@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # Code Conventions
@@ -38,6 +38,12 @@ Conventions for application code. Data-model conventions live in [[conventions]]
   `apps/api/src/common/money.ts`) and every body it writes (`…MoneyToDb`). A new money column gets the
   same pair of helpers there, and a test that reads it back over HTTP; there is no global
   `BigInt.prototype.toJSON`.
+- **Secret columns are omitted by default** ([[0105-prisma-global-omit-for-secret-columns]]): the
+  Prisma client leaves the columns in `PRISMA_GLOBAL_OMIT` (`apps/api/src/prisma/prisma-omit.ts`) out of
+  every result. A read that genuinely needs one opts in with `omit: { col: false }`,
+  `omit: includeOmitted('<model>')` or a `select` naming it, and never returns that row unprojected. A new
+  hash, token, ciphertext or key column goes into the constant in the same change (a schema spec fails
+  otherwise). Type a `tx` parameter as `AppTransactionClient`, not `Prisma.TransactionClient`.
 - **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
   reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
   guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
@@ -106,7 +112,9 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
     `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
     Carries an accessible name by default — list filters must name their search box.
   - `components/export-button.tsx` — `ExportButton` ({ `path`, `params`, `total`, `filename`,
-    `permission` }), the one CSV export of a list ([[0103-data-export-streaming-path]]). `params`
+    `permission`, optional `resource` }), the one export of a list ([[0103-data-export-streaming-path]]).
+    A `resource` in `DATA_EXPORT_XLSX_RESOURCES` turns it into a CSV / Excel menu (§11); without one
+    it is CSV only. `params`
     comes from the endpoint module's `…FilterParams` function, the same one the list read builds
     on, so the file holds every row matching the screen's filters. It renders only with the list's
     read permission, is disabled at `total` 0, warns instead of calling above the 100,000-row cap,
@@ -202,8 +210,10 @@ Symptoms and recovery: [[docker-build-troubleshooting]] § `error: lockfile had 
 
 - Unit tests **always**; core/complex logic gets thorough, many-cased testing. Priority is
   the application core, not scaffolding/UI. Full policy: [[0012-testing-strategy]].
-- Runners: **Jest** (`apps/api`) · **`bun test`** (`packages/shared`). Frontend unit tests and
-  e2e are **deferred**. No global coverage gate — rigor on the core via review.
+- Runners: **Jest** (`apps/api`) · **`bun test --isolate`** (`packages/shared`, the pure logic in
+  `apps/web`, `apps/agent` — via `bun run test`). Rely on isolation or restore what you stub — see
+  [[workflows]] § Testing. Frontend component tests and e2e are **deferred**. No global coverage
+  gate — rigor on the core via review.
 
 ## Workflow
 

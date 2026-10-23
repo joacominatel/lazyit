@@ -3,7 +3,7 @@ title: InfraNodeFactChange
 tags: [domain, entity, infra, topology, agent]
 status: accepted
 created: 2026-08-02
-updated: 2026-08-02
+updated: 2026-10-22
 ---
 
 # InfraNodeFactChange
@@ -93,6 +93,14 @@ written **only when something actually moved**, so a host nobody touched adds no
   report path — degrades to a warning and the report still acks. A host whose report 500s vanishes from
   the CMDB and shows OFFLINE; a history row that was not written costs one line in a timeline. Same
   posture as the agent-policy resolution, for the same reason.
+- **The retire lifecycle is recorded here too, but only its MACHINE transitions** (#1701,
+  [[0074-server-reporting-agent]] §4 amendment of 2026-10-22). A `FACT_CHANGED` row with fact
+  `node.lifecycle` (shared `INFRA_NODE_LIFECYCLE_FACT`) records `active → retired` when the host's own
+  agent decommissions it on uninstall (one row for the host and one for each container or guest child
+  retired with it), and `retired → active` when a retired node, or a retired
+  container or guest child, reports again and is un-retired automatically. A human retire or un-retire
+  is curation, not an ingest fact, so it writes no row here. It is attributed by `InfraNode.retiredById`
+  instead. Both rows go through the same capped, never-fail write path as every other row.
 - **Read-only, always.** Only the ingest path appends. There is no create/update/delete API, and the
   Changes tab offers no affordance to add or remove a row.
 - **Permissions** ([[0046-roles-permissions-v2]]): `infra:read` to read a node's history. There is no

@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # AccessGrant
@@ -57,6 +57,12 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
   rows, or the API returns `400` — don't grant access to a decommissioned app or a departed user.
+  The person must also be **active**: a deactivated person (`isActive = false`) cannot sign in, so
+  a grant to them is refused with `400 ACCESS_GRANT_PERSON_INACTIVE` (#1661). The check lives in the
+  one grant write path, so it covers `POST /access-grants` **and** every [[access-request]] approval,
+  self-filed or filed on someone's behalf — a request filed while the person was active and approved
+  after they were deactivated is refused and stays `PENDING`. A directory-only person is refused too
+  (they have no account).
 - **Referential integrity:** the required FKs are `onDelete: Restrict` — a [[user]] or
   [[application]] with grant rows **cannot be hard-deleted**.
 
@@ -132,8 +138,8 @@ Indexes: `@@index([userId])`, `@@index([applicationId])`. **No uniqueness constr
 `apps/api/src/access-grants/` (`AccessGrantsModule`). The authenticated principal is the actor on
 create/revoke (see the note above). Documented via Swagger ([[0018-api-documentation-swagger]]).
 
-- `POST /access-grants` — open a grant. `userId`/`applicationId` must be live → else `400` (FK
-  errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
+- `POST /access-grants` — open a grant. `userId`/`applicationId` must be live and the person active
+  → else `400` (FK errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
 - `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=&limit=&offset=&page=` —
   list, newest first, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to true**
   (`revokedAt = null`); `includeExpired` **defaults to true** (pass `false` to hide active grants
@@ -141,7 +147,9 @@ create/revoke (see the note above). Documented via Swagger ([[0018-api-documenta
 - `GET /access-grants/mine?activeOnly=&includeExpired=&limit=&offset=&page=` — the caller's **own**
   grants, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to false** (revoked
   history included). A self-read: any authenticated human, no `accessGrant:read` needed; the user id
-  comes only from the principal, never a parameter. Service accounts get `403`.
+  comes only from the principal, never a parameter. Service accounts get `403`. Each grant carries the
+  coarse `provisioning` status (#1700) — see [Provisioning status](#provisioning-status). Only this
+  self-read returns it; the admin lists do not.
 - `GET /access-grants/:id` — one by id (`404` if missing).
 - `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()` and the principal in
   `revokedById` or `revokedBySaId`. Already revoked, or revoked concurrently first → `409`.
@@ -159,13 +167,37 @@ Plus the natural sub-resource endpoints on the related entities:
 
 - `GET /users/:id/access-grants?activeOnly=&includeExpired=` — grants of one [[user]] (`404` if the
   user is missing/soft-deleted).
-- `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — grants on one [[application]].
+- `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — grants on one [[application]],
+  unpaged. Kept for older web clients; the Access tab moves to the paged route below.
+- `GET /applications/:id/access-grants/page?status=&accessLevel=&noAccessLevel=&q=&limit=&offset=&page=`
+  — one page of an application's grants with the filters run server-side (#1660,
+  [[0030-list-pagination-contract]] envelope `{ items, total, limit, offset }`, default 50, max 200):
+  - `status` (default `active`): `active` = not revoked; `expiring` = not revoked and `expiresAt`
+    within `GRANT_EXPIRING_WITHIN_DAYS` (30, the dashboard's default) **including** grants already past
+    expiry that the sweep has not revoked yet; `revoked`; `all`. Unknown → `400`.
+  - `accessLevel` — exact level (1-100 characters); `noAccessLevel=true` — only grants with no level.
+    Both at once → `400`.
+  - `q` — person search: each whitespace token must match the grantee's first name, last name or
+    email, case-insensitive (not accent-folded). An offboarded grantee stays searchable. `q` needs
+    **`user:read`** on top of `accessGrant:read` (`403` otherwise), because a search over names and
+    emails would otherwise reveal directory data the caller cannot list. At most 200 characters.
+  - The order follows the status and there is **no `sort`** param (`400`): `active`/`all` by person
+    (first name, last name), active before revoked, then newest grant; `expiring` soonest expiry
+    first; `revoked` newest revocation first. The `id` tie-break is always last.
+- `GET /applications/:id/access-grants/summary` — the Access tab's headline numbers over **all** the
+  application's grants (`ApplicationGrantSummarySchema`): `counts` (`active`, `expiring`, `expired`,
+  `revoked`, `all`), `levels` (`[{ accessLevel, count }]`, alphabetical, no level last),
+  `offboardedHolders` (distinct offboarded people still holding an active grant — `null` without
+  `user:read`) and `expiringWithinDays`.
 
 **Export** — the access-review artefact ([[0103-data-export-streaming-path]]).
 `GET /access-grants/export?userId=&applicationId=&activeOnly=&includeExpired=` and
 `GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` stream as CSV every grant the
 matching list returns: same `accessGrant:read` (a VIEWER gets 403 by default), same filters and
 defaults, and the per-application route `404`s on a missing or archived application like its list.
+The per-application export also takes the paged route's `status`, `accessLevel`, `noAccessLevel` and
+`q` (#1660), with the same rules (including `user:read` for `q`), so the file holds exactly the rows
+the filtered Access tab shows. Mixing `status` with `activeOnly`/`includeExpired` is a `400`.
 Columns: application, user, user email, access level, status (`active`, `expired` = past `expiresAt`
 and not yet swept, `revoked`), granted at, granted by, expires at, revoked at, revoked by, notes,
 grant ID. A service-account actor reads `<name> (service account)`. The names are joined, so each one
@@ -174,12 +206,49 @@ follows the read the screen would need to resolve it: user names and the email c
 Without it the cell holds the id the list already returns, and the email column is left out. Every
 export writes a [[data-export-log]] row.
 
+## Provisioning status
+
+The coarse, requester-facing answer to "was my account in the application set up?" (#1700, CEO
+decision Q2 on #1344). Run history stays behind `workflow:read` ([[workflow-engine/security]] §4), so a
+grantee cannot read it; instead the self-scope reads carry one of four values
+(`GrantProvisioningSchema` in `@lazyit/shared`):
+
+| The grant's latest `ACCESS_GRANTED` [[workflow-run]] | `provisioning` | Shown as |
+| --- | --- | --- |
+| none | `NONE` | No automation |
+| `PENDING`, `RUNNING` | `IN_PROGRESS` | Setup in progress |
+| `SUCCEEDED` | `DONE` | Set up |
+| `AWAITING_INPUT` (a manual step), `FAILED`, `COMPENSATED` | `WAITING_ON_IT` | Waiting on IT |
+
+- **Derived on read, no column, no migration.** The source is the latest run linked by `accessGrantId`
+  with trigger `ACCESS_GRANTED`: highest `replaySeq` first (a replay-latest clones to seq + 1,
+  [[0057-retry-fix-and-replay]]), then the newest. A retry resumes the same run, so its status moves
+  with it. A deprovision (`ACCESS_REVOKED`) run is not provisioning and never changes the value.
+- **`NONE`** also covers a grant opened before the application had an enabled workflow, a grant whose
+  trigger lookup failed (the grant path swallows it, [[0054-applications-workflow-engine]]), and a
+  cloned grant the clone did not run the engine for ([[0058-user-manager-and-clone-actions]]).
+- **`COMPENSATED`** reads as waiting on IT: it is a failure whose external effects were rolled back, so
+  the account does not exist. Retry and replay-latest accept only `FAILED`, so this one clears only
+  with a new grant (a new organic run). `AWAITING_INPUT` is only a manual step today (no inbound-callback step
+  ships yet).
+- **One batched query per page** (`AccessGrantsService.provisioningFor`, on the
+  `workflow_runs(accessGrantId)` index): it selects only the grant id and the run status — no workflow
+  name, step, error or payload is read, so none can leak.
+- **Where it appears:** `GET /access-grants/mine` (every grant) and `GET /access-requests/mine` (the grant
+  an approved request created, **while that grant is still active**; `null` otherwise, including after a
+  manual revoke or the expiry sweep — [[access-request]]). The field is optional in the contract and
+  tolerant on read (an unknown value parses as absent), so a client that predates it ignores it, and an
+  older API simply omits it. The web shows it on the active grants of `/profile` and on an approved
+  request whose access is still active; revoked history shows none.
+- The mapping lives in `apps/api/src/access-grants/grant-provisioning.ts`; a run state added later
+  reads `WAITING_ON_IT` until it is mapped there.
+
 ## Not yet implemented (deferred)
 
 - A soft-delete-time guard on apps/users with active grants. (Auto-revoke on `expiresAt` is now
   implemented — see `expiresAt` above.)
 
-Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
+Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] · [[workflow-run]] ·
 [[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
 [[0016-auth-strategy-deferred]] · [[0022-draft-visibility-auth-shim]] ·

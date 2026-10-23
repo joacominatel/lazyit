@@ -45,6 +45,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { statusTone } from "@/lib/infra/canvas";
 import { AgentOnboarding } from "./agent-onboarding";
+import { NodeLifecycleBadges } from "./node-lifecycle";
 import {
   AgentBadge,
   AgentFreshness,
@@ -396,9 +397,12 @@ export function ServersTableView() {
             href={diagramHref(node.id)}
             title={node.label}
             badge={
-              <StatusBadge tone={statusTone(node.status)}>
-                {t(`status.${node.status}`)}
-              </StatusBadge>
+              <span className="flex flex-wrap items-center gap-1">
+                <StatusBadge tone={statusTone(node.status)}>
+                  {t(`status.${node.status}`)}
+                </StatusBadge>
+                <NodeLifecycleBadges node={node} />
+              </span>
             }
             meta={
               <>
@@ -472,9 +476,13 @@ export function ServersTableView() {
               <Badge variant="outline">{t(`kind.${node.kind}`)}</Badge>
             </TableCell>
             <TableCell>
-              <StatusBadge tone={statusTone(node.status)}>
-                {t(`status.${node.status}`)}
-              </StatusBadge>
+              <span className="flex flex-wrap items-center gap-1">
+                <StatusBadge tone={statusTone(node.status)}>
+                  {t(`status.${node.status}`)}
+                </StatusBadge>
+                {/* Retired / alerts snoozed (#1701). */}
+                <NodeLifecycleBadges node={node} />
+              </span>
             </TableCell>
             <TableCell>
               <AssetCell assetId={node.assetId} assetName={node.assetName} />

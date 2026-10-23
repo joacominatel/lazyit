@@ -10,6 +10,10 @@ subcategory: data-export
 Most lists in lazyit can be downloaded as a **CSV** file you can open in a spreadsheet, hand to finance,
 or feed to a script. Look for the **Export CSV** button at the top of the list.
 
+On **Assets** and **Purchases** the button is called **Export** and opens a small menu: **CSV (.csv)** or
+**Excel (.xlsx)**. See [Excel files](#excel-files) for how the two differ. Every other list exports CSV
+only.
+
 ## Where you can export
 
 | Screen | What the file holds |
@@ -18,7 +22,7 @@ or feed to a script. Look for the **Export CSV** button at the top of the list.
 | **Reports** (activity) | One row per event: when, action, entity, actor and summary. |
 | **Reports → Audit log** | One row per event of the source tab you have open (Secrets, Permissions, Service accounts or Exports). |
 | **Users** | One row per person: name, email, role, whether the account is active, directory details, manager, and how many assets and grants they hold. |
-| **An application's page** | Its access grants: the active ones when the *Active* or *Expiring* view is selected, every grant including revoked ones under *Revoked* or *All*. Who, access level, granted and revoked by whom and when, expiry and notes. The button is on the *Access* tab. |
+| **An application's page** | Its access grants, exactly as the *Access* tab shows them: the selected view (*Active*, *Expiring*, *Revoked* or *All*), narrowed by the level filter and the person search. Who, access level, granted and revoked by whom and when, expiry and notes. The button is on the *Access* tab. |
 | **A person's page** | The same grant columns for that person, active and revoked. The button is on the *Access* tab. |
 | **Consumables** | One row per item: name, SKU, category, unit, current stock, reorder threshold and whether it is low. |
 | **Purchases** | One row per purchase: reference, supplier, status, receipt state, dates, invoice numbers, units ordered, received and pending, total and currency. |
@@ -68,19 +72,44 @@ purchase reference and invoice-number columns appear only for people who can vie
 ## Every export is recorded
 
 Each export is written to the audit log, under **Reports → Audit log → Exports**: who exported, which
-list, how many rows and with which filters. The entry is written when the download starts, so an export
+list, how many rows and with which filters. An Excel export also shows `format: xlsx` among them. The entry is written when the download starts, so an export
 you abandon half way still shows up. An export that is refused (too many rows, or too many at once) is
 not recorded. Exporting the *Exports* tab itself includes the entry for that very export.
 
-## Opening the file in a spreadsheet
+## Excel files
 
-The file is UTF-8 with a byte-order mark, so Excel shows accented names (*José*, *Dirección*) correctly.
+On **Assets** and **Purchases**, **Export → Excel (.xlsx)** downloads the same export as an Excel
+workbook, named like `lazyit-assets-2026-10-22.xlsx`. It holds exactly what the CSV would: the same rows
+for the same filters, the same columns in the same order (the purchase columns on Assets still need the
+permission to view purchases), and the same limits, permission and audit entry.
+
+What changes is how the spreadsheet reads it:
+
+- **Cells are typed.** Counts are numbers, amounts are numbers with two decimals (their currency stays in
+  the column next to them), and dates are real dates you can sort and filter: a plain date such as a
+  purchase date shows as `2026-10-22`, a timestamp as `2026-10-22 14:05:00`. Timestamps are in **UTC**, as
+  in the CSV.
+- **The header row is bold, frozen and has a filter** on every column, ready to sort.
+- **Text is always text.** No cell is ever a formula, so a value starting with `=`, `+`, `-` or `@` is
+  shown as written, with no `'` in front of it.
+- A text longer than Excel's **32,767-character** cell limit (a very long note) is cut to that limit. The
+  CSV keeps it whole.
+- The file has one sheet, named `assets` or `purchases`, and no `# lazyit` version line.
+
+**The Excel file cannot be imported back.** The [bulk import](/help/assets-bulk-import) reads CSV only and
+turns `.xlsx` files away. To edit assets in a spreadsheet and load them back, export **CSV**: the Excel file
+is for reading, the CSV is for the round trip.
+
+## Opening a CSV in a spreadsheet
+
+The CSV file is UTF-8 with a byte-order mark, so Excel shows accented names (*José*, *Dirección*) correctly.
 A text cell that starts with `=`, `+`, `-` or `@` gets a leading `'`, so a spreadsheet never runs it as a
 formula. Numbers and dates are written as plain values.
 
-## The asset file can be imported back
+## The asset CSV can be imported back
 
-The assets file starts with a line like `# lazyit v2.1.0 — 2026-10-16T…` naming the version that wrote
+The assets CSV starts with a line like `# lazyit v2.1.0 — 2026-10-16T…` naming the version that wrote
 it. Keep that line when you edit the file to bring it back through the
 [bulk import](/help/assets-bulk-import): the importer reads it to check the file comes from a compatible
-version. No other export carries it, so every other file has its column names on the first line.
+version. No other export carries it, so every other file has its column names on the first line. The Excel
+version of the assets export cannot be imported (see [Excel files](#excel-files)).

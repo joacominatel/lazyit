@@ -3,7 +3,7 @@ title: AssetAssignment
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-22
 ---
 
 # AssetAssignment
@@ -66,6 +66,9 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   double-click / concurrent call flips the row at most once (mirrors `release()`'s conditional write),
   and already-acknowledged / released / not-yours all return `409`. On success a **targeted**
   notification (`asset_assignment.acknowledged`) nudges the human who assigned the device.
+  The route has no permission gate, so its response is the **self-read shape** (`id`, `userId` and
+  the trimmed owner, `AssetListAssignmentSchema` — what `GET /assets/mine` inlines), never `notes` or
+  who assigned / released the device (#1518).
 - **Referential integrity ([[0019-asset-assignment-integrity]]):** the required FKs are
   `onDelete: Restrict` — an [[asset]] or [[user]] with assignment rows **cannot be hard-deleted**.
 
@@ -137,6 +140,9 @@ schema.
   the future → `400`.
 - `GET /asset-assignments?assetId=&userId=&activeOnly=` — list (`asset:read`), newest first. `activeOnly`
   **defaults to `true`** (only `releasedAt = null`); pass `activeOnly=false` to include released.
+  The `userId` filter **also needs `user:read`** (`403` otherwise, #1685): listing a named person's
+  assignments is directory-relational, like `GET /users/:id/assignments`. A malformed `userId` is
+  still a `400`, checked first.
 - `GET /asset-assignments/:id` — one by id (`asset:read`; `404` if missing).
 - `PATCH /asset-assignments/:id/release` (`asset:write`) — body `{ notes? }`; sets
   `releasedAt = now()` and the releasing actor from the principal. Already released → `409`.
@@ -161,6 +167,21 @@ Plus the natural sub-resource endpoints on the related entities:
 - `GET /assets/:id/assignments?activeOnly=` — assignments of one [[asset]] (`404` if the asset is
   missing/soft-deleted).
 - `GET /users/:id/assignments?activeOnly=` — assignments of one [[user]].
+
+> [!important] Who sees an owner's email — and nothing more without `user:read`
+> The asset-side reads inline each assignment's `user` behind `asset:read`: `GET /assets/:id/assignments`,
+> the asset detail's `activeAssignments`, and the asset list row. VIEWER holds `asset:read` and not
+> `user:read`, so a VIEWER sees owners' emails here. That is a **decision**, not an oversight
+> (2026-10-21, #1636): the holder of an asset is part of the inventory record. It covers the owner's
+> id, name and email (plus `deletedAt`) only. Since #1685 (built), a caller without `user:read` gets
+> exactly those columns (`ASSET_OWNER_USER_SELECT`); the rest of the public allowlist
+> (`PUBLIC_USER_SELECT`: role, `legajo`, `username`, `directoryAttrs`, …) is selected only for a
+> `user:read` holder — `AssetAssignmentsService.findAll({ includeUser, fullUser })`, where `fullUser`
+> defaults to false (fail-closed). Filtering by person (`?userId=` here, `?assignedToUserId=` on
+> [[asset]]) needs `user:read`. The reasoning, and the contrast with the servers reads that gate the
+> same email behind `user:read` (#1627), are in [[asset]]. The user-side read,
+> `GET /users/:id/assignments`, starts from a person and is directory-relational, so it needs
+> `user:read` ([[user]]).
 
 All documented via Swagger ([[0018-api-documentation-swagger]]).
 

@@ -30,6 +30,19 @@ function matchesField(value: unknown, cond: unknown): boolean {
         return (comparable(value) as number) < (comparable(operand) as number);
       case 'gt':
         return (comparable(value) as number) > (comparable(operand) as number);
+      case 'lte':
+        return (
+          value !== null &&
+          value !== undefined &&
+          (comparable(value) as number) <= (comparable(operand) as number)
+        );
+      case 'is':
+        // A to-one relation filter: the related row (inlined on the test row) must match.
+        return (
+          value !== null &&
+          value !== undefined &&
+          matchesWhere(value as Row, operand as Where)
+        );
       case 'contains': {
         const text = typeof value === 'string' ? value : '';
         return ops.mode === 'insensitive'
@@ -58,16 +71,48 @@ export function matchesWhere(row: Row, where: Where | undefined): boolean {
   });
 }
 
+type Direction = 'asc' | 'desc';
+type OrderTerm = {
+  [field: string]:
+    Direction | { sort: Direction; nulls?: 'first' | 'last' } | OrderTerm;
+};
+
+/** One orderBy term's value, direction and null placement, following a to-one relation (`{ user: { … } }`). */
+function resolveTerm(
+  row: Row | undefined,
+  term: OrderTerm,
+): { value: unknown; dir: Direction; nulls?: 'first' | 'last' } {
+  const [field, spec] = Object.entries(term)[0];
+  const value = row?.[field];
+  if (typeof spec === 'string') return { value, dir: spec };
+  if ('sort' in spec && typeof spec.sort === 'string') {
+    return {
+      value,
+      dir: spec.sort,
+      nulls: spec.nulls as 'first' | 'last' | undefined,
+    };
+  }
+  return resolveTerm(value as Row | undefined, spec as OrderTerm);
+}
+
 export function sortRows<T extends Row>(rows: T[], orderBy: unknown): T[] {
   const keys = (
     Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : []
-  ) as Record<string, 'asc' | 'desc'>[];
+  ) as OrderTerm[];
   return [...rows].sort((a, b) => {
     for (const key of keys) {
-      const [field, dir] = Object.entries(key)[0];
-      const x = comparable(a[field]) as string | number;
-      const y = comparable(b[field]) as string | number;
+      const left = resolveTerm(a, key);
+      const right = resolveTerm(b, key);
+      const { dir, nulls } = left;
+      const x = comparable(left.value) as string | number | null | undefined;
+      const y = comparable(right.value) as string | number | null | undefined;
       if (x === y) continue;
+      if (x == null || y == null) {
+        if (x == null && y == null) continue;
+        // Postgres: NULLs sort as the largest value unless `nulls` says otherwise.
+        const nullsFirst = nulls ? nulls === 'first' : dir === 'desc';
+        return x == null ? (nullsFirst ? -1 : 1) : nullsFirst ? 1 : -1;
+      }
       const order = x < y ? -1 : 1;
       return dir === 'desc' ? -order : order;
     }

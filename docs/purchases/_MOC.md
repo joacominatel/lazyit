@@ -3,7 +3,7 @@ title: "Purchases — Map of Content"
 tags: [purchases, moc, index, research]
 status: draft
 created: 2026-10-01
-updated: 2026-10-04
+updated: 2026-10-22
 ---
 
 # Purchases — Map of Content
@@ -51,14 +51,21 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | Merge duplicate suppliers | [[0099-purchases-scope-model-and-optionality#Merge duplicate suppliers (2026-10-03, #1496)\|Merge duplicate suppliers]] | #1496 |
 | Purchases and suppliers in global search | [[0035-search-architecture#Amendment (2026-10-03) — purchases and suppliers, gated per caller (issue #1499)\|ADR-0035 amendment]] | #1499 |
 | Drop a document on *New purchase* or the list to start a purchase | [[purchases/decisions#6. Drop a document to start a purchase (2026-10-03, #1516)\|Decisions §6]] | #1516 |
+| *Receive delivery* across lines | [[0099-purchases-scope-model-and-optionality#Decisions while building (Receive delivery, #1497)\|Receive delivery]] | #1690 (#1497) |
+| Dashboard *Pending deliveries*, *Overdue only*, the *near the order date* chip, the line price follow-up and *Apply purchase value* | ADR-0099 §2 and §13 *Built (API)* / *Built (web)* notes | #1692 · #1704 (#1498, #1503, #1502) |
+| Supplier yearly totals per currency label | ADR-0099 §13 · [[supplier]] | #1689 · #1704 (#1500) |
+| XLSX export of the purchases list and the asset inventory (a CSV / Excel menu on both lists) | [[0103-data-export-streaming-path#11. XLSX, opted in per route (2026-10-22, #1501)\|ADR-0103 §11]] | #1711 · web (#1501) |
 
 **Planned in ADR-0099 §13 or the UX proposal §7 but not built** (tracked as #1495, with sub-issues
-#1496–#1503; merging suppliers has since shipped, #1496): *Receive delivery* across lines, the dashboard *Pending deliveries* tile, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
-field to suppliers, the warranty replacement action, and the XLSX export. Also not built: the per-asset proposal after a line's
-price is edited (§2; the asset panel shows *Differs from purchase* instead), the pending list's *Overdue only*
-toggle and the link picker's *created near the order date* chip. **The attachments backup** (§12) has not
-shipped either: #1467 is open, deferred by the CEO, and the purchase's documents panel says the files are not
-in the backup ([[backups]]).
+#1496–#1503): *Suggest purchases*, mapping a custom field to suppliers, the warranty replacement action, and the
+XLSX export (#1501). Since built (table above): the XLSX export of purchases and assets (#1501, 2026-10-22),
+merging suppliers (#1496), global search (#1499), *Receive
+delivery* across lines (#1497), the dashboard *Pending deliveries* row (#1498), the supplier's yearly totals per
+currency label (#1500), the per-asset proposal after a line's price is edited plus *Apply purchase value* on the
+asset (#1502), and the pending list's *Overdue only* toggle and the link picker's *near the order date* chip
+(#1503) — the last four on 2026-10-22. **The attachments backup** (§12) did not
+ship with the epic; it followed on 2026-10-21 (#1467) — purchase documents are now in the backup
+([[backups]] item 7).
 
 ## Research (pre-decision)
 
@@ -91,6 +98,6 @@ in the backup ([[backups]]).
 - [[0034-consumables-design]] · [[0088-application-license-seat-tracking]] — consumable and license
   lines.
 - [[0036-int4-bounded-integers]] — the integer bound money leaves.
-- [[0082-attachments-storage]] — purchase documents and the backup gap.
+- [[0082-attachments-storage]] — purchase documents and their backup (the gap closed by #1467).
 - [[0046-roles-permissions-v2]] · [[0048-service-accounts]] — the permission catalog and the actor model.
 - [[0097-ai-assistant-mcp-and-headless-api]] — the AI pipeline extraction and chat build on.

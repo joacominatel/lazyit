@@ -449,8 +449,10 @@ const PermissionSetSchema = z
  * not a key here — `.strict()` rejects any extra key (including `ADMIN`) with a 400, so an attempt to
  * edit ADMIN can never be silently accepted. Every listed permission is validated against the frozen
  * `@lazyit/shared` catalog; an unknown permission → 400. Granting MEMBER/VIEWER any catalog permission
- * (even a `:delete` or a coarse verb) is intentional — the only guardrails are ADMIN-immutable and
- * catalog-membership (ADR-0046 P5).
+ * (even a `:delete` or a coarse verb) is intentional — the guardrails are ADMIN-immutable,
+ * catalog-membership (ADR-0046 P5) and write-implies-read ({@link missingImpliedReads}, #1518). The last
+ * one is NOT a refinement here: the API checks it against the STORED matrix, so it can refuse a new
+ * write-without-read (400) and heal a legacy one in the same request.
  */
 export const UpdateRolePermissionsSchema = z
   .object({
@@ -480,3 +482,107 @@ export type MyPermissions = z.infer<typeof MyPermissionsSchema>;
 export const PERMISSION_AUDIT_ACTIONS = ["grant", "revoke"] as const;
 export const PermissionAuditActionSchema = z.enum(PERMISSION_AUDIT_ACTIONS);
 export type PermissionAuditAction = z.infer<typeof PermissionAuditActionSchema>;
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Write implies read (#1518, CEO decision 2026-10-21). A role that holds `X:write`, `X:delete`,
+ * `X:manage` or any other non-read verb on a domain must also hold that domain's `X:read`: a write route
+ * returns the row it wrote, and a role that may change something but not see it is incoherent. The rule
+ * is DERIVED from the catalog (every non-read verb of a domain that has a `:read` implies it), minus the
+ * explicit exemptions below. The matrix editor turns the read on with the write; `PUT
+ * /config/permissions` refuses a NEW write-without-read and heals a stored one by adding the read, never
+ * by removing the write.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Non-read verbs that do NOT imply their domain's read, and why. Each one's "read" is something else:
+ *   - `accessRequest:create` — self-service (seeded to every role, VIEWER included). The requester's read
+ *     is the self-scoped `GET /access-requests/mine`; `accessRequest:read` is the estate-wide list,
+ *     pre-tightened away from VIEWER on purpose (`VIEWER_DENIED_READS`). Implying it would undo that.
+ *   - `secret:fetch` — the machine twin of `secret:read` (ADR-0080): the service-account fetch IS its
+ *     read, and `secret:read` is the human vault surface a service account can never hold.
+ *   - `infra:report` — the reporting agent's ingestion verb (ADR-0074 §5); it explicitly confers no read.
+ * Verbs of a domain with no `:read` at all (`import:run`, `ai:use`, `ai:connect`) imply nothing either.
+ */
+export const READ_IMPLICATION_EXEMPT = [
+  "accessRequest:create",
+  "secret:fetch",
+  "infra:report",
+] as const satisfies readonly Permission[];
+
+/** The domain half of a `domain:action` literal. */
+const domainOf = (permission: Permission): string =>
+  permission.slice(0, permission.indexOf(":"));
+
+/**
+ * The read each non-read permission implies: `X:verb` → `X:read`, for every domain that has a `:read`,
+ * except {@link READ_IMPLICATION_EXEMPT}. A permission absent from the map implies nothing (it is a read,
+ * an exempt verb, or a verb of a read-less domain).
+ */
+export const IMPLIED_READS: Readonly<Partial<Record<Permission, Permission>>> =
+  Object.fromEntries(
+    PERMISSIONS.flatMap((permission): [Permission, Permission][] => {
+      if (permission.endsWith(":read")) return [];
+      if ((READ_IMPLICATION_EXEMPT as readonly string[]).includes(permission))
+        return [];
+      const read = `${domainOf(permission)}:read`;
+      return (PERMISSIONS as readonly string[]).includes(read)
+        ? [[permission, read as Permission]]
+        : [];
+    }),
+  );
+
+/** The read `permission` requires, or `undefined` when it requires none. */
+export function impliedReadOf(permission: Permission): Permission | undefined {
+  return IMPLIED_READS[permission];
+}
+
+/** The non-read permissions that require `read` (its dependents), in catalog order. */
+export function dependentsOfRead(read: Permission): Permission[] {
+  return PERMISSIONS.filter((p) => IMPLIED_READS[p] === read);
+}
+
+/** One violation of the rule: a held `permission` whose required read is missing from the set. */
+export interface MissingImpliedRead {
+  permission: Permission;
+  requires: Permission;
+}
+
+/**
+ * Every held permission whose implied read is not held, in catalog order. Empty means the set obeys the
+ * rule. Pure; tolerant of duplicates and order.
+ */
+export function missingImpliedReads(
+  perms: readonly Permission[],
+): MissingImpliedRead[] {
+  const held = new Set(perms);
+  return PERMISSIONS.flatMap((permission): MissingImpliedRead[] => {
+    const requires = IMPLIED_READS[permission];
+    return held.has(permission) && requires !== undefined && !held.has(requires)
+      ? [{ permission, requires }]
+      : [];
+  });
+}
+
+/**
+ * The set with every missing implied read ADDED (deduplicated, catalog order). Never removes anything —
+ * this is the self-heal: it can widen what a role sees, never narrow what it can do.
+ */
+export function withImpliedReads(perms: readonly Permission[]): Permission[] {
+  const next = new Set(perms);
+  for (const { requires } of missingImpliedReads(perms)) next.add(requires);
+  return PERMISSIONS.filter((p) => next.has(p));
+}
+
+/**
+ * The set with every permission whose implied read is missing REMOVED (catalog order). The editor's
+ * cascade when a read is turned off: the writes that need it go with it. Never adds anything.
+ */
+export function withoutOrphanedDependents(
+  perms: readonly Permission[],
+): Permission[] {
+  const orphaned = new Set(
+    missingImpliedReads(perms).map(({ permission }) => permission),
+  );
+  const held = new Set(perms);
+  return PERMISSIONS.filter((p) => held.has(p) && !orphaned.has(p));
+}

@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -135,7 +135,8 @@ The key forks only; each links its analysis.
    >   manual tasks its assignee guard admits (in practice, unassigned ones).
    > - **Authoring, chat only in v1**: workflows and their versions, connections (incl. the connection
    >   test), the dry-run, and enabling or disabling a workflow. Every authoring tool is `elevated` and
-   >   declares `channels: ['CHAT']`. MCP authoring is deferred (#1344). A Service Account never
+   >   declares `channels: ['CHAT']`. MCP authoring is deferred (#1344) — *decided 2026-10-21, below:
+   >   disabled workflows only*. A Service Account never
    >   authors, connects or enables a workflow — a permanent exclusion over headless, not a deferral
    >   (CEO, #1344; INV-AI-17 in [[ai-assistant/security|security]] §6.9).
    > - **Workflow secrets stay structurally excluded** (INV-AI-5, INV-AI-14): the AI never reads, creates,
@@ -260,6 +261,40 @@ The key forks only; each links its analysis.
    > in order: step-up, elevated, creates assets or changes money, refused.
    > → [[0099-purchases-scope-model-and-optionality]] *Decisions while building (Phase 3, #1478)* and
    > *(Phase 3 web, #1478)*; [[ai-assistant/frontend|frontend]] §11d.
+
+   > Amended 2026-10-21 (#1688; CEO decision Q1 on #1344): **workflow authoring over MCP, for disabled
+   > workflows only.** The CEO: under `lazyit.admin`, MCP may create and edit workflows and their versions
+   > only while the workflow is **disabled**; anything with `OUTBOUND_INTEGRATION` is refused over MCP —
+   > enabling a workflow, creating or re-pointing a connection, or a new version on an enabled workflow.
+   > This replaces "MCP authoring is deferred" in the 2026-09-24 workflow-engine amendment above.
+   >
+   > - **Three tools reach MCP.** `workflow_create` (always created disabled), `workflow_update` and
+   >   `workflow_author_version` declare `channels: ['CHAT', 'MCP']`. They are `elevated`, so they are listed
+   >   only under `lazyit.admin` (the scope whose consent re-proves the password), and **to human callers
+   >   only**: every authoring tool carries the new descriptor flag `humanOnly`, so core never lists,
+   >   invokes, proposes or approves it for a Service Account on any channel — an SA token connected over
+   >   MCP can carry an `elevated` ceiling and the workflow routes admit a Service Account, so the channel
+   >   alone would not exclude it — and refuses before anything is recorded. They keep the class-derived
+   >   annotations unchanged (`destructiveHint` and `openWorldHint` true — conservative: the client keeps
+   >   asking). Enabling or disabling, archiving, and every connection tool (create, update, test, archive)
+   >   stay chat-only.
+   > - **Disabled only, refused otherwise.** `OUTBOUND_INTEGRATION` joins `AI_CHANNEL_REFUSED_WARNINGS` for
+   >   MCP (and headless, defence in depth): a version on an enabled workflow is refused with a 403 pointing
+   >   to the chat. A header change (name, description, deprovision policy) on an enabled workflow carries
+   >   no warning, so the tool refuses it over MCP itself. Critical applications stay refused over MCP
+   >   (`CRITICAL_APPLICATION`).
+   > - **Server-side and race-safe.** Over MCP no card is built and the client's own confirmation is the
+   >   only review, so the check runs at execute: the tool reads the workflow, and the routes take a new
+   >   optional precondition `expectedEnabled` (`PATCH /workflows/:id`, `POST /workflows/:id/versions`),
+   >   checked under the workflow row lock that already serializes authoring and enabling (SEC-077) — a 409
+   >   when the workflow was enabled in between. The AI tools send it on every channel.
+   > - **Headless unchanged, and no Service Account over MCP either.** No authoring tool lists `HEADLESS`,
+   >   and `humanOnly` excludes Service Accounts on MCP too; a Service Account never authors, connects or
+   >   enables a workflow (INV-AI-17). INV-AI-15 is restated: no **live** outbound integration without a
+   >   human's in-app approval.
+   >
+   > → [[ai-assistant/security|security]] §6.9, T-40, T-42; [[ai-assistant/tools-and-execution|tools]] §7
+   > W10–W12; [[INVARIANTS]] INV-AI-15.
 
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,
@@ -400,6 +435,26 @@ The key forks only; each links its analysis.
    >   *revoke sessions* on, the recovery CLI, a deactivation, an offboarding (manual or by directory
    >   sync). lazyit has no user-facing "sign out everywhere" route; the admin *revoke sessions* option is
    >   that explicit act. Revoking a connection in `/account/ai` (or Settings → AI) is unchanged.
+   >   *Amended 2026-10-22 (#1699, CEO decision on #1344 Q4):* the user-facing route now exists —
+   >   "Sign out everywhere and disconnect AI apps", `POST /auth/sessions/revoke-all`, a self-service
+   >   action that bumps both counters and deletes every session row in one transaction, in **every** auth
+   >   mode (OIDC included, where `POST /auth/logout` is a no-op), audited `SIGNED_OUT_EVERYWHERE` in the
+   >   OAuth audit trail. No password step-up: like every other revocation it only removes access, and
+   >   step-up is unavailable outside local mode. The plain logout below is untouched.
+   >   *Amended again 2026-10-22 (#1715, CEO decision: "add a cutoff"):* as first shipped, the action did
+   >   **not** end OIDC web sessions on the user's *other* devices. In OIDC mode the browser carries the
+   >   IdP's access token, the OIDC branch of the guard checked no lazyit-side counter, and Auth.js renews
+   >   that token with the `offline_access` refresh token — so another device stayed signed in for as long
+   >   as the IdP kept honouring its refresh token, and could at once mint a new personal token or approve
+   >   a new OAuth connection. Now the action also stamps `User.oidcTokensNotBefore` (nullable, no
+   >   backfill; deactivation, offboarding and the sync's soft offboard stamp it too), and the OIDC guard
+   >   refuses a token whose `iat` — or `auth_time`, when the token carries one — is earlier than that
+   >   cutoff minus 30 seconds of clock skew, with the 401 of an expired token. `auth_time` is what stops a
+   >   renewed token: renewal gives a fresh `iat` but keeps the original `auth_time`. **What remains:**
+   >   lazyit still cannot end the IdP's own session; the user signs out at the provider for that. With an
+   >   IdP whose access tokens carry no `auth_time` (Entra ID, for one), a device that renews its token
+   >   *before* it next calls the API gets a fresh `iat` and is not caught; the cutoff then ends only the
+   >   tokens it held. Details: [[authorization]] §3.2.
    > - **What does not**: `POST /auth/logout`. It still bumps `sessionEpoch`, so every web session of the
    >   user ends, as ADR-0086 §8 says.
    > - **In-flight tool calls.** An MCP request delegates at the live `sessionEpoch` it re-read while
@@ -612,8 +667,9 @@ fallback chains or per-user keys; MCP elicitation (the chat's input forms, decis
 2026-09-24 for #1388, have no MCP counterpart), resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; a lazyit-side
 web search or URL fetch (the provider's own search is allowed, decision 3 as amended 2026-09-24 for #1389); admins reading
-other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
-headless (MCP deferred, #1344; headless excluded for good, INV-AI-17); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
+other people's conversations; a per-request headless tool allowlist; workflow authoring over headless
+(excluded for good, INV-AI-17) and, over MCP, anything beyond disabled workflows (enabling, connections, a
+version on an enabled workflow — decision 3 as amended 2026-10-21); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
 
 ## As built (2026-09-26)
 
@@ -666,21 +722,35 @@ the CIMD verified rule (decision 13); seventeen invariants (decision 12).
 
 **Deferred** — AI scope only, tracked in #1344 unless noted:
 
-- Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17).
-- Requester-facing provisioning status; whether an admin may approve their own access request; deferred
-  tool loading now that the catalog passes ~60 tools.
-- A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
-  sessions* option does).
+- Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17). *Decided
+  2026-10-21: disabled workflows only, decision 3 as amended (#1688).*
+- ~~Requester-facing provisioning status~~ **Done in #1700** (CEO Q2): a coarse `provisioning` value
+  on the caller's own `/mine` grant and request reads, derived from the latest provisioning run
+  ([[access-grant#Provisioning status]]); run history stays `workflow:read`. Whether an admin may
+  approve their own access request; deferred tool loading now that the catalog passes ~60 tools.
+- ~~A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
+  sessions* option does).~~ **Done in #1699**: "Sign out everywhere and disconnect AI apps"
+  (decision 8, amendment of 2026-10-22). The `mcp.client_connected` email became a security notice
+  that ignores the per-user opt-out in the same change.
 - Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
+  *Done 2026-10-21 (#1687): the `input` sentence param kind, bounded on the server and set apart on the
+  card ([[ai-assistant/tools-and-execution|tools]] §9.1).*
 - A route-level expected version on writes (assets, consumables, users, KB, access) to close the
   approve→execute window rather than narrow it.
-- Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.
-- Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
-  `lazyit-*` system rows in `ai_messages`.
+- ~~Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.~~
+  **Done in #1683** ([[ai-assistant/mcp-and-oauth|MCP]] §16): a per-user overall cap on `/mcp` on top of
+  the per-grant / per-SA limits (CEO Q8), DCR keyed per IPv4 address or IPv6 /64, and the oldest unused
+  pending registration evicted at the cap.
+- ~~Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
+  `lazyit-*` system rows in `ai_messages`.~~ **Done (#1675):** `AiConversation.systemPrompt` and
+  `AiRun.sessionEpoch`; the legacy rows are read as a fallback, never backfilled or deleted
+  ([[ai-assistant/provider-and-runtime|provider]] §8.1 *Runtime state columns*).
 - A per-host plugin name (two instances installed side by side share the `lazyit` namespace).
-- From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
+- ~~From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
   the authorization code, record the code → grant link so a replayed code revokes its grant, and a
-  distinct consent refusal for an unreachable CIMD document.
+  distinct consent refusal for an unreachable CIMD document.~~ **Done in #1683** (CEO Q10; MCP §16): two
+  additive nullable columns on `oauth_authorization_codes`; a replay revokes only when the replayed request
+  is otherwise valid (OAuth 2.1); `CLIENT_METADATA_UNREACHABLE`.
 - From the amendments: an admin switch, an expiry and a per-turn cap for auto-approve (decision 4); an
   admin allow-list of pickable models, a per-model cost view and a provider-aware model-id rule for Google
   (decision 5).

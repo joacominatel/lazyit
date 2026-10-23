@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # Releasing lazyit
@@ -30,7 +30,10 @@ Once `v1.0.0` exists on `master`, releases are cut by CI — you do not tag by h
 3. Merge the promotion. The `release` job creates the **annotated tag** (unsigned — CI holds no
    signing key; see *Tag trust* in [[0083-versioning-and-releases]]) + a **GitHub Release** with
    generated notes. CI is otherwise push-free — there is **no external cron or
-   tagging script**; the Action is the automation.
+   tagging script**; the Action is the automation. In parallel,
+   `.github/workflows/promotion-autoclose.yml` closes the issues the promoted PRs reference with
+   `Closes #N` (#1666) — preview it before merging with a dry run; see *Issue auto-close* in
+   [[git-workflow]].
 4. **Rebuild the production images on the host** (`docker compose ... up -d --build`). The
    version an instance reports comes from the tag: `git describe --tags` → build-arg
    `APP_VERSION`/`GIT_SHA` (baked by `infra/start.sh`/compose) → `GET /instance/version` →
@@ -184,6 +187,9 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   servers export show owner names to anyone with `infra:read`, but emails only to roles that can read
 >   the user directory (VIEWER cannot by default), and the servers search no longer matches an owner's
 >   email for them. A VIEWER tab left open across the update errors on the servers list until reloaded.
+> - **Filtering assets or assignments by person needs `user:read`** (#1685): `?assignedToUserId=` and
+>   `/asset-assignments?userId=` now answer 403. Grant `user:read` to scripts and service accounts that
+>   use them. Viewers no longer see owners' role, legajo, username or directory attributes.
 > - **Applications filter by category and criticality on the server** (#1631). The list, its total and
 >   its export now follow both filters; before, they narrowed only the page on screen.
 > - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an

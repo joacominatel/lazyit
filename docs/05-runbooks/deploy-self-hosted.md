@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-21
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -474,8 +474,11 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 
 Configure backups before real use — see **[[backups]]**. The prod stack has **one** database, and
 the DR linchpin `WORKFLOW_SECRET_KEY` lives in `infra/env/.env.prod`: back up the DB **and**
-`.env.prod` off-host, together. An opt-in `backup` profile sidecar automates the DB dump with
-retention (see [[backups]]). Under BYOI, your IdP is backed up by its own procedure.
+`.env.prod` off-host, together. Uploaded files live on the `attachments_data` volume, which no dump
+captures. The `backup` sidecar automates both — each run writes an `app-<ts>.dump` and an
+`attachments-<ts>.tar.gz` pair, with retention — and the `--profile prod` bring-up already starts it
+(see [[backups]], including the disk space the tarballs take). Under BYOI, your IdP is backed up by
+its own procedure.
 
 ## 6. Resource sizing & limits
 
@@ -505,7 +508,7 @@ service is constrained.
 > lightweight (256 MB ceiling — mostly job metadata) and runs AOF persistence on the `valkey_data`
 > volume so queued jobs survive a restart. It holds only in-flight job state — PostgreSQL is the system
 > of record — so it is **not** a backup target (like Meilisearch, its volume is rebuildable); the
-> `backup` sidecar only dumps the two Postgres DBs (see [[backups]]).
+> `backup` sidecar dumps only the app database and archives the attachments volume (see [[backups]]).
 
 Build/boot problems → [[docker-build-troubleshooting]].
 

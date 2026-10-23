@@ -28,7 +28,8 @@ import type {
 } from '@lazyit/shared';
 import { canManageRole, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
-import type { User } from '../../generated/prisma/client';
+// The default row carries no passwordHash (ADR-0105 global omit).
+import type { UserRow as User } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import { pickPublicUserColumns } from './public-user';
 import type { PublicUserColumns } from './public-user';
@@ -146,6 +147,15 @@ export interface UserFilters {
    * absent/undefined → both (default; no filter). Validated as exactly "true" | "false" at the controller.
    */
   isActive?: boolean;
+  /**
+   * Resolver mode for {@link ids} (issue #1659). When true AND `ids` is non-empty, the page covers
+   * live AND soft-deleted (offboarded) users, so a history row, a grantee chip or "who revoked this"
+   * renders the real name of a person who has since left instead of "Unknown person". The offboarded
+   * row is the same allowlisted public shape a live row has (SEC-085) and is marked by its non-null
+   * `deletedAt`. The controller sets it only when the caller sent `ids` without an explicit `deleted`
+   * slice; the open list (no `ids`) stays live-only whatever this says.
+   */
+  includeOffboarded?: boolean;
 }
 
 /**
@@ -259,11 +269,15 @@ export class UsersService {
    * over the same `where` in one `$transaction`.
    */
   async findPage(filters: UserFilters, page: PageQuery) {
+    // An explicit id lookup may reach offboarded people too (issue #1659); the open list never does.
+    const resolveOffboarded =
+      filters.includeOffboarded === true && (filters.ids?.length ?? 0) > 0;
     const where = {
       ...this.buildWhere(filters),
-      ...deletedWhere(page.deleted),
+      ...(resolveOffboarded ? {} : deletedWhere(page.deleted)),
     };
-    const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
+    const includeSoftDeleted =
+      resolveOffboarded || includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
       resolveSortOrBadRequest<Prisma.UserOrderByWithRelationInput>(
@@ -1040,6 +1054,8 @@ export class UsersService {
             ? {
                 sessionEpoch: { increment: 1 },
                 mcpCredentialEpoch: { increment: 1 },
+                // OIDC mode: a reactivation must not revive the IdP sessions held before it (#1715).
+                oidcTokensNotBefore: new Date(),
                 // A stale sync stamp would let the directory sync undo this deactivation (#1311).
                 directoryOffboardedAt: null,
                 directoryReenabledAt: null,
@@ -1620,6 +1636,8 @@ export class UsersService {
           deletedAt: now,
           sessionEpoch: { increment: 1 },
           mcpCredentialEpoch: { increment: 1 },
+          // OIDC mode: a restore must not revive the IdP sessions held before the offboarding (#1715).
+          oidcTokensNotBefore: now,
         },
       });
 

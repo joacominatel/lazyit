@@ -20,6 +20,7 @@ import {
   guestExternalIdPrefix,
   guestNodeKind,
   guestNodeStatus,
+  hostExternalIdOfContainerChild,
   hostIdentityEvidence,
   identityDiscriminator,
   inferNodeKind,
@@ -73,6 +74,8 @@ import {
   INFRA_FACT_CHANGE_PAGE_SIZE_MAX,
   INFRA_GRAPH_EDGES_MAX,
   INFRA_GRAPH_NODES_MAX,
+  INFRA_NODE_LIFECYCLE_FACT,
+  INFRA_NODE_SNOOZE_MAX_DAYS,
   offsetOf,
   pageOf,
 } from '@lazyit/shared';
@@ -551,6 +554,10 @@ const INFRA_NODE_LIST_SELECT = {
   lastReportedAt: true,
   agentVersion: true,
   chassis: true,
+  // The retire / snooze lifecycle (#1701) — three scalars, so the list row can badge them.
+  retiredAt: true,
+  retiredById: true,
+  alertsSnoozedUntil: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -623,6 +630,8 @@ const INFRA_GRAPH_NODE_SELECT = {
   status: true,
   ipAddress: true,
   chassis: true,
+  retiredAt: true,
+  alertsSnoozedUntil: true,
   x: true,
   y: true,
 } satisfies Prisma.InfraNodeSelect;
@@ -674,6 +683,46 @@ export function childSafeDisambiguatedId(
     return key;
   }
   return disambiguateExternalId(externalId, discriminator.replaceAll('/', '_'));
+}
+
+/**
+ * Can this host key scope container child keys unambiguously (#1158)? True when a child key built
+ * from it parses back to exactly this key — the FIRST-separator rule of
+ * {@link hostExternalIdOfContainerChild}. A key ending in `/container` fails: its children's keys
+ * would resolve to the shorter key, and that key's retire-sweep prefix would select them.
+ */
+export function isUniqueContainerScope(hostKey: string): boolean {
+  return (
+    hostExternalIdOfContainerChild(containerExternalId(hostKey, 'probe')) ===
+    hostKey
+  );
+}
+
+/**
+ * Do the MACs a report carries share NOTHING with the ones its clone node last held (#1158)? Both
+ * sides must have MACs: a side with none is "nothing to compare" — the same posture
+ * {@link isClonedMachineId} takes — never a difference.
+ */
+function sharesDerivedKeyWithAnotherMachine(
+  stored: { macs: readonly string[] },
+  incoming: { macs: readonly string[] },
+): boolean {
+  if (!stored.macs.length || !incoming.macs.length) return false;
+  const held = new Set(stored.macs);
+  return !incoming.macs.some((mac) => held.has(mac));
+}
+
+/**
+ * The sticky "second machine seen on this derived key" mark a clone node's marker already carries
+ * (#1158), or `undefined`. Tolerant read: anything but a non-empty string is "not marked".
+ */
+function storedSharedKeySeenAt(
+  rest: Record<string, unknown> | undefined,
+): string | undefined {
+  const conflict = rest?.identityConflict;
+  if (typeof conflict !== 'object' || conflict === null) return undefined;
+  const seenAt = (conflict as Record<string, unknown>).sharedKeySeenAt;
+  return typeof seenAt === 'string' && seenAt.length > 0 ? seenAt : undefined;
 }
 
 /**
@@ -878,6 +927,11 @@ export class InfraService {
     principal?: Principal,
     rawBody?: unknown,
   ): Promise<AgentReportAck> {
+    // The uninstaller's last word (#1701). It retires this host's own node and ingests nothing else,
+    // so it is answered before any of the machinery below runs.
+    if (report.decommissioning === true) {
+      return this.decommissionReportingHost(report);
+    }
     // The inventory blob (ADR-0074 §2 / ADR-0007 jsonb posture): host facts plus the report timestamp
     // for provenance. Stored verbatim — validated already by `AgentReportSchema` at the controller.
     // `agentVersion` is NOT duplicated here (#907): it now lives in its own queryable column below.
@@ -929,6 +983,8 @@ export class InfraService {
         // The #1140 narrowest policy scope + the acknowledgement this report may advance.
         agentPolicy: true,
         policyRevision: true,
+        // A retired node that reports again is un-retired (#1701).
+        retiredAt: true,
       },
     });
 
@@ -1104,6 +1160,7 @@ export class InfraService {
             assetId: true,
             ipAddressSource: true,
             policyRevision: true,
+            retiredAt: true,
           },
         });
         // No loop: after P2002 the row exists. If it somehow doesn't (e.g. it was soft-deleted in the
@@ -1140,6 +1197,250 @@ export class InfraService {
       }
       throw err;
     }
+  }
+
+  /**
+   * The uninstaller's last report (#1701, epic #1146 Q11): retire THIS host's own node and the
+   * container and guest children it reported, and nothing else.
+   *
+   * WHICH NODE. The one the report's own `(reportingSource, externalId)` resolves to — the same lookup
+   * an ordinary check-in makes, so a token can retire only what it could already refresh. A host whose
+   * machine-id COLLIDED (#1141) does not own the node under that key: its own node lives under the
+   * derived `<externalId>#<discriminator>` key, so the same corroboration the ingest path runs decides
+   * which one is meant. When the evidence cannot name the clone's own node, nothing is retired —
+   * refusing is the only answer that cannot retire a peer.
+   *
+   * WHICH CHILDREN (CEO decision 2026-10-22). Every live, agent-reported child keyed under THAT node's
+   * own key: `<key>/container/<name>` and `<key>/guest/<ref>`, in the same reporting source — exactly
+   * the rows the ingest path's own reconcile would touch, so a clone's decommission can never reach its
+   * peer's children (their prefix is the peer's key) and a hand-drawn node is never retired. The ingest
+   * path's two refusals apply here too: a key that cannot scope children unambiguously, and a clone node
+   * on which a second machine has been seen, retire the host only. See
+   * {@link retireDecommissionedChildren}.
+   *
+   * WHAT IT DOES NOT TOUCH. The report's facts are not ingested (the host is leaving; its last in-service
+   * snapshot stands), liveness is not refreshed, and no linked Asset is ever read or written — retiring
+   * a server is not disposing of the hardware.
+   *
+   * IDEMPOTENT. A node that is already retired keeps its original `retiredAt`/`retiredById`; the ack
+   * still says `retired`. A retirement is recorded in the fact history only when it actually happened,
+   * as a `node.lifecycle` row, because it is a MACHINE transition on the ingest path — a human retire is
+   * curation and is attributed by `retiredById` instead.
+   *
+   * An unknown host is a 404: there is nothing to retire, and a decommission never creates a node.
+   */
+  private async decommissionReportingHost(
+    report: AgentReport,
+  ): Promise<AgentReportAck> {
+    const target = await this.resolveDecommissionTarget(report);
+    if (target.kind === 'unknown') {
+      throw new NotFoundException(
+        'No live node is reporting under this host key, so there is nothing to retire.',
+      );
+    }
+    if (target.kind === 'cloneWithoutNode') {
+      throw new NotFoundException(
+        "This host shares its machine id with another server and has no node of its own in lazyit, so nothing was retired. The other server's node was left alone.",
+      );
+    }
+    const { node } = target;
+    const now = new Date();
+    if (!node.retiredAt) {
+      // Conditional on still being active, so two racing uninstall reports record one transition.
+      const { count } = await this.prisma.infraNode.updateMany({
+        where: { id: node.id, retiredAt: null },
+        data: { retiredAt: now, retiredById: null },
+      });
+      if (count > 0) {
+        await this.recordFactChanges(node.id, [
+          {
+            kind: 'FACT_CHANGED',
+            fact: INFRA_NODE_LIFECYCLE_FACT,
+            previousValue: 'active',
+            currentValue: 'retired',
+          },
+        ]);
+        this.logger.log(
+          `Node ${node.id} retired by its own agent's uninstall (decommissioning report).`,
+        );
+      }
+    }
+    // Attempted even when the host was already retired: a second uninstall still sweeps up a child the
+    // first one missed. Never fails the decommission — the host's own retirement already stands.
+    if (target.childScope) {
+      await this.retireDecommissionedChildren(
+        report.reportingSource,
+        target.hostKey,
+        now,
+      );
+    }
+    return this.finishAck(
+      { nodeId: node.id, state: node.state, accepted: true, retired: true },
+      undefined,
+      report.agentVersion,
+    );
+  }
+
+  /**
+   * The node a decommissioning report means — see {@link decommissionReportingHost}. `hostKey` is that
+   * node's OWN reporting key (the derived one for a clone), which is what its children are keyed under.
+   * `childScope` is false when the ingest path itself would refuse to reconcile children under it.
+   */
+  private async resolveDecommissionTarget(report: AgentReport): Promise<
+    | { kind: 'unknown' }
+    | { kind: 'cloneWithoutNode' }
+    | {
+        kind: 'found';
+        node: { id: string; state: InfraNodeState; retiredAt: Date | null };
+        hostKey: string;
+        childScope: boolean;
+      }
+  > {
+    const select = { id: true, state: true, retiredAt: true } as const;
+    const existing = await this.prisma.infraNode.findFirst({
+      where: {
+        reportingSource: report.reportingSource,
+        externalId: report.externalId,
+      },
+      select,
+    });
+    if (!existing) return { kind: 'unknown' };
+    const stored = await this.storedNodeSpecs(existing.id);
+    const incoming = hostIdentityEvidence(report.host);
+    if (!isClonedMachineId(stored.identity, incoming)) {
+      return {
+        kind: 'found',
+        node: existing,
+        hostKey: report.externalId,
+        childScope: isUniqueContainerScope(report.externalId),
+      };
+    }
+    // A clone (#1141): the node under the reported key is its PEER's.
+    const discriminator = identityDiscriminator(incoming);
+    if (discriminator === undefined) return { kind: 'cloneWithoutNode' };
+    const hostKey = childSafeDisambiguatedId(report.externalId, discriminator);
+    const own = await this.prisma.infraNode.findFirst({
+      where: { reportingSource: report.reportingSource, externalId: hostKey },
+      select,
+    });
+    if (!own) return { kind: 'cloneWithoutNode' };
+    // The ingest path's two child refusals for a clone (#1158): a key that cannot scope child keys,
+    // and a clone node on which a second machine has already been seen (sticky).
+    const ownStored = await this.storedNodeSpecs(own.id);
+    return {
+      kind: 'found',
+      node: own,
+      hostKey,
+      childScope:
+        isUniqueContainerScope(hostKey) &&
+        storedSharedKeySeenAt(ownStored.rest) === undefined,
+    };
+  }
+
+  /**
+   * Retire the decommissioned host's live, agent-reported container and guest children (CEO decision
+   * 2026-10-22). Without this, the moment the host stops listing them they go stale on their own clock
+   * and are each announced as an outage — the tray full of ghosts retire exists to prevent.
+   *
+   * Bounded by construction: one read of the children (at most `AGENT_CONTAINERS_MAX` +
+   * `AGENT_GUESTS_MAX` per host), one conditional bulk write, and the lifecycle rows in ONE insert
+   * after one grouped count, so a 500-guest hypervisor costs four statements, not a thousand. The
+   * per-node hourly fact cap is honoured (a child already at its cap gets no row). Like every other
+   * child reconcile it never fails the report: a failure is a warning, and the host stays retired.
+   * A child that is listed again later is un-retired by the ordinary refresh, exactly like its host.
+   */
+  private async retireDecommissionedChildren(
+    reportingSource: string,
+    hostKey: string,
+    now: Date,
+  ): Promise<void> {
+    try {
+      const children = await this.prisma.infraNode.findMany({
+        where: {
+          reportingSource,
+          source: 'AGENT',
+          retiredAt: null,
+          OR: [
+            {
+              externalId: {
+                startsWith: escapeLikePrefix(
+                  containerExternalIdPrefix(hostKey),
+                ),
+              },
+            },
+            {
+              externalId: {
+                startsWith: escapeLikePrefix(guestExternalIdPrefix(hostKey)),
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      if (children.length === 0) return;
+      const retired = await this.prisma.infraNode.updateManyAndReturn({
+        where: { id: { in: children.map((c) => c.id) }, retiredAt: null },
+        data: { retiredAt: now, retiredById: null },
+        select: { id: true },
+      });
+      if (retired.length === 0) return;
+      this.logger.log(
+        `${retired.length} container/guest child node(s) of ${hostKey} retired with their host's uninstall.`,
+      );
+      const ids = retired.map((row) => row.id);
+      const recent = await this.prisma.infraNodeFactChange.groupBy({
+        by: ['nodeId'],
+        where: {
+          nodeId: { in: ids },
+          createdAt: {
+            gte: new Date(now.getTime() - INFRA_FACT_CHANGES_WINDOW_MS),
+          },
+        },
+        _count: { _all: true },
+      });
+      const full = new Set(
+        recent
+          .filter(
+            (row) => row._count._all >= INFRA_FACT_CHANGES_MAX_PER_NODE_WINDOW,
+          )
+          .map((row) => row.nodeId),
+      );
+      const rows = ids
+        .filter((id) => !full.has(id))
+        .map((nodeId) => ({
+          nodeId,
+          kind: 'FACT_CHANGED' as const,
+          fact: INFRA_NODE_LIFECYCLE_FACT,
+          previousValue: 'active',
+          currentValue: 'retired',
+        }));
+      if (rows.length > 0) {
+        await this.prisma.infraNodeFactChange.createMany({ data: rows });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not retire the container/guest children of ${hostKey} — the host itself is retired. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * The fact-history row for an AUTOMATIC un-retire (#1701): a retired node reported again. Recorded
+   * so an operator who retired a host can see why it is back, and when.
+   */
+  private unretiredFactChange(
+    nodeId: string,
+    retiredAt: Date,
+  ): InfraFactChangeDraft {
+    this.logger.log(
+      `Node ${nodeId} was retired at ${retiredAt.toISOString()} and reported again — un-retired automatically.`,
+    );
+    return {
+      kind: 'FACT_CHANGED',
+      fact: INFRA_NODE_LIFECYCLE_FACT,
+      previousValue: 'retired',
+      currentValue: 'active',
+    };
   }
 
   /**
@@ -1378,7 +1679,16 @@ export class InfraService {
    * ADR-0074 §2.
    */
   private async refreshKnownNode(args: {
-    node: { id: string; assetId: string | null; ipAddressSource: string };
+    /**
+     * `retiredAt` is REQUIRED (#1701) so a path added later cannot refresh a retired node without
+     * un-retiring it — a node that reports again is, by definition, not gone.
+     */
+    node: {
+      id: string;
+      assetId: string | null;
+      ipAddressSource: string;
+      retiredAt: Date | null;
+    };
     blob: AgentReportSpecsBlob;
     software: SoftwareDirective;
     now: Date;
@@ -1420,6 +1730,9 @@ export class InfraService {
       agentVersion: args.agentVersion,
       ...(args.policyFields ?? {}),
       ...(plan.write !== undefined ? { specs: plan.write } : {}),
+      // AUTO-UN-RETIRE (#1701): a retired node that reports again is not gone. Only written when it
+      // WAS retired, so an ordinary check-in adds nothing to the update.
+      ...(node.retiredAt ? { retiredAt: null, retiredById: null } : {}),
     };
     // Overwrite the IP with the live fact — but only when the agent owns it (never a MANUAL edit) and
     // the report actually carries one (never clear a good IP on a partial report). CEO policy #1081.
@@ -1442,7 +1755,12 @@ export class InfraService {
       data,
       select: { id: true, state: true },
     });
-    await this.recordFactChanges(node.id, factChanges);
+    await this.recordFactChanges(
+      node.id,
+      node.retiredAt
+        ? [...factChanges, this.unretiredFactChange(node.id, node.retiredAt)]
+        : factChanges,
+    );
     // Keep the linked Asset's specs snapshot fresh (agent-owned facts only). It is asked on EVERY
     // report even when the node's blob was skipped, and decides its own write the same way: an Asset
     // linked to a node whose facts have not changed since would otherwise never receive them.
@@ -1916,7 +2234,7 @@ export class InfraService {
    * two. See {@link disambiguateExternalId}.
    */
   private async ingestCollidingHost(
-    peer: { id: string; label: string },
+    peer: { id: string; label: string; retiredAt: Date | null },
     stored: HostIdentityEvidence,
     incoming: HostIdentityEvidence,
     report: AgentReport,
@@ -1937,7 +2255,12 @@ export class InfraService {
       // back to the ordinary refresh rather than throwing keeps the machine-facing path total.
       return this.finishAck(
         await this.refreshKnownNode({
-          node: { id: peer.id, assetId: null, ipAddressSource: 'AGENT' },
+          node: {
+            id: peer.id,
+            assetId: null,
+            ipAddressSource: 'AGENT',
+            retiredAt: peer.retiredAt,
+          },
           blob,
           software,
           now,
@@ -1964,39 +2287,66 @@ export class InfraService {
       peerLabel: peer.label,
       discriminator,
     };
-    /** Refresh the clone's own node, carrying the collision marker with it (rule 4 above). */
+    /**
+     * Refresh the clone's own node, carrying the collision marker with it (rule 4 above), then
+     * reconcile its containers under that node's own key (#1158).
+     */
     const refreshWithMarker = async (node: {
       id: string;
       assetId: string | null;
       ipAddressSource: string;
       policyRevision?: number | null;
+      retiredAt: Date | null;
     }): Promise<AgentReportAck> => {
+      const detectedAt =
+        (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString();
+      // Read here rather than inside the refresh, because the container guard below needs what the
+      // node held BEFORE this report overwrites it. Same row, same read, handed on.
+      const stored = await this.storedNodeSpecs(node.id);
+      // STICKY (#1158). Once a report's MACs share nothing with the ones the node last held, a second
+      // machine may be reporting under this derived key, and that is remembered on the marker for as
+      // long as the marker lives. Comparing only against the previous report would forget it the
+      // moment the other machine reported twice in a row — and reconcile, retiring the first
+      // machine's children. See {@link reconcileCollidingHostContainers} for how it clears.
+      const sharedKeySeenAt =
+        storedSharedKeySeenAt(stored.rest) ??
+        (sharesDerivedKeyWithAnotherMachine(stored.identity, incoming)
+          ? now.toISOString()
+          : undefined);
       const conflict: AgentReportIdentityConflict = {
         ...conflictFacts,
-        detectedAt:
-          (await this.storedConflictDetectedAt(node.id)) ?? now.toISOString(),
+        detectedAt,
+        ...(sharedKeySeenAt !== undefined ? { sharedKeySeenAt } : {}),
       };
-      return this.finishAck(
-        await this.refreshKnownNode({
-          node,
-          blob: { ...blob, identityConflict: conflict },
-          software,
+      const samePolicyGeneration = this.samePolicyGeneration(
+        report,
+        node.policyRevision,
+      );
+      const ack = await this.refreshKnownNode({
+        node,
+        blob: { ...blob, identityConflict: conflict },
+        software,
+        now,
+        agentVersion: report.agentVersion,
+        primaryIpAddress,
+        policyFields: this.policyWriteFields(
+          report,
+          node.policyRevision,
+          policy,
           now,
-          agentVersion: report.agentVersion,
-          primaryIpAddress,
-          policyFields: this.policyWriteFields(
-            report,
-            node.policyRevision,
-            policy,
-            now,
-          ),
-          samePolicyGeneration: this.samePolicyGeneration(
-            report,
-            node.policyRevision,
-          ),
-        }),
+        ),
+        samePolicyGeneration,
+        stored,
+      });
+      return this.reconcileCollidingHostContainers(
+        ack,
+        externalId,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
         policy,
-        report.agentVersion,
+        sharedKeySeenAt !== undefined,
       );
     };
 
@@ -2008,6 +2358,7 @@ export class InfraService {
         assetId: true,
         ipAddressSource: true,
         policyRevision: true,
+        retiredAt: true,
       },
     });
     if (own) return refreshWithMarker(own);
@@ -2069,6 +2420,7 @@ export class InfraService {
             assetId: true,
             ipAddressSource: true,
             policyRevision: true,
+            retiredAt: true,
           },
         });
         // No loop and no nudge: after P2002 the row exists, and the report that WON it emitted the
@@ -2129,7 +2481,7 @@ export class InfraService {
     });
 
     void this.syncNodeToSearch(created.id);
-    return this.finishAck(
+    return this.reconcileCollidingHostContainers(
       {
         nodeId: created.id,
         state: created.state,
@@ -2141,9 +2493,102 @@ export class InfraService {
           ? { softwareResend: true }
           : {}),
       },
+      externalId,
+      report,
+      now,
+      // A node created a moment ago has no stored revision — the same `null` its policy columns
+      // were just written against.
+      this.samePolicyGeneration(report, null),
+      principal,
       policy,
-      report.agentVersion,
+      // A node that did not exist a moment ago held no other machine's identity.
+      false,
     );
+  }
+
+  /**
+   * The colliding host's CONTAINERS (#1158) — reconciled under the clone NODE's own key, then the ack
+   * is finished.
+   *
+   * Until #1158 this branch reconciled no containers at all: the container key was derived from the
+   * REPORTED `externalId`, which both clones share, so each clone's report would have claimed its
+   * peer's children and the retire sweep would have flipped the peer's running containers OFFLINE
+   * every tick. Deriving the key from the node instead (`<externalId>#<discriminator>/container/<name>`)
+   * makes the clone's children its own, and the peer's prefix (`<externalId>/container/`) and the
+   * clone's can never select each other's rows. No existing child is re-keyed: an ordinary host's
+   * node key IS its reported key, and before #1158 nothing was ever written under a clone's prefix.
+   *
+   * Only containers. GUESTS and the ADR-0095 §6 identity join still do not run under a collision — a
+   * recorded ADR-0095 limitation this change does not touch.
+   *
+   * Two cases keep the pre-#1158 behaviour (no reconcile, nothing retired) because the key would not
+   * be unique to this machine:
+   *
+   *  - **The derived key does not round-trip.** The discriminator is agent free text; a serial ending
+   *    in `/container` makes `<key>/container/<name>` parse back to a different host key (the first
+   *    separator wins) and nests one clone's prefix inside another's. AUD-102 already keeps the full
+   *    separator out of the node key; this is the one partial shape it cannot see.
+   *  - **A second machine has been seen on the same derived key.** Two clones that share the first
+   *    serial resolve to ONE clone node, exactly as two clones shared one node before #1141 — their MACs
+   *    alternate on it. The first report whose MACs share nothing with the ones the node held stamps
+   *    `identityConflict.sharedKeySeenAt`, and from then on this node reconciles no containers. The
+   *    mark is STICKY on purpose: a per-report comparison forgets it as soon as one machine reports
+   *    twice in a row (jittered timers do this routinely), and that second report would reconcile and
+   *    retire the other machine's children. It clears only with the marker itself — the clone's
+   *    machine-id is fixed (the node is no longer reached), the operator merges the node (a merge drops
+   *    the marker) or discards it (the next report starts a fresh node). A genuine NIC swap on a lone
+   *    clone therefore also stops its container tracking until then: wrongly untracked is recoverable,
+   *    a cross-retire thrash writes OFFLINE flips and fact-change rows every tick.
+   *
+   * Children land PENDING and are NOT offered to the auto-confirm rules, the same posture the clone's
+   * own node gets ({@link autoConfirmProposal}): a host under suspicion is for a human to look at.
+   *
+   * NEVER FAILS THE REPORT, for the reason {@link reconcileChildren} gives.
+   */
+  private async reconcileCollidingHostContainers(
+    ack: AgentReportAck,
+    nodeKey: string,
+    report: AgentReport,
+    now: Date,
+    samePolicyGeneration: boolean,
+    principal: Principal | undefined,
+    policy: AgentPolicy | undefined,
+    sharedDerivedKey: boolean,
+  ): Promise<AgentReportAck> {
+    const containers = report.host.containers;
+    if (containers === undefined) {
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    if (!isUniqueContainerScope(nodeKey)) {
+      this.logger.warn(
+        `Containers for colliding host ${report.host.hostname} were not reconciled: its derived key ${nodeKey} cannot scope child keys unambiguously. Its containers stay untracked until its identity conflict is fixed.`,
+      );
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    if (sharedDerivedKey) {
+      this.logger.warn(
+        `Containers for colliding host ${report.host.hostname} were not reconciled: a second machine has been seen reporting under ${nodeKey} (network cards that shared nothing with the ones held), so its containers stay untracked until the identity conflict is resolved.`,
+      );
+      return this.finishAck(ack, policy, report.agentVersion);
+    }
+    try {
+      await this.applyContainerTopology(
+        ack.nodeId,
+        nodeKey,
+        containers,
+        report,
+        now,
+        samePolicyGeneration,
+        principal,
+        policy,
+        false,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Container topology for ${report.host.hostname} could not be reconciled — the host itself still reported. ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return this.finishAck(ack, policy, report.agentVersion);
   }
 
   /**
@@ -2152,7 +2597,9 @@ export class InfraService {
    * finish the ack. One seam, called from every ordinary ingest branch (known-key refresh, unknown-key
    * create, P2002 race), so a branch added later cannot ship a report that reconciles one child
    * channel and silently drops the other. Deliberately NOT called from {@link ingestCollidingHost}:
-   * a host under an identity collision reconciles no children — a recorded ADR-0095 limitation.
+   * a host under an identity collision reconciles its CONTAINERS through
+   * {@link reconcileCollidingHostContainers} (#1158) and no GUESTS and no identity join — the latter
+   * two remain a recorded ADR-0095 limitation.
    *
    * ABSENT AND EMPTY ARE DIFFERENT ANSWERS, per channel and independently. An absent `containers` or
    * `guests` key means that collector never probed — an older agent, a non-Linux collector, an
@@ -2186,6 +2633,12 @@ export class InfraService {
       try {
         await this.applyContainerTopology(
           ack.nodeId,
+          // The NODE's key (#1158). On every branch that reaches this seam the node was found or
+          // created by exact equality on `report.externalId`, so the two are the same string and
+          // every container key stays byte-identical to what #1139 has always written. The
+          // collision branch, whose node key differs, passes its own key — see
+          // {@link reconcileCollidingHostContainers}.
+          report.externalId,
           containers,
           report,
           now,
@@ -2248,12 +2701,19 @@ export class InfraService {
    */
   private async applyContainerTopology(
     hostNodeId: string,
+    // The reporting host's NODE `externalId` — the scope every child key is derived from (#1158).
+    // Never re-derived from the report here: for a colliding clone the report carries the machine-id
+    // its peer reports too, and only the node's disambiguated key is unique to this machine.
+    hostKey: string,
     containers: readonly AgentContainer[],
     report: AgentReport,
     now: Date,
     samePolicyGeneration: boolean,
     principal?: Principal,
     policy?: AgentPolicy,
+    // False under an identity collision (#1158): the clone's children are enrolled PENDING and left
+    // for a human, the same posture the clone's own node gets — see {@link autoConfirmProposal}.
+    offerAutoConfirm = true,
   ): Promise<void> {
     // A child's liveness follows its HOST's cadence, so it is judged against the host's served
     // staleness threshold (#1140). Without this, moving a host to a daily cadence would leave its
@@ -2283,17 +2743,22 @@ export class InfraService {
       externalId: string | null;
       specs: Prisma.JsonValue;
       assetId: string | null;
+      retiredAt: Date | null;
     }[] =
       (await this.prisma.infraNode.findMany({
         where: {
           reportingSource: report.reportingSource,
           externalId: {
-            startsWith: escapeLikePrefix(
-              containerExternalIdPrefix(report.externalId),
-            ),
+            startsWith: escapeLikePrefix(containerExternalIdPrefix(hostKey)),
           },
         },
-        select: { id: true, externalId: true, specs: true, assetId: true },
+        select: {
+          id: true,
+          externalId: true,
+          specs: true,
+          assetId: true,
+          retiredAt: true,
+        },
       })) ?? [];
     const knownByExternalId = new Map(
       known.flatMap((n) => (n.externalId ? [[n.externalId, n] as const] : [])),
@@ -2307,12 +2772,12 @@ export class InfraService {
     // by a throttle. The budget is per service account and shared fleet-wide, and children spend it
     // too, so exhausting it mid-list is a normal rollout event.
     const reported = new Set(
-      containers.map((c) => containerExternalId(report.externalId, c.name)),
+      containers.map((c) => containerExternalId(hostKey, c.name)),
     );
     const childIds: string[] = [];
     let budgetSpent = false;
     for (const container of containers) {
-      const externalId = containerExternalId(report.externalId, container.name);
+      const externalId = containerExternalId(hostKey, container.name);
       // The child's whole inventory blob — what this report WOULD store. Whether it is stored is
       // decided below: since #1153 the write is conditional on the facts actually having moved, on
       // the host path and here alike. When it is written it replaces the column wholesale, which is
@@ -2389,7 +2854,7 @@ export class InfraService {
         ) {
           const raced = await this.prisma.infraNode.findFirst({
             where: { reportingSource: report.reportingSource, externalId },
-            select: { id: true, specs: true, assetId: true },
+            select: { id: true, specs: true, assetId: true, retiredAt: true },
           });
           if (raced) {
             // No auto-confirm offer: the report that WON the race made it for this child already.
@@ -2411,6 +2876,7 @@ export class InfraService {
       }
       childIds.push(created.id);
       void this.syncNodeToSearch(created.id);
+      if (!offerAutoConfirm) continue;
       // The child half of #1145. A container child is offered to the matcher under its CONTAINER
       // NAME, with no IP of its own — the host owns the address, and pretending the child reported
       // one would let a subnet rule confirm containers on the strength of their host's wire.
@@ -2477,7 +2943,12 @@ export class InfraService {
    * about when these facts were gathered.
    */
   private async refreshContainerChild(
-    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    child: {
+      id: string;
+      specs: Prisma.JsonValue;
+      assetId: string | null;
+      retiredAt: Date | null;
+    },
     specs: ContainerSpecsBlob,
     status: InfraNodeStatus,
     report: AgentReport,
@@ -2511,9 +2982,16 @@ export class InfraService {
         lastReportedAt: now,
         agentVersion: report.agentVersion,
         ...childPolicyFields,
+        // A retired child its host lists again is not gone (#1701) — the host path's rule.
+        ...(child.retiredAt ? { retiredAt: null, retiredById: null } : {}),
       },
     });
-    await this.recordFactChanges(child.id, childChanges);
+    await this.recordFactChanges(
+      child.id,
+      child.retiredAt
+        ? [...childChanges, this.unretiredFactChange(child.id, child.retiredAt)]
+        : childChanges,
+    );
     if (child.assetId) {
       await this.syncAssetSpecs(child.assetId, { ...effective }, [
         'container',
@@ -2624,6 +3102,7 @@ export class InfraService {
           specs: true,
           assetId: true,
           deletedAt: true,
+          retiredAt: true,
         },
         includeSoftDeleted: true,
       } as Prisma.InfraNodeFindManyArgs)) as unknown as {
@@ -2632,6 +3111,7 @@ export class InfraService {
         specs: Prisma.JsonValue;
         assetId: string | null;
         deletedAt: Date | null;
+        retiredAt: Date | null;
       }[]) ?? [];
     const liveByExternalId = new Map<string, (typeof known)[number]>();
     /** ref key → the CANONICAL node an earlier §6 absorb resolved that guest to. */
@@ -2768,7 +3248,7 @@ export class InfraService {
         ) {
           const raced = await this.prisma.infraNode.findFirst({
             where: { reportingSource: report.reportingSource, externalId },
-            select: { id: true, specs: true, assetId: true },
+            select: { id: true, specs: true, assetId: true, retiredAt: true },
           });
           if (raced) {
             await this.refreshGuestChild(
@@ -2823,7 +3303,12 @@ export class InfraService {
    * {@link applyGuestTopology}).
    */
   private async refreshGuestChild(
-    child: { id: string; specs: Prisma.JsonValue; assetId: string | null },
+    child: {
+      id: string;
+      specs: Prisma.JsonValue;
+      assetId: string | null;
+      retiredAt: Date | null;
+    },
     specs: GuestSpecsBlob,
     status: InfraNodeStatus,
     report: AgentReport,
@@ -2851,8 +3336,16 @@ export class InfraService {
         lastReportedAt: now,
         agentVersion: report.agentVersion,
         ...childPolicyFields,
+        // A retired guest its hypervisor lists again is not gone (#1701).
+        ...(child.retiredAt ? { retiredAt: null, retiredById: null } : {}),
       },
     });
+    // Guests record no fact diff (see applyGuestTopology); the un-retire is a lifecycle row, not one.
+    if (child.retiredAt) {
+      await this.recordFactChanges(child.id, [
+        this.unretiredFactChange(child.id, child.retiredAt),
+      ]);
+    }
     if (child.assetId) {
       await this.syncAssetSpecs(child.assetId, { ...effective }, [
         'guest',
@@ -4654,6 +5147,72 @@ export class InfraService {
     return restored;
   }
 
+  // ── Retire + snooze: the HUMAN half (#1701, epic #1146 Q11/Q15) ───────────────────────────────────
+
+  /**
+   * Retire a node (#1701): mark it GONE rather than silent. The staleness sweeper skips it from now on,
+   * so it is never flipped OFFLINE or announced again; its history, edges, position and Asset link are
+   * untouched, and it stays on the map with a badge. Idempotent: an already-retired node keeps its
+   * original stamp. `retiredById` records the human; the controller admits humans only.
+   *
+   * Not recorded in the fact history: that table is the ingest path's, and a human retire is curation,
+   * attributed here instead. If the host reports again it is un-retired automatically — and THAT is
+   * recorded (see {@link refreshKnownNode}).
+   */
+  async retireNode(id: string, principal?: Principal) {
+    const node = await this.getNode(id);
+    if (node.retiredAt) return node;
+    const { userId } = this.actor.resolveActor(principal);
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { retiredAt: new Date(), retiredById: userId ?? null },
+    });
+  }
+
+  /** Un-retire a node (#1701): the sweeper judges it again from its next tick. Idempotent. */
+  async unretireNode(id: string) {
+    const node = await this.getNode(id);
+    if (!node.retiredAt) return node;
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { retiredAt: null, retiredById: null },
+    });
+  }
+
+  /**
+   * Snooze a node's offline alerts until `until` (#1701). The node still goes OFFLINE when it is silent
+   * — only the `infra.agent_offline` notification is withheld while the instant is in the future. A
+   * later call replaces the window. Bounded: `until` must be in the future and at most
+   * {@link INFRA_NODE_SNOOZE_MAX_DAYS} days ahead — a host that should never alert again is retired.
+   */
+  async snoozeNodeAlerts(id: string, until: string) {
+    const untilMs = Date.parse(until);
+    const nowMs = Date.now();
+    if (!Number.isFinite(untilMs) || untilMs <= nowMs) {
+      throw new BadRequestException('A snooze must end in the future.');
+    }
+    if (untilMs > nowMs + INFRA_NODE_SNOOZE_MAX_DAYS * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException(
+        `A snooze can last at most ${INFRA_NODE_SNOOZE_MAX_DAYS} days. To stop alerts for good, retire the node.`,
+      );
+    }
+    await this.getNode(id);
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { alertsSnoozedUntil: new Date(untilMs) },
+    });
+  }
+
+  /** End a node's snooze now (#1701). Idempotent. */
+  async unsnoozeNodeAlerts(id: string) {
+    const node = await this.getNode(id);
+    if (!node.alertsSnoozedUntil) return node;
+    return this.prisma.infraNode.update({
+      where: { id },
+      data: { alertsSnoozedUntil: null },
+    });
+  }
+
   // ── Identity reconciliation: the HUMAN half (ADR-0074 §3 amendment, #1141) ───────────────────────
 
   /**
@@ -5281,6 +5840,13 @@ export type AgentReportIdentityConflict = {
    * says how long it has been true rather than only "still true as of the last check-in".
    */
   detectedAt: string;
+  /**
+   * When a SECOND machine was first seen reporting under this node's derived key (#1158) — a report
+   * whose MACs shared nothing with the ones the node held. Carried across every re-stamp like
+   * `detectedAt`; while present the node reconciles no containers. Absent on every marker written
+   * before #1158 and on every clone only one machine has reported under.
+   */
+  sharedKeySeenAt?: string;
 };
 
 /**

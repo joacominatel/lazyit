@@ -1,6 +1,8 @@
 import { SmtpService } from './smtp.service';
 import { SMTP_SECRET_KEY_ENV } from './email.constants';
+import { encryptSmtpPassword } from './smtp.crypto';
 import type { PrismaService } from '../prisma/prisma.service';
+import { withGlobalOmit } from '../../test/prisma/global-omit';
 
 // Stub the generated Prisma client so ts-jest never resolves its ESM-style `.js` imports (the api
 // CommonJS-Jest convention — mirrors asset-tag-scheme.service.spec). PrismaService is mocked anyway.
@@ -45,7 +47,8 @@ describe('SmtpService', () => {
 
   beforeEach(() => {
     prisma = makePrisma();
-    service = new SmtpService(prisma);
+    // Answers like the real client: the envelope is globally omitted unless a read opts in (ADR-0105).
+    service = new SmtpService(withGlobalOmit(prisma));
   });
   afterEach(() => {
     if (original === undefined) delete process.env[SMTP_SECRET_KEY_ENV];
@@ -169,5 +172,29 @@ describe('SmtpService', () => {
     const result = await service.sendTest('someone@example.com');
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/not fully configured/i);
+  });
+  // ADR-0105: the envelope is globally omitted; the transport read opts it back in. Without the opt-in
+  // the password silently resolves to null and every authenticated relay refuses the send.
+  it('resolveConfig decrypts the stored password (the envelope is opted back in)', async () => {
+    process.env[SMTP_SECRET_KEY_ENV] = TEST_KEY;
+    const envelope = encryptSmtpPassword('relay-s3cret');
+    prisma.smtpSettings.findFirst.mockResolvedValue({
+      enabled: true,
+      host: 'smtp.example.com',
+      port: 587,
+      security: 'starttls',
+      username: 'mailer',
+      passwordCiphertext: envelope.ciphertext,
+      passwordIv: envelope.iv,
+      passwordAuthTag: envelope.authTag,
+      passwordKeyVersion: envelope.keyVersion,
+      fromAddress: 'it@example.com',
+      fromName: 'lazyit',
+      rejectUnauthorized: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const config = await service.resolveConfig(true);
+    expect(config?.password).toBe('relay-s3cret');
   });
 });

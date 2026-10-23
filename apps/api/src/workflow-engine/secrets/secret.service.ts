@@ -6,6 +6,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { CreateWorkflowSecret } from '@lazyit/shared';
+import { includeOmitted } from '../../prisma/prisma-omit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialUnavailableError } from '../handlers/step-handler';
 
@@ -267,6 +268,8 @@ export class SecretService implements OnModuleInit {
   async revealById(id: string): Promise<string> {
     const row = await this.prisma.workflowSecret.findFirst({
       where: { id, deletedAt: null },
+      // The envelope is globally omitted (ADR-0105); this is the one read that decrypts it.
+      omit: includeOmitted('workflowSecret'),
     });
     if (!row) {
       throw new CredentialUnavailableError();

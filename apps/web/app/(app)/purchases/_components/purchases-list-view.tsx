@@ -268,6 +268,7 @@ export function PurchasesListView() {
               total={page?.total}
               filename="purchases"
               permission="purchaseOrder:read"
+              resource="PURCHASE_ORDERS"
             />
             {newPurchaseAction}
           </>

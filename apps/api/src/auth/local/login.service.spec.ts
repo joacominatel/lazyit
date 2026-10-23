@@ -300,6 +300,8 @@ describe('LoginService', () => {
     // Normalized (trim + lowercase) and queried as an OR over email/username.
     expect(findFirst).toHaveBeenCalledWith({
       where: { OR: [{ email: 'alice' }, { username: 'alice' }] },
+      // The globally omitted hash is opted back in for the verify (ADR-0105) — without it no one logs in.
+      omit: { passwordHash: false },
     });
   });
 

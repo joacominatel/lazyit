@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-16
+updated: 2026-10-22
 ---
 
 # InfraNode
@@ -138,18 +138,49 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   **migration** inside a PVE cluster appears as old child OFFLINE on node A + new child on node B,
   surfaced as duplicate-suspects for a one-click operator merge — **no auto-merge in v1**, same
   reasoning as ADR-0093's no-retroactive-re-linking.
-- **A host in machine-id COLLISION has no container children at all (#1158).** The child key above is
-  derived from the **reported** `externalId`, which two clones share, so both would compute identical
-  container keys and each report would retire the other's still-running children. The #1141 collision
-  branch therefore skips container reconciliation entirely: a colliding host's containers go
-  **untracked** until its `/etc/machine-id` — on Windows, its `MachineGuid` — is fixed, then tracking
-  resumes on its own. The same property holds for `/guest/` children ([[0095-hypervisor-guest-inventory]]
-  "Known limitations"): a hypervisor host in collision reports no guests until its identity conflict
-  is resolved. A Windows image prepared with `sysprep /generalize` regenerates that key per
+- **A host in machine-id COLLISION keys its containers under its OWN node (#1158).** The child key's
+  host half is the reporting host's **node** `externalId`, not the reported one. For every ordinary
+  host the two are the same string (the node is found by exact equality on the reported key), so
+  those keys never moved. A clone's node is `<externalId>#<discriminator>`, so its children are
+  `<externalId>#<discriminator>/container/<name>`, and neither clone's retire sweep can select the
+  other's rows. Two cases still reconcile nothing, because the key would not be unique to one machine:
+  a discriminator ending in `/container`, and a clone node on which a second machine has been seen
+  (two clones sharing a first serial on ONE clone node). The latter is **sticky**: the first report
+  whose MACs share nothing with the ones the node held stamps `identityConflict.sharedKeySeenAt`, and
+  it clears only with the marker (machine-id fixed, node merged or discarded). A clone's children land
+  PENDING and are not offered to the auto-confirm rules. `/guest/` children are unchanged
+  ([[0095-hypervisor-guest-inventory]] "Known limitations"): a hypervisor host in collision reports no
+  guests until its identity conflict is resolved. A Windows image prepared with `sysprep /generalize` regenerates that key per
   clone and never enters this branch at all, which is the asymmetry the ADR-0074 §3 amendment for
-  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. Deliberate and
-  deferred (re-deriving the key would re-key every existing child); the guarantee that a colliding
-  host's report never retires its peer's children is pinned by test.
+  #1144 documents: the Linux baked-machine-id trap has no automatic Windows equivalent. The guarantee
+  that a colliding host's report never retires its peer's children is pinned by test, with
+  reconciliation running ([[0074-server-reporting-agent]] §3, the #1158 amendment).
+- **Retired is not OFFLINE** (#1701, epic #1146 Q11; [[0074-server-reporting-agent]] §4 amendment of
+  2026-10-22). `retiredAt` marks a node as **gone**: a decommissioned server or an uninstalled agent,
+  as distinct from one that has merely gone quiet. The staleness sweeper never selects a retired node,
+  so it is never flipped OFFLINE or announced. Its status stays what it was, and it stays on the map,
+  with its history, edges and Asset link intact. **The linked Asset is never touched**: retiring a
+  server is not disposing of the hardware. A node is retired in one of two ways:
+  - **A human** — `POST /infra/nodes/:id/retire`, which sets `retiredById` to that user.
+  - **Its own agent** on uninstall (`lazyit-agent decommission`, run by `install.sh --uninstall` /
+    `install.ps1 -Uninstall`) — a last report with `decommissioning: true`, which
+    retires the node that report's own reporting key resolves to (the clone's derived-key node for
+    a collided machine-id) **and its live agent-reported container and guest children** under that same
+    key, and ingests nothing else.
+
+  **A retired node that reports again is un-retired automatically**, and so is a container or guest
+  child its host lists again. That transition, and an agent's own decommission, is recorded as a
+  `node.lifecycle` row in [[infra-node-fact-change]]. A decommissioned host's agent-reported
+  children are retired with it (2026-10-22, CEO decision), never a peer's, and never one when the ingest
+  path itself would refuse to reconcile children under that key. The retire is not a new `state` or `status` value, because a retired node can be in
+  any of them. The fleet read keeps a retired host as a row but counts it only under
+  `summary.retired`, and the [[software-watch]] population excludes it.
+- **Offline alerts can be snoozed** (#1701, epic #1146 Q15). While `alertsSnoozedUntil` is in the
+  future, the sweeper still flips the node OFFLINE but sends no `infra.agent_offline` notification for
+  it. What decides it is when the flip happens: a node flipped inside the window is never announced,
+  not even when the window ends, and one first flipped after the window is announced as usual. A snooze must end
+  in the future and at most 90 days ahead (`INFRA_NODE_SNOOZE_MAX_DAYS`): a node that should never alert
+  again is retired. There is no per-group routing and no digest (CEO decision, Q15).
 - **Access surface, not a network model** (scope cut). `ipAddress` is **format-validated** as an IPv4
   or IPv6 value on write (shared `IpAddressSchema`, native zod — [[0090-ipam-validated-ip]] / #847): a
   human edit that is malformed is a clean `400`, and the agent DROPS a garbage NIC value rather than
@@ -199,13 +230,16 @@ state enums) live in `@lazyit/shared` (`packages/shared/src/schemas/infra.ts`).
 | `state` | `InfraNodeState` | `@default(CONFIRMED)`; PENDING = the v2 review tray. |
 | `reportingSource` | `string?` | which agent/host reported it (the dedup scope; a container child carries its host's). |
 | `externalId` | `string?` | the reconciliation key. A reported HOST: its `/etc/machine-id` on Linux, `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` on Windows (#1144; macOS platform UUID is reserved, no collector ships) — **except** on a host whose machine-id collided with one already in use (a cloned VM template), where it is the derived `<machine-id>#<serial-or-MAC>` (ADR-0074 §3 / #1141; a discriminator that would put `/container/` or `/guest/` in the key has its slashes swapped for `_`) and the value the host actually claims is kept in `specs.identityConflict.reportedExternalId`. A reported CONTAINER child: `<host externalId>/container/<name>` (#1139) — name-keyed so a recreate is not a duplicate, host-scoped so two hosts' `redis` stay two nodes. A reported GUEST child: `<host externalId>/guest/<ref>` ([[0095-hypervisor-guest-inventory]], shared `guestExternalId`) — **ref**-keyed (PVE vmid, Hyper-V VM GUID, libvirt domain UUID) so a rename is not a duplicate, host-scoped so vmid `101` on two cluster nodes stays two keys. Neither separator can occur in a host key, so the three spaces never collide on the shared partial unique index — and since AUD-102 a report whose host key carries `/container/` or `/guest/` is rejected on write (`AgentReportSchema`); stored rows are read as they are. |
-| `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container or guest child on every report that still lists it. |
+| `lastReportedAt` | `datetime?` | agent liveness (stale → OFFLINE). Advances for a host on every check-in and for a container or guest child on every report that still lists it. The §4 sweeper measures silence from the later of this and the API process's boot (#1674), so for one staleness window after a restart no node is flipped OFFLINE or announced for a gap it could not have reported across. |
 | `agentVersion` | `string?` | the reporting agent's build at its last check-in (#907); null for manual/pre-stamp nodes. |
 | `chassis` | `string?` | what the host physically **is** — `laptop` / `desktop` / `server` / `vm` / `container` / `unknown`, written from `host.chassis` on **every** agent report, create and refresh alike ([[0093-chassis-routing-and-asset-adoption]] §2 / #1198). **Agent-owned**: chassis is a *fact* (the `ipAddress` class), not curation (the `kind` class), so a re-image or a board swap changes the truth and the column follows — there is deliberately **no `chassisSource`** and no `MANUAL` counterpart, because chassis is never on the create/update DTOs and so there is no human write to protect. `String?` rather than a Prisma enum on purpose: the wire vocabulary `.catch()`es an unrecognised value so a report is never rejected for one, and a DB enum would turn that same value into a write error on the hot report path; validation lives in shared zod at the write boundary and the read is tolerant (`AgentChassisSchema.nullish().catch(null)`). An **absent** chassis never clears a stored one (a downgraded agent must not un-heal the estate); an explicit `unknown` does write, because "the probe did not run" is a different fact from any form factor. Null for a manual node, for a CONTAINER child (whose blob carries no `host` key at all — #1139), for a GUEST child (chassis is never written for a child — [[0095-hypervisor-guest-inventory]] §5, consistent with ADR-0093 §2; a guest's chassis arrives when its own in-guest agent reports) and for every row predating #1198, which self-heals on that host's next report — no backfill. Read by the canvas, which hides `laptop`/`desktop` by default (§5), and usable as an auto-confirm rule condition (§6). |
 | `agentPolicy` | `jsonb?` | this node's own agent-policy override — the NARROWEST of the three #1140 scopes (instance default < service account < node). A partial `AgentPolicyOverride` (zod in `@lazyit/shared`): a closed set of booleans, integers and **glob** strings, never a command/script/path/regex. Null = "adds no override", which is every pre-#1140 row. Read-TOLERANT — an unparseable blob resolves as no override rather than failing a report. Written only by `PUT /infra/nodes/:id/agent-policy` (human-only); **no editor ships in this build** — the UI edits the instance default. |
 | `policyRevision` | `int?` | the policy generation the agent last **echoed** (#1140) — the acknowledgement half. Equal to the instance revision (`GET /infra/agent-policy`) = *applied*; lower = *pending* until the next check-in. Null for a manual node and for any agent predating the policy channel, which must render as "not reporting a policy", never as "pending". |
 | `policyAppliedAt` | `datetime?` | when the echoed revision last **changed** — i.e. when this host actually picked a new policy up. Deliberately not advanced on every report, or it would just be a second `lastReportedAt`. |
 | `policyStaleAfterSeconds` | `int?` | the staleness threshold last **served** to this node, denormalized so the §4 sweeper judges each node against the cadence it was told instead of one global env var (#1140). A container child inherits its host's. Written only when the report **echoed a `policyRevision`** — an agent that predates the policy channel is not running a served threshold, so its row stays null and keeps the env var — and rewritten on every such report, so it self-heals after any policy change. Null = never served one → the sweeper falls back to `INFRA_AGENT_STALE_AFTER_MS`. |
+| `retiredAt` | `datetime?` | when the node was RETIRED (#1701) — gone, not silent; the sweeper skips it. Set by a human retire or the host's own decommissioning report; cleared by an un-retire or automatically when the node reports again. Null = active, which is every row that predates the column. On the list row, the graph projection and the fleet row. |
+| `retiredById` | `uuid?` | FK → [[user]], `onDelete: SetNull`. The human who retired it; null for an agent self-retire or a departed user. |
+| `alertsSnoozedUntil` | `datetime?` | offline alerts snoozed until this instant (#1701). Only a FUTURE value suppresses `infra.agent_offline`; the OFFLINE flip itself still happens, and a past value is inert. On the list row, the graph projection and the fleet row. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete = off the map. |
@@ -247,7 +281,8 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
     is not, so for a caller without `user:read` each owner keeps `userId` and its names and carries
     `email: null`. The same gate applies to the deprecated `GET /infra/nodes` array, the drill-in
     below (and every write route that returns it), and therefore to the AI infra tools, which read
-    through these routes as the caller.
+    through these routes as the caller. The asset itself does **not** gate them: on the asset reads
+    every `asset:read` holder sees owners' emails, by decision (#1636, see [[asset]]).
     **Minus `specs`** (#1135): a lean `select` projection omits the blob, because on an agent-reported
     host it is the whole inventory (installed-software list included) and this endpoint is polled —
     every 40s by the PENDING review tray, every 5s by the create-agent wizard. Nothing renders `specs`
@@ -292,7 +327,7 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
   `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
   its edges with it, so the canvas cannot draw or highlight that relationship). Each item is
-  projected to exactly `{ id, label, kind, status, ipAddress, chassis, x, y }` — the `owners` /
+  projected to exactly `{ id, label, kind, status, ipAddress, chassis, retiredAt, alertsSnoozedUntil, x, y }` (the two lifecycle timestamps since #1701, for the Retired and Snoozed badges) — the `owners` /
   `assetName` relation joins and the `shortcuts` blob are dropped, because the board never drew them,
   so this complete read is strictly **cheaper** than the paged list read it replaced. Bounded at
   `INFRA_GRAPH_NODES_MAX` = **2000**, with `truncated` **REQUIRED** on the wire (`total >
@@ -324,6 +359,11 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
   **re-pointing an already-linked node is a `400`**, #1117).
 - `PATCH /infra/nodes/:id/position` — persist canvas `{ x, y }` (debounced on drag-stop).
 - `DELETE /infra/nodes/:id` — soft delete (off the map). `POST /infra/nodes/:id/restore` — back on.
+- `POST /infra/nodes/:id/retire` / `POST /infra/nodes/:id/unretire` — retire or un-retire the node
+  (#1701). Both are idempotent and return the node. `infra:manage`, human-only.
+- `PUT /infra/nodes/:id/snooze` `{ until }` / `DELETE /infra/nodes/:id/snooze` — set or clear the
+  offline-alert snooze (#1701). A `400` when `until` is not in the future or is more than 90 days ahead.
+  `infra:manage`, human-only.
 - `GET /infra/nodes/:id/impact` — **blast radius** ([[0070-infra-topology-graph]] §7): the downstream
   set reachable over active inverse RUNS_ON/DEPENDS_ON edges, each with a hop `depth`. "What's
   affected if this goes down." This recursive query remains **estate-wide** and is not computed from
@@ -395,7 +435,9 @@ See [[infra-auto-confirm-rule]] for the saved-rule half of the same amendment.
   (they inherit their host's `agentVersion`, so counting them would inflate every bucket); the test is
   the child-key namespace, not `kind`, which a VM guest shares with a VM host (AUD-057). The same
   population feeds the major-behind line on the update email. `osFamily` is
-  projected out of `specs` per read rather than added as a column. Deliberately **not** on the 5–40s
+  projected out of `specs` per read rather than added as a column. A retired host stays a row (with
+  `retiredAt`) but is counted only under `summary.retired` — not in `total`, the version buckets,
+  `notReporting` or `degraded` — and not in the major-behind email count (#1701). Deliberately **not** on the 5–40s
   poll the node list is on: it is a page an operator opens, and it is the heavier read (#1135).
 
 The web consumes it at **Assets › Topology › Agents** (`?view=agents`, #1207): the distribution, the
@@ -484,11 +526,19 @@ this build, which that section now states on screen rather than implying only on
   posture and not a styling choice. Still **inert until #1203**: every Docker-served binary reports
   `agentVersion: "dev"` today, so an estate honestly reads as entirely "version unknown" and fills in as
   hosts are re-installed — the view says exactly that rather than implying those agents are fine.
+- ~~**Software watchlist**~~ **Shipped (API + web, #1684; epic #1146 item 4)** — see [[software-watch]]. The
+  first cross-host read of `specs.software`: an operator-maintained list of package names, each answered
+  on read with *package → versions → host counts, plus the hosts missing it* over the same population the
+  fleet view counts (agent hosts, children excluded). **Distribution only** (CEO Q12): no version
+  comparison, no EOL, no CVE feed. A node storing **no** `software` key — which is what a
+  `softwareState: 'disabled'` report leaves (#1142) — reads **UNKNOWN, never MISSING**. It reads `specs`
+  through two narrow jsonb projections, never the blob, so the #1135 "detail-only" rule for `specs`
+  stands. No column on this table changes.
 - List-row asset name/owner enrichment (#750); deep network model (VLAN/ports/IPAM); metrics/alerting;
   per-kind `specs` validation; multi-board layouts; a `SERVICE` kind linked to [[application]].
   → [[0070-infra-topology-graph]] "Future".
 
-Related: [[infra-edge]] · [[infra-node-fact-change]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
+Related: [[infra-edge]] · [[infra-node-fact-change]] · [[software-watch]] · [[asset]] · [[asset-assignment]] · [[asset-centric]] · [[user]] ·
 [[0093-chassis-routing-and-asset-adoption]] · [[0094-assisted-agent-update]] ·
 [[0095-hypervisor-guest-inventory]] ·
 [[0070-infra-topology-graph]] · [[0074-server-reporting-agent]] · [[0019-asset-assignment-integrity]] ·

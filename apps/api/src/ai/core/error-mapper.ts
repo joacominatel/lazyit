@@ -63,6 +63,30 @@ const PRISMA_CODES: Readonly<Record<string, MappedToolError>> = {
   },
 };
 
+/** A transaction that lost a lock race (Postgres 40P01 / 40001): nothing was saved, and a retry should pass. */
+const RETRYABLE_CONFLICT: MappedToolError = {
+  code: 'CONFLICT',
+  status: 409,
+  message:
+    'This change ran into another one at the same moment and was not saved. Try again.',
+};
+const RETRYABLE_PG_CODES: ReadonlySet<string> = new Set(['40P01', '40001']);
+
+/** The same rule as `isRetryableConflict` in the PrismaExceptionFilter, read structurally. */
+function isRetryableConflict(err: unknown, code: string): boolean {
+  if (code === 'P2034') return true;
+  if (code !== 'P2010') return false;
+  const meta = (err as { meta?: { driverAdapterError?: unknown } }).meta;
+  const cause = (
+    meta?.driverAdapterError as
+      { cause?: { originalCode?: unknown } } | undefined
+  )?.cause;
+  return (
+    typeof cause?.originalCode === 'string' &&
+    RETRYABLE_PG_CODES.has(cause.originalCode)
+  );
+}
+
 function prismaCode(err: unknown): string | undefined {
   if (!(err instanceof Error) || err.name !== 'PrismaClientKnownRequestError') {
     return undefined;
@@ -95,6 +119,9 @@ export function mapToolError(err: unknown): MappedToolError {
     };
   }
   const prisma = prismaCode(err);
+  if (prisma !== undefined && isRetryableConflict(err, prisma)) {
+    return RETRYABLE_CONFLICT;
+  }
   if (prisma !== undefined && PRISMA_CODES[prisma]) {
     return PRISMA_CODES[prisma];
   }

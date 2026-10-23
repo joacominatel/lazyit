@@ -6,12 +6,16 @@ import type {
   UpdateDirectoryConnection,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
+import { includeOmitted } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import { DIRECTORY_CONNECTION_SINGLETON_ID } from './directory.constants';
 import { decryptBindPassword, encryptBindPassword } from './directory.crypto';
 import type { ResolvedDirectoryConfig } from './directory-ldap.client';
 
-/** The DirectoryConnection Prisma row shape this service maps (kept explicit for the redaction helper). */
+/**
+ * The DirectoryConnection Prisma row shape this service maps (kept explicit for the redaction helper).
+ * Of the envelope it carries only the ciphertext, opted back in for `bindPasswordSet` (ADR-0105).
+ */
 type DirectoryConnectionRow = {
   enabled: boolean;
   host: string | null;
@@ -24,8 +28,6 @@ type DirectoryConnectionRow = {
   attributeMap: Prisma.JsonValue | null;
   offboardGraceDays: number;
   bindPasswordCiphertext: string | null;
-  bindPasswordIv: string | null;
-  bindPasswordAuthTag: string | null;
   bindPasswordKeyVersion: number | null;
   serviceAccountId: string | null;
   lastSyncAt: Date | null;
@@ -52,6 +54,8 @@ export class DirectoryConnectionService {
   async getSettings(): Promise<DirectoryConnection> {
     const row = await this.prisma.directoryConnection.findFirst({
       where: { id: DIRECTORY_CONNECTION_SINGLETON_ID },
+      // `bindPasswordSet` is derived from it (ADR-0105 global omit); toWire drops it.
+      omit: { bindPasswordCiphertext: false },
     });
     if (!row) {
       const now = new Date().toISOString();
@@ -131,6 +135,7 @@ export class DirectoryConnectionService {
         ...base,
         ...envelopeData,
       },
+      omit: { bindPasswordCiphertext: false }, // for `bindPasswordSet`; toWire drops it
     });
     return this.toWire(row);
   }
@@ -146,6 +151,7 @@ export class DirectoryConnectionService {
   ): Promise<ResolvedDirectoryConfig | null> {
     const row = await this.prisma.directoryConnection.findFirst({
       where: { id: DIRECTORY_CONNECTION_SINGLETON_ID },
+      omit: includeOmitted('directoryConnection'), // decrypt in memory (ADR-0105 opt-in)
     });
     if (!row) return null;
     if (requireEnabled && !row.enabled) return null;

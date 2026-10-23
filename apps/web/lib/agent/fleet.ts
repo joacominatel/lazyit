@@ -66,6 +66,9 @@ export const AGENT_FLEET_FILTERS = [
   "current",
   "notReporting",
   "degraded",
+  // Retired hosts (#1701): rows in the table, but outside every other view, exactly as the summary
+  // counts them.
+  "retired",
 ] as const;
 export type AgentFleetFilter = (typeof AGENT_FLEET_FILTERS)[number];
 
@@ -91,9 +94,20 @@ export function agentFleetFilterFromParam(
  * rather than trusting the restatement.
  */
 export function isNotReportingNode(
-  node: Pick<AgentFleetNode, "status" | "lastReportedAt">,
+  node: Pick<AgentFleetNode, "status" | "lastReportedAt" | "retiredAt">,
 ): boolean {
+  // A RETIRED host is gone, not silent (#1701) — never "not reporting", as in the summary.
+  if (isRetiredNode(node)) return false;
   return node.status === "OFFLINE" || node.lastReportedAt === null;
+}
+
+/**
+ * Is this host retired (#1701)? `summarizeAgentFleet` counts a retired host under `retired` and in
+ * NO other cell, so every filter here applies the same exclusion: a view and the number on the button
+ * that opened it always agree. An API older than #1701 sends no `retiredAt`, which reads as active.
+ */
+export function isRetiredNode(node: Pick<AgentFleetNode, "retiredAt">): boolean {
+  return Boolean(node.retiredAt);
 }
 
 /** Everything the fleet table filters on: one free-text needle and one view. */
@@ -117,7 +131,11 @@ export function filterAgentFleetNodes(
 ): AgentFleetNode[] {
   const needle = q.trim().toLowerCase();
   return nodes.filter((node) => {
-    if (filter === "notReporting") {
+    if (filter === "retired") {
+      if (!isRetiredNode(node)) return false;
+    } else if (filter !== "ALL" && isRetiredNode(node)) {
+      return false;
+    } else if (filter === "notReporting") {
       if (!isNotReportingNode(node)) return false;
     } else if (filter === "degraded") {
       if (!node.degraded) return false;
@@ -180,8 +198,10 @@ export function agentFleetCredentialBlock(
  * silence, and on an estate that predates #1203 `unknown` is most of the fleet.
  */
 export function isAgentUpdatable(
-  node: Pick<AgentFleetNode, "versionBucket">,
+  node: Pick<AgentFleetNode, "versionBucket" | "retiredAt">,
 ): boolean {
+  // A retired host has no agent left to update (#1701).
+  if (isRetiredNode(node)) return false;
   return node.versionBucket === "majorBehind" || node.versionBucket === "behind";
 }
 

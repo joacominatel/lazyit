@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-21
 ---
 
 # Application
@@ -45,7 +45,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   category never deletes its applications.
 - **A write never files under an archived category** — create, or an update that changes `categoryId`, is a
   `400` when the category is missing or soft-deleted. An update that leaves a legacy archived category
-  unchanged is accepted, and reads stay tolerant of it.
+  unchanged is accepted, and reads stay tolerant of it. A write naming a category locks it `FOR SHARE`
+  in its transaction, before the application row, so a concurrent category delete cannot strand it
+  there (#1604).
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
@@ -130,8 +132,11 @@ Indexes: `@@index([categoryId])`.
 - `GET /applications/:id` — one by id (`404` if missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
-- `GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` — the same grants as CSV
-  (see [[access-grant]] § Export).
+- `GET /applications/:id/access-grants/page?status=&accessLevel=&noAccessLevel=&q=` — one page of this
+  app's grants, filtered server-side, and `GET /applications/:id/access-grants/summary` — its headline
+  counts and levels (#1660; see [[access-grant]] § Endpoints).
+- `GET /applications/:id/access-grants/export` — the same grants as CSV, with either the old
+  `activeOnly`/`includeExpired` filters or the paged route's filters (see [[access-grant]] § Export).
 - `POST /applications` — create.
 - `PATCH /applications/:id` — partial update. `null` clears an optional field (`description`, `url`,
   `vendor`, `notes`, `metadata`, the seat fields); `categoryId: null` detaches the category.

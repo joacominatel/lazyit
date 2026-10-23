@@ -34,10 +34,14 @@ import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import {
+  ASSET_OWNER_USER_SELECT,
+  PUBLIC_USER_SELECT,
+} from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
+import { lockLiveParent } from '../common/parent-row-lock';
 import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
 import {
   AssetHistoryService,
@@ -61,6 +65,13 @@ import {
   statusChangedPayload,
   type LiveStatusLabel,
 } from '../asset-status-labels/asset-status-label-lock';
+
+/** The 400 for a write that names a missing or archived location. */
+function locationNotLive(locationId: string): BadRequestException {
+  return new BadRequestException(
+    `Location ${locationId} not found (missing or archived)`,
+  );
+}
 
 /**
  * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
@@ -160,6 +171,13 @@ export interface AssetFilters {
    * `expired` = warranty end already passed. Assets with no `warrantyEnd` match neither.
    */
   warranty?: AssetWarrantyFilter;
+  /**
+   * The acquisition-date window (#1503), ISO datetimes, both inclusive: the asset's `purchaseDate`, or its
+   * `createdAt` when it has no purchase date, within `[acquiredFrom, acquiredTo]`. Either bound alone is open
+   * on the other side. A plain-column filter (`asset:read`), unlike the purchase filters below.
+   */
+  acquiredFrom?: string;
+  acquiredTo?: string;
   /** Exact, case-sensitive asset tags (#1387): the assets holding any of them. */
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
@@ -238,13 +256,27 @@ const ASSET_RELATIONS = {
     orderBy: { assignedAt: 'desc' },
     // The owner through the PUBLIC column allowlist (SEC-085) — a whole-row `user: true` put the
     // owner's passwordHash and session epochs on GET /assets/:id for every `asset:read` holder.
+    // This full allowlist is for a caller holding `user:read` only (#1685); see ASSET_RELATIONS_OWNER_ONLY.
     include: { user: { select: PUBLIC_USER_SELECT } },
   },
 } satisfies Prisma.AssetInclude;
 
-type AssetWithIncludes = Prisma.AssetGetPayload<{
-  include: typeof ASSET_RELATIONS;
-}>;
+/**
+ * {@link ASSET_RELATIONS} for a caller WITHOUT `user:read` (#1685): each owner carries only its id,
+ * name, email and `deletedAt` — the inventory record every `asset:read` holder sees (#1636). Role,
+ * `legajo`, `username`, `directoryAttrs` and the rest of the directory columns are never read.
+ */
+const ASSET_RELATIONS_OWNER_ONLY = {
+  ...ASSET_RELATIONS,
+  assignments: {
+    ...ASSET_RELATIONS.assignments,
+    include: { user: { select: ASSET_OWNER_USER_SELECT } },
+  },
+} satisfies Prisma.AssetInclude;
+
+type AssetWithIncludes =
+  | Prisma.AssetGetPayload<{ include: typeof ASSET_RELATIONS }>
+  | Prisma.AssetGetPayload<{ include: typeof ASSET_RELATIONS_OWNER_ONLY }>;
 
 /**
  * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
@@ -354,6 +386,26 @@ type LeanListRow = Omit<
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
+ * The acquisition-date window (#1503): the asset's purchase date within `[from, to]`, or — for an asset with
+ * no purchase date — the day it was recorded. Both bounds inclusive, either one optional; neither → no filter.
+ * The link picker's "created near the order date" chip: a back-linked asset is usually dated by its purchase,
+ * a received one only by its creation.
+ */
+export function acquiredWindowWhere(
+  from: string | undefined,
+  to: string | undefined,
+): Prisma.AssetWhereInput | undefined {
+  if (from === undefined && to === undefined) return undefined;
+  const range: Prisma.DateTimeFilter = {
+    ...(from !== undefined ? { gte: new Date(from) } : {}),
+    ...(to !== undefined ? { lte: new Date(to) } : {}),
+  };
+  return {
+    OR: [{ purchaseDate: range }, { purchaseDate: null, createdAt: range }],
+  };
+}
+
+/**
  * The `warrantyEnd` predicate for the warranty-window list filter (#955). `expiring90d` = the same
  * (now, now + N days] look-ahead the dashboard tile counts (warranty not yet lapsed but ending soon);
  * `expired` = warranty end already in the past. `now` is captured at call time so the window tracks
@@ -427,7 +479,8 @@ export class AssetsService {
    * 400 unless the location a write names is LIVE. A soft-deleted location still passes the foreign key, so
    * without this an asset could be created into, received into or moved to an archived location. Write-only:
    * reads stay tolerant, and an update that leaves the location unchanged is not checked (a legacy row
-   * stays editable).
+   * stays editable). This unlocked read is only the bulk receive's upfront check; each write re-checks under
+   * {@link lockLocationLive}.
    */
   private async assertLocationLive(
     client: Prisma.TransactionClient | PrismaService,
@@ -439,10 +492,21 @@ export class AssetsService {
       select: { id: true },
     });
     if (!location) {
-      throw new BadRequestException(
-        `Location ${locationId} not found (missing or archived)`,
-      );
+      throw locationNotLive(locationId);
     }
+  }
+
+  /**
+   * {@link assertLocationLive} under a lock (#1604): the location row is locked `FOR SHARE` for the rest of the
+   * transaction, so a concurrent location delete (which locks it `FOR UPDATE` before scanning its assets) either
+   * waits for this write and then resolves the asset with the rest, or commits first and this write is a 400.
+   * Taken before the asset row, as every parent lock is.
+   */
+  private async lockLocationLive(
+    tx: Prisma.TransactionClient,
+    locationId: string,
+  ): Promise<boolean> {
+    return lockLiveParent(tx, 'locations', locationId);
   }
 
   /** 400 unless the model a write names is LIVE — the same rule as {@link assertLocationLive}. */
@@ -561,6 +625,34 @@ export class AssetsService {
     };
   }
 
+  /**
+   * Whether an asset read may inline its owners' directory columns (role, `legajo`, `username`,
+   * `directoryAttrs`, …) for this caller (#1685) — the `user:read` the directory itself requires. Without
+   * it an owner is only id, name, email and `deletedAt`. Public because the controller asks it for the
+   * assignment read, which AssetAssignmentsService builds.
+   */
+  canReadOwnerDetails(principal?: Principal): Promise<boolean> {
+    return this.holds(principal, 'user:read');
+  }
+
+  /**
+   * Authorize the by-person filter (`assignedToUserId`) for `principal` (#1685): 403 unless it holds
+   * `user:read`. Listing the assets a NAMED person holds is a directory-relational lookup, like
+   * `GET /users/:id/assignments`, so `asset:read` alone does not grant it. The `/assets/mine` self-read
+   * does not come through here: it filters by the caller's own id, taken from the principal.
+   */
+  async authorizePersonFilter(
+    assignedToUserId: string | undefined,
+    principal?: Principal,
+  ): Promise<void> {
+    if (assignedToUserId === undefined) return;
+    if (!(await this.holds(principal, 'user:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by person needs user:read',
+      );
+    }
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -658,6 +750,8 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    acquiredFrom,
+    acquiredTo,
     purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
     // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
@@ -683,8 +777,12 @@ export class AssetsService {
             },
           ]),
     ];
+    // The acquisition window (#1503) — an OR of its own, so it joins the AND list rather than the top-level
+    // `OR` the text search writes.
+    const acquired = acquiredWindowWhere(acquiredFrom, acquiredTo);
+    const and = [...purchase, ...(acquired ? [acquired] : [])];
     return {
-      ...(purchase.length > 0 ? { AND: purchase } : {}),
+      ...(and.length > 0 ? { AND: and } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.
@@ -795,12 +893,22 @@ export class AssetsService {
     };
   }
 
-  /** A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. */
-  async findOne(id: string) {
-    const asset = await this.prisma.asset.findFirst({
-      where: { id },
-      include: ASSET_RELATIONS,
-    });
+  /**
+   * A single non-deleted asset by id, expanded with its relations; 404 if missing or deleted. Each active
+   * owner carries the full public user columns only for a caller holding `user:read`, otherwise only its
+   * id, name, email and `deletedAt` (#1685). No principal → the trimmed owner (fail-closed).
+   */
+  async findOne(id: string, principal?: Principal) {
+    const full = await this.canReadOwnerDetails(principal);
+    const asset = full
+      ? await this.prisma.asset.findFirst({
+          where: { id },
+          include: ASSET_RELATIONS,
+        })
+      : await this.prisma.asset.findFirst({
+          where: { id },
+          include: ASSET_RELATIONS_OWNER_ONLY,
+        });
     if (!asset) {
       throw new NotFoundException(`Asset ${id} not found`);
     }
@@ -856,8 +964,14 @@ export class AssetsService {
             status,
             statusLabelId,
           );
-          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
-          await this.assertLocationLive(tx, rest.locationId);
+          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400). The location
+          // stays locked FOR SHARE until the commit, so a concurrent location delete cannot strand this asset.
+          if (
+            rest.locationId &&
+            !(await this.lockLocationLive(tx, rest.locationId))
+          ) {
+            throw locationNotLive(rest.locationId);
+          }
           if (rest.modelId) {
             const model = await tx.assetModel.findFirst({
               where: { id: rest.modelId, deletedAt: null },
@@ -1115,6 +1229,12 @@ export class AssetsService {
         typeof statusLabelId === 'string'
           ? await this.liveStatusLabel(tx, statusLabelId)
           : undefined;
+      // Then the named location FOR SHARE (#1604), also before the asset row: a location delete locks the
+      // location and then its assets, so a parent is never waited for while the asset is held.
+      const locationLive =
+        typeof rest.locationId === 'string'
+          ? await this.lockLocationLive(tx, rest.locationId)
+          : true;
       await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ${id} FOR UPDATE`;
       const before = await tx.asset.findFirst({
         where: { id, deletedAt: null },
@@ -1140,8 +1260,12 @@ export class AssetsService {
         label,
       );
       // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
-      if (rest.locationId !== before.locationId) {
-        await this.assertLocationLive(tx, rest.locationId);
+      if (
+        rest.locationId &&
+        rest.locationId !== before.locationId &&
+        !locationLive
+      ) {
+        throw locationNotLive(rest.locationId);
       }
       if (rest.modelId !== before.modelId) {
         await this.assertModelLive(tx, rest.modelId);
@@ -1246,7 +1370,7 @@ export class AssetsService {
     }
     if (existing.deletedAt === null) {
       // Already live — return the expanded view; no RESTORED event for a no-op.
-      return this.findOne(id);
+      return this.findOne(id, principal);
     }
     const restored = await this.prisma.$transaction(async (tx) => {
       const row = await tx.asset.update({
@@ -1263,7 +1387,7 @@ export class AssetsService {
     // Re-index the restored asset (ADR-0035).
     this.search.upsert('assets', projectAsset(restored));
     // Return the expanded relation graph (same shape as findOne), consistent with the no-op branch.
-    return this.findOne(id);
+    return this.findOne(id, principal);
   }
 
   // --- batch (bulk) actions (ADR-0030 amendment) ---------------------------

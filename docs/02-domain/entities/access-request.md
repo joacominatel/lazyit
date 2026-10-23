@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-10-22
 ---
 
 # AccessRequest
@@ -43,6 +43,12 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
 - **Approval is atomic:** the [[access-grant]] is created and the request flipped to `APPROVED` in **one
   transaction**, via `AccessGrantsService.createWithinApproval` — the grant inherits the request's
   `accessLevel`. The workflow engine fires AFTER the grant commits ([[0054-applications-workflow-engine]]).
+- **Approval re-checks the person (#1661):** the grant write path refuses a person who is no longer
+  live, active and account-holding, so approving a request whose person was deactivated after filing is
+  a **400** (`ACCESS_GRANT_PERSON_INACTIVE` for a deactivated person) and the request stays `PENDING`
+  for the approver to deny. Decided 2026-10-21: no auto-deny when a person is deactivated or
+  offboarded; deciding stays human-only ([[0085-access-request-flow]]); grants to inactive people are
+  refused with `400 ACCESS_GRANT_PERSON_INACTIVE`.
 - **On behalf of someone else (#1645, CEO 2026-10-17):** `POST /access-requests` takes an optional
   `requesterId`. Omitted or the caller's own id, nothing changes. Another person's id needs
   `accessGrant:grant`, the permission that decides requests (otherwise **403**
@@ -56,6 +62,13 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   **deciding** reuses `accessGrant:grant` (no new verb); both approve/deny are **human-only**. Listing all
   requests needs `accessRequest:read` (ADMIN+MEMBER), but a requester always sees their **own** via
   `GET /access-requests/mine`. → [[0046-roles-permissions-v2]].
+- **The requester sees whether their account was set up (#1700).** On `GET /access-requests/mine` each
+  request carries `provisioning`: for an approved request whose access is still active, the coarse
+  status of the grant it created (`NONE`, `IN_PROGRESS`, `DONE`, `WAITING_ON_IT`, mapped from that
+  grant's latest provisioning run); `null` for a PENDING or DENIED request, and for an approved one
+  whose grant was revoked since (by hand or by the expiry sweep). Computed for the whole page in two
+  batched reads (the still-active grants, then their runs), never on the estate-wide `GET /access-requests`, and with no workflow detail. The mapping is in
+  [[access-grant#Provisioning status]].
 - **Self-approval is allowed (CEO 2026-09-25, #1344).** A decider holding `accessGrant:grant` may approve
   or deny their **own** request: the route does not block it and the web UI adds no warning. The AI
   assistant's approval card only states the fact ("You are deciding your own request."), without a

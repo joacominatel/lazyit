@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-16
+updated: 2026-10-21
 deciders: [Joaquín Minatel]
 ---
 
@@ -27,6 +27,13 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 `settings:manage` no longer edits the matrix. See *Amendment — the matrix is edited by an ADMIN only* below.
 **Amended** — 2026-10-16 (SEC-088, CEO decision): a delegated `settings:manage` no longer saves SMTP, and
 mints service-account verbs only within its own role. See *Amendment — SMTP and service accounts* below.
+
+> **Superseded in part** by [[0104-custom-roles]] (2026-10-21, CEO decision on #1560): **§1** (the three
+> roles stay fixed) and the deferral of Option B. Custom roles are the accepted direction: a `roles`
+> table with ADMIN, MEMBER and VIEWER as protected system rows. **The build is deferred**, so until
+> ADR-0104's U1 ships the code still runs exactly what §1 describes. The catalog (§2), the DB-first
+> role-to-permission map (§3), the read tiers (§4), ADMIN as the immutable full set (§5) and the
+> amendments below still stand.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -88,7 +95,8 @@ Constant constraints carried from the auth arc:
   operators define their own roles and assign permissions freely. Rejected for now: it breaks the
   fixed-role invariants the whole auth stack leans on (last-admin, first-user-ADMIN, the IdP role
   mirror of exactly three project roles), adds a role-management UI + lifecycle, and over-serves a
-  5–20-person single-org team. **Deferred to a future ADR**, not discarded.
+  5–20-person single-org team. **Deferred to a future ADR**, not discarded. *(Accepted 2026-10-21 in
+  [[0104-custom-roles]], build deferred.)*
 - **Option C — Keep ADR-0040 as-is (coarse `@Roles` only).** Zero new surface. Rejected: it leaves the
   role→capability mapping uneditable-without-code and the sensitive reads wide open — the two gaps
   this ADR exists to close.
@@ -98,6 +106,10 @@ Constant constraints carried from the auth arc:
 Adopt **Option A**. The shape:
 
 ### 1. Roles stay fixed; permissions become the unit of authorization
+
+> **Superseded** by [[0104-custom-roles]] (2026-10-21). Permissions stay the unit of authorization; the
+> fixed set of roles does not. The build is deferred, so this section still describes the code as it runs
+> today.
 
 `enum Role { ADMIN MEMBER VIEWER }` is **unchanged** (schema, `RoleSchema` in `@lazyit/shared`, the IdP
 mirror of exactly three project roles — all untouched). What changes is that a privilege decision will
@@ -306,7 +318,8 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   `isAdmin` because the API's `assertCanListDeleted` keeps the `deleted=only` slice role-based, not a
   permission.
 - **Fast-follow — service accounts** reuse this same catalog.
-- **Future ADR — dynamic custom roles** (Option B), if ever needed.
+- **Future ADR — dynamic custom roles** (Option B): written as [[0104-custom-roles]] (accepted 2026-10-21,
+  build deferred).
 
 ### Single-instance assumption + resolver cache TTL (issue #592, 2026-06-20)
 
@@ -381,6 +394,35 @@ CEO decision, closing SEC-088. Two more `settings:manage` surfaces reached past 
 
 `settings:manage` stays delegable for the rest of instance configuration. No data change.
 
+### Amendment — write implies read (#1518, 2026-10-21)
+
+CEO decision on #1518: the matrix cannot hold a write without its read. A role holding any non-read verb
+on a domain (`X:write`, `X:delete`, `X:manage`, `accessGrant:grant`, the `workflow` verbs, …) also holds
+that domain's `X:read`, because a write route answers with the row it wrote, and a role allowed to change
+something it cannot see is incoherent. The mapping is derived from the catalog (`IMPLIED_READS` in
+`permission.ts`: every non-read verb of a domain that has a `:read`). Three verbs are exempt because
+their read is something else: `accessRequest:create` (self-service; its read is the requester's own
+`GET /access-requests/mine`, and `accessRequest:read` stays pre-tightened away from VIEWER),
+`secret:fetch` (the service-account fetch is its own read) and `infra:report` (the agent's ingestion verb,
+which confers no read). Verbs of a read-less domain (`import:run`, `ai:use`, `ai:connect`) imply nothing.
+
+- **The editor enables the read automatically.** Ticking a permission ticks the read it needs; clearing a
+  read clears what needs it, and the save's consequential confirm names those permissions. P7's "warn,
+  never client-block" rule holds: the un-tick is not blocked.
+- **The server enforces it on save.** `PUT /config/permissions` refuses with **400**
+  `PERMISSION_READ_REQUIRED` (`violations: [{ role, permission, requires }]`) a body that grants a non-read
+  permission without its read or revokes a read a kept permission needs.
+- **Legacy matrices are tolerated and self-heal.** `GET /config/permissions` and the resolver read stored
+  rows as they are. A write-without-read the stored matrix already held is healed on the next save by
+  adding the read — never by removing the write — and audited as a GRANT. That widens what the role can
+  see for that domain; it never narrows what it can do.
+- **Defaults and presets already obey the rule** (a shared test pins it), so neither the seed nor an
+  upgrade adds anything by itself.
+- **Not extended to service accounts.** Their grants are a separate, least-privilege set
+  ([[0048-service-accounts]]); whether the rule should apply there is an open question on #1518.
+
+The P5 sentence "the only guardrails are ADMIN-immutable + catalog-membership" now has a third guardrail.
+
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 
 [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] adds a domain to the catalog, `ai`, with two
@@ -437,9 +479,9 @@ domain permission already implies the need to read one non-sensitive projection 
     land and be reviewed before any enforcement behavior changes.
 
 - **Follow-ups (separate PRs / ADRs):** P2–P5 above; the service-account fast-follow; the
-  dynamic-custom-roles future ADR (Option B).
+  dynamic-custom-roles future ADR (Option B), now [[0104-custom-roles]].
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] ·
 [[INVARIANTS]] · [[user]] · [[shared-package]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[authorization]]
+[[authorization]] · [[0104-custom-roles]]

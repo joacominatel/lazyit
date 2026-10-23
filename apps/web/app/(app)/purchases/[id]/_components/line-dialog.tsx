@@ -34,6 +34,8 @@ import { LineFields } from "../../_components/line-fields";
 /**
  * Add a line to a saved purchase, or edit one (ADR-0099 §2). Only the description is required. Editing
  * sends only what changed; a line with linked units keeps its kind (the API refuses the change, 409).
+ * `onUpdated` hands the caller the line as saved and as it read before the edit — the purchase page uses it
+ * to offer *Update cost on linked assets?* after a price change (#1502).
  */
 export function LineDialog({
   open,
@@ -41,6 +43,7 @@ export function LineDialog({
   purchaseId,
   currency,
   line,
+  onUpdated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,6 +51,7 @@ export function LineDialog({
   currency: string;
   /** Present → edit this line; absent → add a new one. */
   line?: PurchaseOrderLine;
+  onUpdated?: (updated: PurchaseOrderLine, previous: PurchaseOrderLine) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -57,6 +61,7 @@ export function LineDialog({
             purchaseId={purchaseId}
             currency={currency}
             line={line}
+            onUpdated={onUpdated}
             onDone={() => onOpenChange(false)}
           />
         ) : null}
@@ -69,11 +74,13 @@ function LineDialogBody({
   purchaseId,
   currency,
   line,
+  onUpdated,
   onDone,
 }: {
   purchaseId: string;
   currency: string;
   line?: PurchaseOrderLine;
+  onUpdated?: (updated: PurchaseOrderLine, previous: PurchaseOrderLine) => void;
   onDone: () => void;
 }) {
   const t = useTranslations("purchases.lineDialog");
@@ -115,7 +122,13 @@ function LineDialogBody({
       }
       updateLine.mutate(
         { id: purchaseId, lineId: line.id, data: result.payload },
-        { onSuccess: saved, onError: (error) => notifyError(error, t("saveError")) },
+        {
+          onSuccess: (updated) => {
+            saved();
+            onUpdated?.(updated, line);
+          },
+          onError: (error) => notifyError(error, t("saveError")),
+        },
       );
       return;
     }

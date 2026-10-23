@@ -4,6 +4,7 @@ import type {
   SmtpSettings,
   UpdateSmtpSettings,
 } from '@lazyit/shared';
+import { includeOmitted } from '../prisma/prisma-omit';
 import { PrismaService } from '../prisma/prisma.service';
 import { SMTP_SETTINGS_SINGLETON_ID } from './email.constants';
 import { decryptSmtpPassword, encryptSmtpPassword } from './smtp.crypto';
@@ -35,6 +36,8 @@ export class SmtpService {
   async getSettings(): Promise<SmtpSettings> {
     const row = await this.prisma.smtpSettings.findFirst({
       where: { id: SMTP_SETTINGS_SINGLETON_ID },
+      // `passwordSet` is derived from it (ADR-0105 global omit); toWire drops it.
+      omit: { passwordCiphertext: false },
     });
     if (!row) {
       const now = new Date().toISOString();
@@ -102,6 +105,7 @@ export class SmtpService {
         // On update, only touch the envelope columns when a new password was provided.
         ...envelopeData,
       },
+      omit: { passwordCiphertext: false }, // for `passwordSet`; toWire drops it
     });
     return this.toWire(row);
   }
@@ -116,6 +120,7 @@ export class SmtpService {
   ): Promise<ResolvedSmtpConfig | null> {
     const row = await this.prisma.smtpSettings.findFirst({
       where: { id: SMTP_SETTINGS_SINGLETON_ID },
+      omit: includeOmitted('smtpSettings'), // decrypt in memory (ADR-0105 opt-in)
     });
     if (!row) return null;
     if (requireEnabled && !row.enabled) return null;

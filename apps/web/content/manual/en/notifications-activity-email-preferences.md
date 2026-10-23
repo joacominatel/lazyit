@@ -27,6 +27,16 @@ The page shows one switch per notification type that your instance can email you
 Each switch **saves the moment you flip it** — there is no separate Save button. If a save fails, the
 switch returns to its previous position and an error message explains what happened.
 
+### Security notices are always on
+
+Some notifications are **security notices** and can't be turned off: their switch stays on and greyed
+out, with the note *Security notice — always emailed, can't be turned off*. Today that is **New AI agent
+connected** — the email telling you an AI app or personal token was used on your account for the first
+time. If it wasn't you, that email is how you find out, so it is sent whenever your instance sends email.
+
+If you had turned **New AI agent connected** off before it became a security notice, lazyit now ignores
+that choice and emails it to you anyway. Nothing to do on your side.
+
 ## Which toggles you see
 
 The list is **built for you**, not fixed. A type only appears when your instance can actually email it,
@@ -56,4 +66,4 @@ know exactly what turning it off will silence. For the full trigger list, see th
 - New notification types added in a future release start **on** (opted in) so you never miss a new
   signal by surprise; turn any of them off here if you prefer.
 - Every notification email ends with a short footer that points back to this page, so you always know
-  where to turn a type off.
+  where to turn a type off. A security notice says instead that it can't be turned off.

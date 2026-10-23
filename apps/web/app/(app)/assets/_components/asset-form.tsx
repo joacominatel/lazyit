@@ -31,6 +31,11 @@ import { MoneyField, moneyInputText } from "@/components/money-input";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { UserCombobox } from "@/components/user-combobox";
 import { NewAssetFromPurchase } from "./new-asset-from-purchase";
+import {
+  HeldAssetsPanel,
+  ReleaseReportList,
+  useHeldAssets,
+} from "./held-assets-panel";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -50,8 +55,14 @@ import { useAssetTagSchemeSummary } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { autoTagHintFrom } from "./auto-tag-hint";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
-import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
+import { useAssignWithReleases } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import {
+  markedRows,
+  NO_RELEASE_MARKS,
+  releaseMarksReducer,
+  releaseReport,
+} from "@/lib/assets/assign-with-releases";
 import { parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import {
@@ -214,16 +225,31 @@ export function AssetForm({
   const locale = useLocale();
   const t = useTranslations("assets.form");
   const tc = useTranslations("common");
+  const ta = useTranslations("assets.assign");
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
-  const assignUser = useAssignUser();
-  const isPending = createAsset.isPending || updateAsset.isPending;
+  const assignUser = useAssignWithReleases();
+  // The owner assignment (and its releases) runs after the create; keep the submit buttons off till then.
+  const isPending =
+    createAsset.isPending || updateAsset.isPending || assignUser.isPending;
 
   // Optional "assign an owner at creation" (issue #951) — CREATE only. Kept OUTSIDE react-hook-form
   // because `CreateAssetSchema` is a `strictObject` (an extra key would fail validation) and the
   // assignment fans out to its own endpoint after the asset exists — same shape as the /users/new
   // head start. The custom-field rows already live outside RHF here, so this follows the house pattern.
   const [assignToUserId, setAssignToUserId] = useState("");
+  // What the picked owner already holds (#1726) — the same panel as the assign dialog. The marks and
+  // the shared release note apply only after the asset is created and assigned; Cancel sends nothing.
+  // Hidden on edit, before a pick, and without `user:read`.
+  const held = useHeldAssets({ userId: isEdit ? undefined : assignToUserId || undefined });
+  const [releaseMarks, dispatchReleaseMarks] = useReducer(
+    releaseMarksReducer,
+    NO_RELEASE_MARKS,
+  );
+  function pickOwner(id: string) {
+    if (id !== assignToUserId) dispatchReleaseMarks({ type: "pick" });
+    setAssignToUserId(id);
+  }
 
   // Purchase cost + depreciation (#954) live OUTSIDE react-hook-form. They're typed in MAJOR units in
   // the viewer's locale (#1470: "1.234,56" in es), but the schema validates integer MINOR units and a
@@ -452,15 +478,47 @@ export function AssetForm({
 
             // Best-effort owner assignment (mirrors /users/new head start, ADR-0064 §1): a failed
             // assignment NEVER un-creates the asset — it surfaces as a non-blocking warning toast.
+            // The held assets marked for release (#1726) follow the assignment, never precede it; if
+            // the assignment fails none is released, and a failed release is reported item by item.
             if (assignToUserId) {
-              try {
-                await assignUser.mutateAsync({
-                  assetId: created.id,
-                  userId: assignToUserId,
+              const releases =
+                held.visible && held.canRelease ? markedRows(held.rows, releaseMarks.marked) : [];
+              const outcome = await assignUser.mutateAsync({
+                assignment: { assetId: created.id, userId: assignToUserId },
+                releases,
+                note: releaseMarks.note,
+              });
+              if (outcome.kind === "assign-failed") {
+                notifyError(outcome.error, t("assignError"));
+                if (releases.length > 0) {
+                  toast.warning(ta("report.skipped", { count: releases.length }));
+                }
+              } else if (outcome.failed.length > 0) {
+                const report = releaseReport(
+                  outcome,
+                  releases,
+                  ta("held.assetFallback"),
+                  ta("report.failedFallback"),
+                );
+                // The form navigates away, so the report rides a toast that stays until dismissed.
+                toast.warning(ta("report.title"), {
+                  description: (
+                    <ReleaseReportList
+                      released={report.released}
+                      failed={report.failed}
+                      releasedText={ta("report.released")}
+                      failedText={ta("report.failed")}
+                    />
+                  ),
+                  duration: Infinity,
+                  closeButton: true,
                 });
-                toast.success(t("assignedToast"));
-              } catch (error) {
-                notifyError(error, t("assignError"));
+              } else {
+                toast.success(
+                  outcome.released.length > 0
+                    ? ta("assignedAndReleasedToast", { count: outcome.released.length })
+                    : t("assignedToast"),
+                );
               }
             }
 
@@ -481,7 +539,7 @@ export function AssetForm({
                 warrantyEnd: values.warrantyEnd,
                 notes: undefined,
               });
-              setAssignToUserId("");
+              pickOwner("");
               form.setFocus("name");
               return;
             }
@@ -877,22 +935,33 @@ export function AssetForm({
           <FieldSet>
             <FieldLegend>{t("headStart.title")}</FieldLegend>
             <FieldDescription>{t("headStart.description")}</FieldDescription>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="assignToUserId">
-                  {t("headStart.assignLabel")}
-                </FieldLabel>
-                <UserCombobox
-                  id="assignToUserId"
-                  value={assignToUserId || undefined}
-                  onValueChange={setAssignToUserId}
-                  placeholder={t("headStart.assignPlaceholder")}
-                  searchPlaceholder={t("headStart.assignSearch")}
-                  emptyText={t("headStart.assignEmpty")}
-                />
-                <FieldDescription>{t("headStart.assignHelp")}</FieldDescription>
-              </Field>
-            </FieldGroup>
+            {/* Two columns once an owner is picked: the pick on the left, what they already hold on the
+                right; stacked on narrow screens. */}
+            <div className={held.visible ? "grid gap-6 md:grid-cols-2" : undefined}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="assignToUserId">
+                    {t("headStart.assignLabel")}
+                  </FieldLabel>
+                  <UserCombobox
+                    id="assignToUserId"
+                    value={assignToUserId || undefined}
+                    onValueChange={pickOwner}
+                    placeholder={t("headStart.assignPlaceholder")}
+                    searchPlaceholder={t("headStart.assignSearch")}
+                    emptyText={t("headStart.assignEmpty")}
+                  />
+                  <FieldDescription>{t("headStart.assignHelp")}</FieldDescription>
+                </Field>
+              </FieldGroup>
+              <HeldAssetsPanel
+                held={held}
+                marks={releaseMarks}
+                dispatch={dispatchReleaseMarks}
+                disabled={isPending}
+                applyOn="create"
+              />
+            </div>
           </FieldSet>
         </>
       ) : null}

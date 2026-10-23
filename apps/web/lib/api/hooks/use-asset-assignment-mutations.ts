@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   AcknowledgeAssignment,
   CreateAssetAssignment,
@@ -11,7 +11,12 @@ import {
   releaseAssetAssignment,
   updateAssetAssignmentNotes,
 } from "../endpoints/asset-assignments";
+import {
+  assignWithReleases,
+  type HeldAssetRow,
+} from "@/lib/assets/assign-with-releases";
 import { useInvalidateAssets } from "./use-assets";
+import { userKeys } from "./use-users";
 
 /**
  * Write hooks for asset ownership. Each invalidates `assetKeys.all` (so the asset
@@ -30,6 +35,41 @@ export function useAssignUser() {
   return useMutation({
     mutationFn: (data: CreateAssetAssignment) => createAssetAssignment(data),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Assign an asset and, in the same step, release the held assets the operator marked (#1726): the new
+ * assignment first, then each release, through {@link assignWithReleases}. It never rejects — the
+ * outcome reports the assignment and each release on its own, so the caller can show a partial failure
+ * item by item. Once the assignment lands it invalidates the asset caches (as {@link useAssignUser}
+ * does) AND the person's record (`userKeys.detail`, which holds their assignment list), so the
+ * held-assets panel and the user page never show a released asset as still held.
+ */
+export function useAssignWithReleases() {
+  const invalidate = useInvalidateAssets();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      assignment,
+      releases,
+      note,
+    }: {
+      assignment: CreateAssetAssignment;
+      releases: readonly Pick<HeldAssetRow, "assignmentId" | "assetId">[];
+      note?: string;
+    }) =>
+      assignWithReleases({
+        assign: () => createAssetAssignment(assignment),
+        release: (id, data) => releaseAssetAssignment(id, data),
+        releases,
+        note,
+      }),
+    onSuccess: (outcome, { assignment }) => {
+      if (outcome.kind !== "assigned") return;
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: userKeys.detail(assignment.userId) });
+    },
   });
 }
 

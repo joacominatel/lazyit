@@ -13,7 +13,7 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import { assetOwnerUserSelect } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -26,6 +26,11 @@ export interface FindAssignmentsFilters {
   activeOnly?: boolean;
   /** When true, inline each assignment's owner (`user`). Used by GET /assets/:id/assignments. */
   includeUser?: boolean;
+  /**
+   * With `includeUser`: true inlines the owner's full public columns, for a caller holding `user:read`;
+   * false (the default, fail-closed) only its id, name, email and `deletedAt` (#1685).
+   */
+  fullUser?: boolean;
 }
 
 /**
@@ -34,6 +39,26 @@ export interface FindAssignmentsFilters {
  * account to `assignedBySaId` / `releasedBySaId` (a DB CHECK enforces at-most-one actor per slot).
  * Opening and releasing also emit `ASSIGNED` / `RELEASED` asset-history events transactionally (ADR-0033).
  */
+/**
+ * The assignment as the SELF-READ shows it — `GET /assets/mine` inlines exactly this per assignment
+ * (`assetMineListSelect`, `AssetListAssignmentSchema`): the id, the owner id and the trimmed owner. The
+ * self-service acknowledge response uses it (#1518), so a holder sees the same fields there as on their
+ * own asset list and never `notes`, `assignedById`, `assignedBySaId` or `releasedById`.
+ */
+export const SELF_ASSIGNMENT_SELECT = {
+  id: true,
+  userId: true,
+  user: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      deletedAt: true,
+    },
+  },
+} satisfies Prisma.AssetAssignmentSelect;
+
 @Injectable()
 export class AssetAssignmentsService {
   constructor(
@@ -51,6 +76,7 @@ export class AssetAssignmentsService {
     userId,
     activeOnly = true,
     includeUser = false,
+    fullUser = false,
   }: FindAssignmentsFilters) {
     const args: Prisma.AssetAssignmentFindManyArgs = {
       where: {
@@ -60,9 +86,10 @@ export class AssetAssignmentsService {
       },
       orderBy: { assignedAt: 'desc' },
       // Inline the owner only when asked (other callers keep the lean shape) — through the PUBLIC column
-      // allowlist, never the whole row (SEC-085: `user: true` served the owner's passwordHash).
+      // allowlist, never the whole row (SEC-085: `user: true` served the owner's passwordHash), and only
+      // the id, name and email unless the caller holds `user:read` (#1685).
       ...(includeUser
-        ? { include: { user: { select: PUBLIC_USER_SELECT } } }
+        ? { include: { user: { select: assetOwnerUserSelect(fullUser) } } }
         : {}),
     };
     return this.prisma.assetAssignment.findMany(args);
@@ -228,8 +255,13 @@ export class AssetAssignmentsService {
         payload: { userId: caller },
         actor: { userId: caller },
       });
-      // updateMany returns only a count; re-read the row for the response (identity is immutable).
-      return tx.assetAssignment.findUnique({ where: { id } });
+      // updateMany returns only a count; re-read the row for the response (identity is immutable), in
+      // the self-read's shape: this route has no permission gate, so it must not return the admin-side
+      // columns (`notes`, who assigned / released the device) the `GET /assets/mine` read leaves out (#1518).
+      return tx.assetAssignment.findUnique({
+        where: { id },
+        select: SELF_ASSIGNMENT_SELECT,
+      });
     });
     // AFTER commit, best-effort: nudge the human who assigned the device that it was acknowledged.
     await this.emitAcknowledgedNotification(assignment);

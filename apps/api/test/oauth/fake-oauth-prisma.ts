@@ -6,11 +6,15 @@
  *
  * Supported `where` forms: equality (incl. `null` and `Date`), `{ gt, gte, lt, lte, not, in }`, `OR`, and
  * the relation filters the OAuth code uses (`grants: { none: {} }`, `codes: { none: {} }`,
- * `tokens: { some: … }`, `user: { deletedAt: null }`). `$transaction` rolls back on a throw.
+ * `tokens: { some: … }`, `user: { deletedAt: null }`). `$transaction` rolls back on a throw. Results go
+ * through the client-level omit (ADR-0105, {@link applyGlobalOmit}), so a token or hash read that does
+ * not opt back in sees the column missing, as it would against PostgreSQL.
  * Test support only — it lives under `test/`, outside the build.
  */
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await -- an in-memory fake mirrors the async Prisma API */
+
+import { applyGlobalOmit } from '../prisma/global-omit';
 
 type Row = Record<string, any>;
 
@@ -41,6 +45,23 @@ function isOperatorObject(value: unknown): value is Row {
   );
 }
 
+/** Resolve Prisma's atomic number operations (`{ increment: n }`) against the row's current values. */
+function applyData(row: Row, data: Row): Row {
+  const out: Row = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      isOperatorObject(value) &&
+      typeof (value as { increment?: unknown }).increment === 'number'
+    ) {
+      out[key] =
+        (row[key] as number) + (value as { increment: number }).increment;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export class FakeOAuthPrisma {
   readonly tables: Record<string, Row[]> = {
     oAuthClient: [],
@@ -50,6 +71,7 @@ export class FakeOAuthPrisma {
     oAuthAuditLog: [],
     aiSettings: [],
     user: [],
+    userSession: [],
   };
 
   readonly oAuthClient = this.model('oAuthClient', {
@@ -75,6 +97,8 @@ export class FakeOAuthPrisma {
   );
   readonly oAuthAuthorizationCode = this.model('oAuthAuthorizationCode', {
     usedAt: null,
+    mcpCredentialEpoch: null,
+    grantId: null,
   });
   readonly oAuthToken = this.model('oAuthToken', { usedAt: null });
   readonly oAuthAuditLog = this.model('oAuthAuditLog', {
@@ -87,6 +111,7 @@ export class FakeOAuthPrisma {
   });
   readonly aiSettings = this.model('aiSettings', {});
   readonly user = this.model('user', { deletedAt: null }, true);
+  readonly userSession = this.model('userSession', {});
 
   async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
     const snapshot = Object.entries(this.tables).map(
@@ -187,8 +212,11 @@ export class FakeOAuthPrisma {
         : null;
     }
     if (include.user) {
-      out.user =
-        this.tables.user.find((user) => user.id === row.userId) ?? null;
+      out.user = applyGlobalOmit(
+        'user',
+        this.tables.user.find((user) => user.id === row.userId) ?? null,
+        typeof include.user === 'object' ? (include.user as Row) : {},
+      );
     }
     return out;
   }
@@ -216,33 +244,43 @@ export class FakeOAuthPrisma {
       rows().push(row);
       return row;
     };
+    const project = <R extends Row | null>(row: R, args: Row = {}): R =>
+      applyGlobalOmit(table, row, args);
     return {
-      create: jest.fn(async ({ data }: { data: Row }) => ({ ...create(data) })),
+      create: jest.fn(async ({ data, ...args }: { data: Row }) =>
+        project({ ...create(data) }, args),
+      ),
       createMany: jest.fn(async ({ data }: { data: Row[] }) => {
         data.forEach(create);
         return { count: data.length };
       }),
-      findUnique: jest.fn(
-        async ({ where, include }: { where: Row; include?: Row }) => {
-          const row = rows().find((candidate) =>
-            this.matches(table, candidate, where),
-          );
-          return row ? this.withIncludes(table, row, include) : null;
-        },
-      ),
+      findUnique: jest.fn(async (args: { where: Row; include?: Row }) => {
+        const row = rows().find((candidate) =>
+          this.matches(table, candidate, args.where),
+        );
+        return project(
+          row ? this.withIncludes(table, row, args.include) : null,
+          args,
+        );
+      }),
       findFirst: jest.fn(async (args: { where?: Row; include?: Row } = {}) => {
         const where = scoped(args);
         const { include } = args;
         const row = rows().find((candidate) =>
           this.matches(table, candidate, where),
         );
-        return row ? this.withIncludes(table, row, include) : null;
+        return project(
+          row ? this.withIncludes(table, row, include) : null,
+          args,
+        );
       }),
       findMany: jest.fn(async (args: { where?: Row; include?: Row } = {}) =>
         rows()
           .filter((candidate) => this.matches(table, candidate, scoped(args)))
           .sort((a, b) => compare(b.createdAt, a.createdAt))
-          .map((row) => this.withIncludes(table, row, args.include)),
+          .map((row) =>
+            project(this.withIncludes(table, row, args.include), args),
+          ),
       ),
       count: jest.fn(
         async (args: { where?: Row } = {}) =>
@@ -255,6 +293,7 @@ export class FakeOAuthPrisma {
           where,
           create: createData,
           update: updateData,
+          ...args
         }: {
           where: Row;
           create: Row;
@@ -263,26 +302,28 @@ export class FakeOAuthPrisma {
           const row = rows().find((candidate) =>
             this.matches(table, candidate, where),
           );
-          if (!row) return { ...create(createData) };
+          if (!row) return project({ ...create(createData) }, args);
           Object.assign(row, updateData, { updatedAt: new Date() });
-          return { ...row };
+          return project({ ...row }, args);
         },
       ),
-      update: jest.fn(async ({ where, data }: { where: Row; data: Row }) => {
-        const row = rows().find((candidate) =>
-          this.matches(table, candidate, where),
-        );
-        if (!row) throw new Error(`FakeOAuthPrisma: ${table} not found`);
-        Object.assign(row, data, { updatedAt: new Date() });
-        return { ...row };
-      }),
+      update: jest.fn(
+        async ({ where, data, ...args }: { where: Row; data: Row }) => {
+          const row = rows().find((candidate) =>
+            this.matches(table, candidate, where),
+          );
+          if (!row) throw new Error(`FakeOAuthPrisma: ${table} not found`);
+          Object.assign(row, applyData(row, data), { updatedAt: new Date() });
+          return project({ ...row }, args);
+        },
+      ),
       updateMany: jest.fn(
         async ({ where, data }: { where: Row; data: Row }) => {
           const matched = rows().filter((candidate) =>
             this.matches(table, candidate, where),
           );
           matched.forEach((row) =>
-            Object.assign(row, data, { updatedAt: new Date() }),
+            Object.assign(row, applyData(row, data), { updatedAt: new Date() }),
           );
           return { count: matched.length };
         },

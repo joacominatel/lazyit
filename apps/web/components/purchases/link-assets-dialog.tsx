@@ -48,7 +48,7 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { linkPickerFilters } from "@/lib/purchases/linked-assets";
+import { linkPickerFilters, NEAR_ORDER_DAYS, nearOrderWindow } from "@/lib/purchases/linked-assets";
 import {
   type ApplyChoices,
   assetsToLink,
@@ -79,7 +79,10 @@ export interface LinkAssetRef {
 
 /** A line to link to: the purchase (for its title) and the line. */
 export interface LinkLineTarget {
-  purchase: Pick<PurchaseOrderDetail, "id" | "reference" | "supplier" | "orderDate" | "createdAt" | "currency">;
+  purchase: Pick<PurchaseOrderDetail, "id" | "reference" | "supplier" | "orderDate" | "createdAt" | "currency"> & {
+    /** The invoice date, when the caller has it — the "near the order date" chip's fallback (#1503). */
+    invoiceDate?: string | null;
+  };
   line: PurchaseOrderLine;
 }
 
@@ -90,7 +93,8 @@ type Step = "assets" | "line" | "diff" | "result";
  * proposal §3.e). One dialog, three entry points:
  *
  *   - a purchase line's *Link existing assets* (`line` given): pick the assets — searchable, filtered to
- *     the line's model and to assets on no purchase yet (#1476) by removable chips — then the diff;
+ *     the line's model, to assets on no purchase yet (#1476) and to assets dated within 90 days of the order
+ *     (#1503) by removable chips — then the diff;
  *   - an asset's *Link to purchase*, and the Assets list's batch action (`assets` given): pick the purchase
  *     and the line — lines of the assets' model first — then the diff;
  *   - the diff itself: values grouped by field (fills pre-checked, replacements never), one *Apply every
@@ -213,6 +217,7 @@ export function LinkAssetsDialog({
 
         {step === "assets" && target ? (
           <AssetPickerStep
+            purchase={target.purchase}
             line={target.line}
             selected={picked}
             onChange={setPicked}
@@ -286,12 +291,14 @@ export function LinkAssetsDialog({
 // ── Step 1a: pick assets for a line ───────────────────────────────────────────────────────────────────
 
 function AssetPickerStep({
+  purchase,
   line,
   selected,
   onChange,
   onCancel,
   onNext,
 }: {
+  purchase: LinkLineTarget["purchase"];
   line: PurchaseOrderLine;
   selected: LinkAssetRef[];
   onChange: (next: LinkAssetRef[]) => void;
@@ -306,6 +313,11 @@ function AssetPickerStep({
   // filter needs purchaseOrder:read (the API refuses it otherwise); without it the chip never shows.
   const canReadPurchases = useCan("purchaseOrder:read");
   const [notLinked, setNotLinked] = useState(true);
+  // "Near the order date" (#1503): assets dated within ±90 days of the order date (else the invoice date,
+  // else the day the purchase was recorded). On by default, removable; a plain asset filter (asset:read).
+  const nearOrder = useMemo(() => nearOrderWindow(purchase), [purchase]);
+  const [byDate, setByDate] = useState(true);
+  const { date } = useFormatters();
   const { data: models } = useAssetModels();
   const { data, isLoading, isFetching } = useAssets(
     linkPickerFilters({
@@ -313,6 +325,7 @@ function AssetPickerStep({
       modelId: byModel && line.assetModelId ? line.assetModelId : null,
       notLinked,
       canReadPurchases,
+      window: byDate ? nearOrder : null,
     }),
   );
   const chosen = new Set(selected.map((asset) => asset.id));
@@ -331,7 +344,7 @@ function AssetPickerStep({
     <>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         <SearchInput value={q} debounceMs={300} onDebouncedChange={setQ} label={t("searchAssets")} placeholder={t("searchAssets")} />
-        {(byModel && line.assetModelId) || (notLinked && canReadPurchases) ? (
+        {(byModel && line.assetModelId) || (notLinked && canReadPurchases) || (byDate && nearOrder) ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {byModel && line.assetModelId ? (
               <Badge variant="secondary" className="gap-1">
@@ -354,6 +367,19 @@ function AssetPickerStep({
                   className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t("removeNotLinkedChip")}
                   onClick={() => setNotLinked(false)}
+                >
+                  <XMarkIcon className="size-3.5" aria-hidden />
+                </button>
+              </Badge>
+            ) : null}
+            {byDate && nearOrder ? (
+              <Badge variant="secondary" className="gap-1">
+                {t("nearOrderChip", { date: date(`${nearOrder.anchor}T00:00:00.000Z`), days: NEAR_ORDER_DAYS })}
+                <button
+                  type="button"
+                  className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={t("removeNearOrderChip")}
+                  onClick={() => setByDate(false)}
                 >
                   <XMarkIcon className="size-3.5" aria-hidden />
                 </button>

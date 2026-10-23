@@ -53,6 +53,10 @@ import {
   type InfraNodeListParams,
   mergeInfraNodeInto,
   restoreInfraNode,
+  retireInfraNode,
+  unretireInfraNode,
+  snoozeInfraNodeAlerts,
+  unsnoozeInfraNodeAlerts,
   updateInfraNode,
   updateInfraNodePosition,
 } from "../endpoints/infra";
@@ -441,6 +445,32 @@ export function useRestoreInfraNode() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreInfraNode(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/**
+ * Retire / un-retire a node (#1701). One hook, the direction in the variables, because every caller
+ * offers both from the same menu. Invalidates `infraKeys.all` — the canvas, the tray, the table and
+ * the fleet view all badge the result.
+ */
+export function useSetInfraNodeRetired() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, retired }: { id: string; retired: boolean }) =>
+      retired ? retireInfraNode(id) : unretireInfraNode(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: infraKeys.all }),
+  });
+}
+
+/** Snooze (an ISO `until`) or unsnooze (`null`) a node's offline alerts (#1701). */
+export function useSetInfraNodeSnooze() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, until }: { id: string; until: string | null }) =>
+      until === null ? unsnoozeInfraNodeAlerts(id) : snoozeInfraNodeAlerts(id, until),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: infraKeys.all }),
   });

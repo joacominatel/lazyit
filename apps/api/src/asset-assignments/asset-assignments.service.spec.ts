@@ -5,9 +5,16 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { AssetAssignmentsService } from './asset-assignments.service';
+import { AssetListAssignmentSchema } from '@lazyit/shared';
+import {
+  AssetAssignmentsService,
+  SELF_ASSIGNMENT_SELECT,
+} from './asset-assignments.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { PUBLIC_USER_SELECT } from '../users/public-user';
+import {
+  ASSET_OWNER_USER_SELECT,
+  PUBLIC_USER_SELECT,
+} from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -305,7 +312,20 @@ describe('AssetAssignmentsService', () => {
     });
   });
 
-  it('findAll inlines the user only when includeUser is true', async () => {
+  it('findAll inlines the user only when includeUser is true — the full public columns with fullUser (user:read)', async () => {
+    assetAssignment.findMany.mockResolvedValue([]);
+
+    await service.findAll({ assetId: 'a1', includeUser: true, fullUser: true });
+
+    expect(assetAssignment.findMany).toHaveBeenCalledWith({
+      where: { assetId: 'a1', releasedAt: null },
+      orderBy: { assignedAt: 'desc' },
+      include: { user: { select: PUBLIC_USER_SELECT } },
+    });
+  });
+
+  // #1685: without user:read the owner is id, name, email and deletedAt only — and that is the default.
+  it('findAll inlines only the owner identity by default (no user:read: role, legajo, username, directoryAttrs withheld)', async () => {
     assetAssignment.findMany.mockResolvedValue([]);
 
     await service.findAll({ assetId: 'a1', includeUser: true });
@@ -313,8 +333,21 @@ describe('AssetAssignmentsService', () => {
     expect(assetAssignment.findMany).toHaveBeenCalledWith({
       where: { assetId: 'a1', releasedAt: null },
       orderBy: { assignedAt: 'desc' },
-      include: { user: { select: PUBLIC_USER_SELECT } },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            deletedAt: true,
+          },
+        },
+      },
     });
+    for (const col of ['role', 'legajo', 'username', 'directoryAttrs']) {
+      expect(ASSET_OWNER_USER_SELECT).not.toHaveProperty(col);
+    }
   });
 
   it('findAll never inlines a credential column of the owner (SEC-085)', async () => {
@@ -596,6 +629,57 @@ describe('AssetAssignmentsService', () => {
       expect(history.record).not.toHaveBeenCalled();
       expect(tx.findUnique).not.toHaveBeenCalled();
       expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    // #1518: the route has no permission gate (self-service), so its response is the self-read's
+    // assignment shape — never notes / assignedById / assignedBySaId / releasedById.
+    it('returns the assignment in the self-read shape, never the admin-side columns', async () => {
+      assetAssignment.findUnique.mockResolvedValue({
+        id: 'as1',
+        assetId: 'a1',
+        userId: ACTOR_ID,
+        assignedById: ASSIGNER_ID,
+        releasedAt: null,
+        acknowledgedAt: null,
+      });
+      const projected = {
+        id: 'ckg9z1a2b0000qzrmn831k4d8',
+        userId: ACTOR_ID,
+        user: {
+          id: ACTOR_ID,
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+          deletedAt: null,
+        },
+      };
+      tx.findUnique.mockResolvedValue(projected);
+
+      const res = await service.acknowledge('as1', {}, HUMAN_PRINCIPAL);
+
+      expect(tx.findUnique).toHaveBeenCalledWith({
+        where: { id: 'as1' },
+        select: SELF_ASSIGNMENT_SELECT,
+      });
+      expect(res).toEqual(projected);
+    });
+
+    it('SELF_ASSIGNMENT_SELECT is exactly the self-read assignment contract (AssetListAssignmentSchema)', () => {
+      expect(Object.keys(SELF_ASSIGNMENT_SELECT).sort()).toEqual(
+        Object.keys(AssetListAssignmentSchema.shape).sort(),
+      );
+      expect(Object.keys(SELF_ASSIGNMENT_SELECT.user.select).sort()).toEqual(
+        Object.keys(AssetListAssignmentSchema.shape.user.shape).sort(),
+      );
+      for (const leaked of [
+        'notes',
+        'assignedById',
+        'assignedBySaId',
+        'releasedById',
+        'releasedBySaId',
+      ]) {
+        expect(SELF_ASSIGNMENT_SELECT).not.toHaveProperty(leaked);
+      }
     });
 
     it('double acknowledge → the second call 409s (set-once)', async () => {

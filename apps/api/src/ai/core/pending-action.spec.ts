@@ -101,6 +101,7 @@ describe('channel refusal by warning', () => {
     (channel) => {
       expect(AI_CHANNEL_REFUSED_WARNINGS[channel]).toEqual([
         'CRITICAL_APPLICATION',
+        'OUTBOUND_INTEGRATION',
       ]);
       expect(
         channelRefusal(channel, [
@@ -123,24 +124,49 @@ describe('channel refusal by warning', () => {
   );
 
   it.each(['MCP', 'HEADLESS'] as const)(
-    '%s: allows a write on a non-critical application, outbound integration included',
+    '%s: allows a write on a non-critical application with no live outbound integration',
+    (channel) => {
+      expect(
+        channelRefusal(channel, ['EXTERNAL_PROVISIONING', 'SOFT_DELETE']),
+      ).toBeUndefined();
+      expect(() =>
+        assertChannelAllows(channel, ['EXTERNAL_PROVISIONING']),
+      ).not.toThrow();
+    },
+  );
+
+  // CEO decision Q1 on #1344 (#1688): MCP authors workflows only while disabled; anything that creates or
+  // changes a live outbound integration keeps the in-app approval card.
+  it.each(['MCP', 'HEADLESS'] as const)(
+    '%s: refuses an outbound integration with a 403 that points to the chat',
     (channel) => {
       expect(
         channelRefusal(channel, [
-          'OUTBOUND_INTEGRATION',
           'EXTERNAL_PROVISIONING',
+          'OUTBOUND_INTEGRATION',
         ]),
-      ).toBeUndefined();
-      expect(() =>
-        assertChannelAllows(channel, ['OUTBOUND_INTEGRATION']),
-      ).not.toThrow();
+      ).toBe('OUTBOUND_INTEGRATION');
+      let thrown: unknown;
+      try {
+        assertChannelAllows(channel, ['OUTBOUND_INTEGRATION']);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ForbiddenException);
+      expect((thrown as ForbiddenException).getStatus()).toBe(403);
+      expect((thrown as ForbiddenException).message).toMatch(
+        /do it from the lazyit chat.*only while it is disabled/,
+      );
     },
   );
 
   it('the chat refuses nothing by warning: a critical application goes through step-up there', () => {
     expect(AI_CHANNEL_REFUSED_WARNINGS.CHAT).toEqual([]);
     expect(() =>
-      assertChannelAllows('CHAT', ['CRITICAL_APPLICATION']),
+      assertChannelAllows('CHAT', [
+        'CRITICAL_APPLICATION',
+        'OUTBOUND_INTEGRATION',
+      ]),
     ).not.toThrow();
   });
 

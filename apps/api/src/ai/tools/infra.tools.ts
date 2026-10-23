@@ -8,6 +8,7 @@ import {
 } from '@lazyit/shared';
 import { AgentDistController } from '../../agent-dist/agent-dist.controller';
 import { InfraController } from '../../infra/infra.controller';
+import { SoftwareWatchController } from '../../infra/software-watch.controller';
 import { INFRA_NODE_SORT_ALLOWLIST } from '../../infra/infra.service';
 import {
   AI_TOOL_LIST_DEFAULT_LIMIT,
@@ -335,6 +336,10 @@ export const infraToolset: AiToolset = {
         'updateNode',
         'removeNode',
         'restoreNode',
+        'retireNode',
+        'unretireNode',
+        'snoozeNodeAlerts',
+        'unsnoozeNodeAlerts',
         'bulkDiscard',
         'createEdge',
         'closeEdge',
@@ -403,6 +408,16 @@ export const infraToolset: AiToolset = {
       InfraController,
       ['attachSecret', 'detachSecret'],
       'Excluded: Secret Manager adjacency (ADR-0061).',
+    ),
+    unexposed(
+      SoftwareWatchController,
+      ['list', 'get', 'listHosts'],
+      "Not in the v1 cut: the software watchlist (#1684) is a fleet-wide aggregate of every host's package inventory; infra_node_get is the per-node read.",
+    ),
+    unexposed(
+      SoftwareWatchController,
+      ['create', 'remove'],
+      'Deferred with the other operator-authored infra configuration: watchlist writes are human-only (tools-and-execution.md §3).',
     ),
     unexposed(
       AgentDistController,

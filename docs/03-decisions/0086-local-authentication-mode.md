@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-10-09
+updated: 2026-10-22
 deciders: [Joaquín Minatel]
 ---
 
@@ -462,7 +462,10 @@ phone in the user's hand.
   hard-deleted (the `PasswordResetToken` / OAuth token precedent); the audit record is the history row.
 - **Not sessions:** personal MCP tokens, OAuth grants and service-account tokens are not listed or ended
   here, and signing out still leaves MCP connections alive ([[0097-ai-assistant-mcp-and-headless-api]]
-  decision 8).
+  decision 8). The separate, explicit **"Sign out everywhere and disconnect AI apps"**
+  (`POST /auth/sessions/revoke-all`, #1699) ends both: it bumps `sessionEpoch` and `mcpCredentialEpoch`
+  and deletes every session row in one transaction, in every auth mode. In OIDC mode it also stamps the
+  `oidcTokensNotBefore` cutoff, which ends the lazyit side of the IdP sessions on every device (#1715).
 - **No admin endpoint.** An admin ends a user's sessions with the levers that already exist; a per-session
   admin view was not built.
 

@@ -26,7 +26,8 @@ hace cada uno, para que sepas qué registros leer y qué es seguro reiniciar. El
 En la pila no corre ningún proveedor de identidad. Con cuentas locales, lazyit gestiona el inicio de
 sesión él mismo; con tu propio proveedor OIDC, el inicio de sesión pasa por un servicio que administras
 en otro sitio (consulta [Proveedor de identidad](/help/deployment-operations-identity-provider)).
-También puede correr, de forma opcional, un contenedor auxiliar de **backup** — consulta
+Junto a ella corre un contenedor auxiliar de **backup** que vuelca la base de datos y archiva los
+archivos subidos según una programación — consulta
 [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Cómo encajan las piezas
@@ -50,6 +51,9 @@ cuentas locales, también las credenciales de inicio de sesión. Consulta
 ## Qué es y qué no es objetivo de copia de seguridad
 
 - **db** guarda estado real: **respáldala.**
+- El **volumen de adjuntos** (montado en **api**) guarda los archivos subidos: documentos e imágenes de
+  la base de conocimiento. También es estado real, y el contenedor de copias lo archiva con cada volcado
+  de la base de datos.
 - **meilisearch** es reconstruible: su índice se rehace desde la base de datos con un comando de
   reindexado, así que sus datos no necesitan copia.
 - **valkey** solo guarda el estado de los trabajos en curso (PostgreSQL es el sistema de registro),

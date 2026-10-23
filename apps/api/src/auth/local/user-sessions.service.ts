@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import type { UserSession, UserSessionList } from '@lazyit/shared';
 import type { User } from '../../../generated/prisma/client';
+import { OAuthAuditService } from '../../oauth/oauth-audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { parseUserAgent } from './user-agent';
@@ -24,14 +30,81 @@ export const SESSION_LIST_LIMIT = 100;
  */
 @Injectable()
 export class UserSessionsService {
+  private readonly logger = new Logger(UserSessionsService.name);
   private readonly sessions: UserSessionStore;
+  private readonly audit: OAuthAuditService;
 
+  // The store comes from AuthModule and the audit from OAuthModule; @Optional with equivalent defaults so
+  // a service built by hand from the two original dependencies (the existing specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly history: UserHistoryService,
     @Optional() sessions?: UserSessionStore,
+    @Optional() audit?: OAuthAuditService,
   ) {
     this.sessions = sessions ?? new UserSessionStore(prisma);
+    this.audit = audit ?? new OAuthAuditService(prisma);
+  }
+
+  /**
+   * "Sign out everywhere and disconnect AI apps" (#1699, CEO decision on #1344 Q4): the caller's own,
+   * explicit, account-wide revocation. In ONE transaction it bumps BOTH counters and deletes every
+   * per-device session row:
+   *   - `sessionEpoch` — every local session token dies (including the one making this request), and so
+   *     does every AI chat delegation and in-flight run, which re-check it before each step;
+   *   - `mcpCredentialEpoch` — every OAuth grant (access and refresh tokens) and personal MCP token stops
+   *     on its next use and drops out of the connected-apps list (ADR-0097 decision 8, amended);
+   *   - the `UserSession` rows — the device list empties at once rather than waiting for the sweeper;
+   *   - `oidcTokensNotBefore` — in OIDC mode, where there is no lazyit session to end, the guard refuses
+   *     every IdP token issued or authenticated before now, so the web sessions on OTHER devices end too
+   *     (#1715). Inert in local and shim mode.
+   * The event is recorded in the OAuth audit trail (`SIGNED_OUT_EVERYWHERE`) in the same transaction.
+   *
+   * Works in EVERY auth mode, unlike {@link LoginService.logout}, which is a no-op outside local mode: in
+   * OIDC mode lazyit mints no web session, so there is no row to delete — the cutoff above ends the lazyit
+   * side of every device's session instead. The identity provider's own session is not lazyit's to end.
+   * The web then drops this browser's cookie.
+   *
+   * Plain sign-out (`POST /auth/logout`) is unchanged: it moves `sessionEpoch` only (CEO, 2026-09-24).
+   *
+   * UNCONDITIONAL increments, on purpose: the plain logout conditions its bump on the epoch the guard read
+   * (so a double click advances it once), but here a concurrent bump of `sessionEpoch` alone (a plain
+   * logout from another device) would make such a condition match nothing and leave `mcpCredentialEpoch`
+   * unmoved — the AI apps would survive the very action meant to cut them off. A repeat bumps again, which
+   * is harmless. No password step-up: like every other revocation in lazyit (sign-out, ending a device,
+   * revoking a connection) it only removes access, and step-up is unavailable outside local mode.
+   */
+  async signOutEverywhere(
+    user: Pick<User, 'id'>,
+    ip: string | null,
+  ): Promise<void> {
+    const ended = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          sessionEpoch: { increment: 1 },
+          mcpCredentialEpoch: { increment: 1 },
+          // OIDC mode: the IdP tokens other devices hold are refused from now on (#1715).
+          oidcTokensNotBefore: new Date(),
+        },
+        select: { id: true },
+      });
+      const count = await this.sessions.endAll(user.id, tx);
+      await this.audit.record(
+        {
+          action: 'SIGNED_OUT_EVERYWHERE',
+          userId: user.id,
+          actorId: user.id,
+          ip,
+          detail: { authMode: process.env.AUTH_MODE ?? null },
+        },
+        tx,
+      );
+      return count;
+    });
+    this.logger.log(
+      `signed out everywhere user=${user.id} sessionRowsEnded=${ended}`,
+    );
   }
 
   /**

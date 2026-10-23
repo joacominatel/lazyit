@@ -155,7 +155,7 @@ export type AdminPasswordResetOutcome = z.infer<
 /**
  * Why the `email` delivery is unavailable, when it is. Two distinct operator fixes, so they are two
  * distinct values rather than one vague "unavailable":
- *   - `smtp-not-configured` — Settings → Instance → SMTP is off or incomplete (host/port/from).
+ *   - `smtp-not-configured` — Settings → Email is off or incomplete (host/port/from).
  *   - `origin-unknown` — no `WEB_ORIGIN` and no trustworthy request origin to build the link against, so
  *     any link we produced would point nowhere. Reachable on a host-agnostic LAN deploy ([[0087]]).
  */

@@ -48,11 +48,31 @@
       },
       "sessions": {
         "title": "Sesiones",
-        "local": "Cerrar sesión termina todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste con \"Mantener la sesión iniciada\". Las apps de IA conectadas y los tokens personales siguen conectados; revocalos en IA y apps conectadas.",
+        "local": "Cerrar sesión termina todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste con \"Mantener la sesión iniciada\". Las apps de IA conectadas y los tokens personales siguen conectados; para cortarlos también, usá Cerrar sesión en todos lados y desconectar las apps de IA, más abajo, o revocalos uno por uno en IA y apps conectadas.",
         "identityProvider": "Cerrar sesión termina tu sesión en este navegador. Tu proveedor de inicio de sesión gestiona tus sesiones en otros lugares.",
         "unknown": "Cerrar sesión termina tu sesión en este navegador.",
         "signOutEverywhere": "Cerrar sesión en todos los dispositivos",
         "signOut": "Cerrar sesión"
+      },
+      "disconnectAll": {
+        "title": "Cerrar sesión en todos lados y desconectar las apps de IA",
+        "description": {
+          "local": "Termina todas tus sesiones, en todos los dispositivos, y desconecta todas las apps de IA y los tokens personales conectados a tu cuenta. Usalo si creés que otra persona puede estar usando tu cuenta.",
+          "identityProvider": "Cierra tu sesión de lazyit en este navegador y en tus otros dispositivos, y desconecta todas las apps de IA y los tokens personales conectados a tu cuenta. Tu sesión en el proveedor de inicio de sesión sigue abierta: cerrá sesión ahí también si alguien más pudo haberla usado.",
+          "unknown": "Cierra tu sesión y desconecta todas las apps de IA y los tokens personales conectados a tu cuenta."
+        },
+        "button": "Cerrar sesión y desconectar",
+        "confirm": {
+          "title": "¿Cerrar sesión en todos lados y desconectar las apps de IA?",
+          "description": {
+            "local": "Vas a quedar fuera en todos los dispositivos, incluido este. Todas las apps de IA y los tokens personales conectados dejan de funcionar al instante y hay que volver a conectarlos. No se puede deshacer.",
+            "identityProvider": "Vas a quedar fuera de lazyit en todos los dispositivos, incluido este, y todas las apps de IA y los tokens personales conectados dejan de funcionar al instante y hay que volver a conectarlos. lazyit no puede cerrar tu sesión en el proveedor de inicio de sesión: cerrala ahí por separado. No se puede deshacer.",
+            "unknown": "Vas a quedar fuera, y todas las apps de IA y los tokens personales conectados dejan de funcionar al instante y hay que volver a conectarlos. No se puede deshacer."
+          },
+          "cancel": "Cancelar",
+          "confirm": "Cerrar sesión y desconectar"
+        },
+        "error": "No se pudo cerrar la sesión en todos lados. No se cambió nada; probá de nuevo."
       },
       "devices": {
         "title": "Tus sesiones",
@@ -118,7 +138,9 @@
     },
     "toast": {
       "saveError": "No se pudieron guardar tus preferencias de notificación"
-    }
+    },
+    "mandatory": "Aviso de seguridad: siempre se envía por correo y no se puede desactivar.",
+    "mandatoryAria": "{type}: aviso de seguridad, siempre se envía por correo"
   },
   "types": {
     "critical_app_access": {

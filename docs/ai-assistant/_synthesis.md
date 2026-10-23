@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-16
+updated: 2026-10-22
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -166,7 +166,9 @@ Secret Manager, cleartext-credential operations, the AI's own configuration, and
 > engine** is in the catalog. Reads, run retry/replay and manual tasks run on every channel
 > (`workflows.tools.ts`, W2-13); authoring — workflows, versions, connections, connection test, dry-run,
 > enable/disable — is `elevated` and **chat only** (`channels: ['CHAT']`, `workflow-authoring.tools.ts`,
-> W2-14); MCP authoring is deferred (#1344), and a Service Account never authors, connects or
+> W2-14); MCP authoring is deferred (#1344) — *decided 2026-10-21 (#1688): MCP may create and edit
+> disabled workflows and their versions; enabling, connections and versions on an enabled workflow stay
+> chat-only* — and a Service Account never authors, connects or
 > enables — over headless that is permanent, not deferred (INV-AI-17, [[ai-assistant/security|security]]
 > §6.9). Workflow secrets stay a structural exclusion. The step-up list gains **every
 > write on a critical application** (`CRITICAL_APPLICATION`), and core derives step-up from the closed
@@ -304,8 +306,9 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
   → `ai:connect` now → resource matches. Authority = the user's current permissions ∩ the scope class.
 - **Revocation:** user or admin revoke, refresh reuse, the revocation endpoint, and any
   `mcpCredentialEpoch` bump (password change or reset, admin reset or *revoke sessions*, deactivation,
-  offboarding). A normal web logout bumps only `sessionEpoch` and does **not** revoke MCP credentials
-  (ADR-0097 decision 8, amended 2026-09-24 — CEO: "Separarlos").
+  offboarding, the user's own "Sign out everywhere and disconnect AI apps", #1699). A normal web logout
+  bumps only `sessionEpoch` and does **not** revoke MCP credentials (ADR-0097 decision 8, amended
+  2026-09-24 — CEO: "Separarlos").
 - **Client allowlist** ([[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] decision 13): every OAuth
   client is checked against an admin-configurable allowlist, matched on its CIMD `client_id` URL or a
   redirect-URI pattern, **never on `client_name`**. The curated defaults (the usual clients) live in code
@@ -479,9 +482,9 @@ bounded per [[0036-int4-bounded-integers]].
 | Table (model) | Kind · ID | Holds | Lifecycle | Source |
 | --- | --- | --- | --- | --- |
 | `ai_settings` (`AiSettings`) | singleton, CHECK `id = 'singleton'` | enabled, provider, model, baseUrl, the key envelope (`apiKeyCiphertext`/`Iv`/`AuthTag`/`KeyVersion`), `allowPrivateNetwork`, effort, provider options, admin instructions, step/output/context limits, `dailyTokenLimitPerPrincipal` (2M), `retentionDays` (90, 7–3650), `approvalTtlMinutes` (30), `mcpEnabled`, the MCP client allowlist overlay (`mcpClientAllowlistAdded` jsonb `[]`, `mcpClientAllowlistRemovedDefaults` text[] `{}`) and `mcpAllowAnyHttpsClient` (true since 2026-09-24) — §4.8, the disclosure acknowledgement, `verifiedAt` | mutable config, no `deletedAt`; an absent row reads as the disabled default | provider §7 |
-| `ai_conversations` (`AiConversation`) | `cuid()` | owner (exactly one of user / SA — CHECK), channel (`CHAT` \| `HEADLESS`), title, pinned provider/model/`promptVersion`/`toolsetHash`/tool names, `webSearchMaxUses` (#1389, null = no web search), `closedReason`, `lastActivityAt` | transcript container; **hard-deleted** by retention, by its owner, and on offboarding | provider §7, tools §11 |
+| `ai_conversations` (`AiConversation`) | `cuid()` | owner (exactly one of user / SA — CHECK), channel (`CHAT` \| `HEADLESS`), title, pinned provider/model/`promptVersion`/`toolsetHash`/tool names, `webSearchMaxUses` (#1389, null = no web search), `systemPrompt` (the frozen prompt, #1675; null = a legacy row read from its `lazyit-system-prompt-v1` message), `closedReason`, `lastActivityAt` | transcript container; **hard-deleted** by retention, by its owner, and on offboarding | provider §7, tools §11 |
 | `ai_messages` (`AiMessage`) | `BigInt` autoincrement | ordered, provider-replayable messages (`content` + `format`), `@@unique(conversationId, seq)` | append-only; cascades with its conversation | provider §7 |
-| `ai_runs` (`AiRun`) | `cuid()` | channel, acting principal (CHECK), status, approval policy, provider/model, step count, token counts, finish reason, redacted error, `idempotencyKey` (partial unique per principal, raw SQL), cancel request, timestamps | mutable lifecycle row, **no content**; conversation FK `SetNull`; kept | provider §7 |
+| `ai_runs` (`AiRun`) | `cuid()` | channel, acting principal (CHECK), status, approval policy, provider/model, step count, token counts, finish reason, redacted error, `idempotencyKey` (partial unique per principal, raw SQL), `sessionEpoch` (humans, #1675; null = SA, or a legacy row read from its `lazyit-run-v1` message), cancel request, timestamps | mutable lifecycle row, **no content**; conversation FK `SetNull`; kept | provider §7 |
 | `ai_tool_invocations` (`AiToolInvocation`) | `cuid()` = `invocationId` | every tool call on every channel: tool, class, actor (at most one — CHECK), MCP client/grant, input + hashes, status, preview, precondition, expiry, result, entity refs, error, duration | the approval unit; **retention-bound** (cascades with its conversation; conversation-less MCP rows pruned after `retentionDays`) — this is also the metadata access log for MCP and headless reads | tools §11 |
 | `ai_action_log` (`AiActionLog`) | `Int` autoincrement | one row per write lifecycle event: invocation id, event, channel, tool, class, actor (at most one — CHECK), conversation/run/MCP client/grant ids as plain strings, redacted input, entity refs, approver, step-up flag, untrusted sources, provider/model, request id, error | **permanent, append-only**; a trigger blocks `DELETE` and every `UPDATE` except the one the actor FKs' own `ON DELETE SET NULL` performs (only `userId` / `serviceAccountId` may become NULL, nothing else may change); no FK to pruned rows; actor FKs `SetNull` | tools §10–11, security §6.7 |
 | `ai_usage` (`AiUsage`) | `BigInt` autoincrement | per model step: principal, provider, model, input/output/cached/reasoning tokens | append-only; kept (budgets and the usage view) | provider §7 |
@@ -685,8 +688,8 @@ change behavior an operator would notice and are also listed in ADR-0097's to-co
 - A "via AI" badge in the activity feed; stamping ledgers beyond asset and user history; a hash-chained
   audit.
 - Admins reading other people's conversations.
-- Workflow authoring over MCP (chat only in v1; deferred, #1344) and over headless (excluded for good,
-  INV-AI-17); any tool over workflow secrets (structural exclusion).
+- Workflow authoring over headless (excluded for good, INV-AI-17) and, over MCP, anything beyond
+  disabled workflows (decided 2026-10-21, #1688); any tool over workflow secrets (structural exclusion).
 
 ---
 

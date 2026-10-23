@@ -219,7 +219,7 @@
     "receiveUnits": "Receive units",
     "cancelRemaining": "Cancel remaining units",
     "linkExisting": "Link existing assets",
-    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep.",
+    "documentsBackupNotice": "Files uploaded here are included in lazyit's scheduled backup, together with the database (unless your administrator has switched that archive off), so a restore brings them back with the purchase.",
     "receivesInto": "into <link>{name}</link>",
     "consumableNotMapped": "no consumable yet",
     "receiveStock": "Receive into stock",
@@ -313,7 +313,15 @@
     "createdFromAssets": "Created from {count, plural, one {# selected asset} other {# selected assets}} ({lines, plural, one {# line} other {# lines}})",
     "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out",
     "supplierMerged": "Supplier {from} merged into {to}",
-    "supplierMergedGeneric": "Supplier merged into another one"
+    "supplierMergedGeneric": "Supplier merged into another one",
+    "linkedValuesApplied": "Updated {count, plural, one {# linked asset} other {# linked assets}} of “{line}” from the purchase: {fields}",
+    "applyFields": {
+      "purchaseCost": "cost",
+      "purchaseDate": "purchase date",
+      "warrantyEnd": "warranty end",
+      "company": "company",
+      "modelId": "model"
+    }
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
@@ -398,6 +406,16 @@
       "confirm": "Merge",
       "mergedToast": "{source} merged into {target}",
       "error": "Couldn't merge the suppliers"
+    },
+    "yearly": {
+      "title": "Spend per year",
+      "year": "Year",
+      "total": "Total",
+      "purchases": "Purchases",
+      "tooLarge": "Too large to display",
+      "partial": "Partial: {count, plural, one {# line has} other {# lines have}} no price",
+      "empty": "Nothing spent with this supplier yet. Drafts and cancelled purchases are not counted.",
+      "help": "From the order date (or when the purchase was recorded), counting ordered and received purchases — not drafts or cancelled ones — and only the units that were not cancelled. Each currency label is totalled on its own; nothing is converted."
     }
   },
   "fromPurchase": {
@@ -505,7 +523,9 @@
     },
     "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link.",
     "notLinkedChip": "Not linked to a purchase",
-    "removeNotLinkedChip": "Also show assets on a purchase"
+    "removeNotLinkedChip": "Also show assets on a purchase",
+    "nearOrderChip": "Dated near {date} (±{days} days)",
+    "removeNearOrderChip": "Show assets from any date"
   },
   "provenance": {
     "title": "Purchase",
@@ -533,7 +553,13 @@
     "unlinkTitle": "Unlink from the purchase?",
     "unlinkDescription": "Unlink {asset} from {purchase}? Its purchase values stay as they are.",
     "unlinkedToast": "Unlinked from the purchase",
-    "unlinkError": "Couldn't unlink the asset"
+    "unlinkError": "Couldn't unlink the asset",
+    "applyValue": "Apply purchase value",
+    "applyTitle": "Apply the purchase value?",
+    "applyDescription": "Set the purchase cost of {asset} to {value}, the price on {purchase}? Its current cost, {current}, is replaced, and the currency label changes with it.",
+    "appliedToast": "Purchase cost updated from the purchase",
+    "alreadyApplied": "The cost already matches the purchase",
+    "applyError": "Couldn't apply the purchase value"
   },
   "pending": {
     "subtitle": "Lines still waiting for units, oldest order first.",
@@ -549,7 +575,10 @@
     "linkExisting": "Link existing assets",
     "cancelRemaining": "Cancel remaining units",
     "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending",
-    "applyLicense": "Apply license"
+    "applyLicense": "Apply license",
+    "overdueOnly": "Overdue only",
+    "emptyOverdue": "Nothing is overdue",
+    "emptyOverdueDescription": "A purchase is overdue when its expected delivery date has passed and units are still pending. Purchases with no expected date are never overdue."
   },
   "receiveStock": {
     "title": "Receive into stock",
@@ -568,6 +597,54 @@
     "submit": "Receive {count, plural, one {# unit} other {# units}}",
     "receivedToast": "{count, plural, one {# unit} other {# units}} received into {name}",
     "error": "Couldn't receive into stock"
+  },
+  "receiveDelivery": {
+    "action": "Receive delivery",
+    "actionFor": "Receive delivery: {purchase}",
+    "moreActions": "More ways to receive",
+    "receiveOne": "Receive one line",
+    "title": "Receive delivery",
+    "description": "{purchase} · Count what arrived on each line. Lines left at 0 are not received.",
+    "loading": "Loading the purchase…",
+    "loadError": "Couldn't load the purchase.",
+    "linesLabel": "Lines waiting for units",
+    "nothingToReceive": "Nothing on this purchase is waiting for units you can receive.",
+    "intoStock": "Into stock",
+    "decrease": "One less: {line}",
+    "increase": "One more: {line}",
+    "quantityLabel": "Units that arrived: {line}",
+    "scanFor": "Scan serial numbers for {line}",
+    "serialsHelp": "One serial per line. The count follows the serials.",
+    "rowInvalid": "Check this line — something in it can't be received as typed.",
+    "nothingCounted": "Count at least one unit that arrived.",
+    "sharedTitle": "Every unit in this delivery",
+    "sharedHelp": "Applied to every asset received now. Cost, company and warranty come from each line, as when you receive one line. Consumable lines only add their count to stock.",
+    "locationFromPurchase": "Where the purchase is delivered.",
+    "noLocation": "The purchase has no delivery location.",
+    "deliveryNote": "Delivery note photo",
+    "deliveryNoteHelp": "Optional — added to the purchase's documents as “{label}”.",
+    "deliveryNoteLabel": "Delivery note",
+    "takePhoto": "Take or choose a photo",
+    "removePhoto": "Remove {name}",
+    "progress": "Receiving line {current} of {total}…",
+    "submit": "{count, plural, =0 {Receive} one {Receive # unit} other {Receive # units}}",
+    "receivedToast": "{count, plural, one {Received # unit} other {Received # units}}",
+    "lineError": "Couldn't receive this line",
+    "result": {
+      "summary": "{units, plural, one {# unit received.} other {# units received.}}",
+      "someProblems": "{count, plural, one {# line needs a look — see below.} other {# lines need a look — see below.}}",
+      "nothingReceived": "Nothing was received — see each line below.",
+      "aLine": "A line",
+      "unitsReceived": "{count, plural, one {# unit received} other {# units received}}",
+      "stockReceived": "{count, plural, one {# unit into stock} other {# units into stock}}",
+      "partial": "{created} received · {failed} couldn't be created",
+      "failed": "No unit could be created",
+      "notReceived": "Not received",
+      "overReceived": "The line is now over-received; you can raise its quantity on the purchase.",
+      "noteUploaded": "The delivery note was added to the purchase's documents.",
+      "noteFailed": "The delivery note couldn't be uploaded. Add it from the purchase's Documents.",
+      "openPurchase": "Open purchase"
+    }
   },
   "lineAssets": {
     "show": "Show assets",
@@ -772,5 +849,23 @@
     },
     "saveFix": "Fix the marked values to save",
     "savedPart": "Saved"
+  },
+  "linkedUpdate": {
+    "title": "Update cost on linked assets?",
+    "description": "The unit price of “{line}” changed. Choose the linked assets whose purchase cost should follow it — nothing changes until you confirm.",
+    "previewError": "Couldn't compare the linked assets with the purchase.",
+    "none": "No live asset is linked to this line any more.",
+    "noCost": "no cost",
+    "change": "{from} → {to}",
+    "overridden": "Overridden",
+    "alreadySame": "Already the same",
+    "assetLabel": "Update the cost of {asset}",
+    "help": "Assets that still had the old purchase price, or no cost, are ticked. Assets whose cost was changed by hand are marked overridden and left unticked. The currency moves with the cost.",
+    "keep": "Keep their costs",
+    "submit": "Update {count, plural, =0 {assets} one {# asset} other {# assets}}",
+    "updatedToast": "{count, plural, =0 {No asset needed a change} one {# asset updated} other {# assets updated}}",
+    "partialToast": "{updated, plural, one {# asset updated} other {# assets updated}} · {failed, plural, one {# not updated} other {# not updated}}",
+    "partialError": "{updated, plural, one {# asset was updated} other {# assets were updated}}, then the update stopped; {notSent, plural, one {# asset was} other {# assets were}} not changed. Choose Update again to finish — your choices are kept, and the assets already updated are left as they are.",
+    "error": "Couldn't update the linked assets"
   }
 }

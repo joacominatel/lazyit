@@ -65,13 +65,18 @@ export const ASSET_LIST_OPTIONS = {
  * ADMIN-only (`assertCanListDeleted`), so a non-admin never gets `deleted`. Everything at its
  * "ALL"/empty default collapses to `undefined` (dropped from the query key hash), so a no-param URL
  * yields the same first-paint key the unfiltered prefetch always used.
+ *
+ * `canFilterByOwner` (default true) gates the `owner` → `assignedToUserId` filter: the API answers 403
+ * to it without `user:read` (#1685), so for such a caller a shared `?owner=` link is ignored and the
+ * list still loads. The server prefetch keeps the default; the client passes it once permissions load.
  */
 export function deriveAssetFilters(
   state: Pick<DerivedListState, "q" | "sort" | "dir" | "offset" | "limit" | "filters">,
-  opts: { isAdmin: boolean },
+  opts: { isAdmin: boolean; canFilterByOwner?: boolean },
 ): AssetFilters {
   const { q, sort, dir, offset, limit, filters } = state;
   const archived = opts.isAdmin && filters.archived === "only";
+  const canFilterByOwner = opts.canFilterByOwner ?? true;
   return {
     q: q || undefined,
     status: filters.status === "ALL" ? undefined : (filters.status as AssetStatus),
@@ -80,7 +85,7 @@ export function deriveAssetFilters(
     modelId: filters.model === "ALL" ? undefined : filters.model,
     locationId: filters.location === "ALL" ? undefined : filters.location,
     company: filters.company === "ALL" ? undefined : filters.company,
-    assignedToUserId: filters.owner || undefined,
+    assignedToUserId: canFilterByOwner ? filters.owner || undefined : undefined,
     ownership:
       filters.ownership === "ALL" ? undefined : (filters.ownership as "HAS" | "NONE"),
     warranty:

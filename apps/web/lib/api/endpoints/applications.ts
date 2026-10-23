@@ -1,6 +1,9 @@
 import type {
   AccessGrant,
+  AccessGrantListPage,
   Application,
+  ApplicationGrantStatus,
+  ApplicationGrantSummary,
   CreateApplication,
   Page,
   UpdateApplication,
@@ -111,7 +114,11 @@ export function applicationGrantFilterParams({
   return params;
 }
 
-/** One application's access grants (raw — `userId` only; resolve the user client-side). */
+/**
+ * One application's access grants, unpaged (raw — `userId` only; resolve the user client-side). The
+ * Access tab reads the paged {@link getApplicationGrantPage} instead (#1660); this compatibility read
+ * stays for the grant dialog's "already holds" context and the workflow dry-run's sample grants.
+ */
 export function getApplicationGrants(
   applicationId: string,
   options: ApplicationGrantsOptions = {},
@@ -121,5 +128,64 @@ export function getApplicationGrants(
     qs
       ? `${BASE}/${applicationId}/access-grants?${qs}`
       : `${BASE}/${applicationId}/access-grants`,
+  );
+}
+
+/**
+ * The filters of an application's paged grant list (`GET /applications/:id/access-grants/page`, #1660).
+ * `accessLevel` and `noAccessLevel` are exclusive (the API answers 400 to both); `q` needs `user:read`
+ * on top of `accessGrant:read`, so a caller without it must not send one (403).
+ */
+export interface ApplicationGrantPageFilters {
+  status: ApplicationGrantStatus;
+  accessLevel?: string;
+  noAccessLevel?: boolean;
+  q?: string;
+}
+
+export interface ApplicationGrantPageParams extends ApplicationGrantPageFilters {
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The paged grant list's filters, never paging; the CSV export sends exactly these (ADR-0103 §10).
+ * `status` is always sent, even at its `active` default: without it the export falls back to the
+ * legacy `activeOnly`/`includeExpired` family.
+ */
+export function applicationGrantPageFilterParams(
+  filters: ApplicationGrantPageFilters,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("status", filters.status);
+  if (filters.noAccessLevel) params.set("noAccessLevel", "true");
+  else if (filters.accessLevel) params.set("accessLevel", filters.accessLevel);
+  if (filters.q) params.set("q", filters.q);
+  return params;
+}
+
+/** One page of an application's grants, filtered and ordered server-side (#1660). */
+export function getApplicationGrantPage(
+  applicationId: string,
+  params: ApplicationGrantPageParams,
+  signal?: AbortSignal,
+): Promise<AccessGrantListPage> {
+  const qs = applicationGrantPageFilterParams(params);
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  return apiFetch<AccessGrantListPage>(
+    `${BASE}/${applicationId}/access-grants/page?${qs.toString()}`,
+    { signal },
+  );
+}
+
+/** The Access tab's headline numbers over every grant of the application (#1660). */
+export function getApplicationGrantSummary(
+  applicationId: string,
+  signal?: AbortSignal,
+): Promise<ApplicationGrantSummary> {
+  return apiFetch<ApplicationGrantSummary>(
+    `${BASE}/${applicationId}/access-grants/summary`,
+    { signal },
   );
 }

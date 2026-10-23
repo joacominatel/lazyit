@@ -252,6 +252,7 @@ export function validateToolsets(
 
       const guards = primary.guards;
       const humanOnly =
+        tool.humanOnly === true ||
         guards.includes(ServicePrincipalForbiddenGuard) ||
         guards.includes(HumanOnlyGuard);
       const serviceOnly = guards.includes(ServiceOnlyGuard);

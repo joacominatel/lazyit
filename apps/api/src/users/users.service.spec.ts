@@ -745,6 +745,11 @@ describe('UsersService', () => {
     expect(updateCalls[0][0].data).toHaveProperty('mcpCredentialEpoch', {
       increment: 1,
     });
+    // …and, in OIDC mode, every IdP session held before it: a restore cannot revive one (#1715).
+    expect(updateCalls[0][0].data).toHaveProperty(
+      'oidcTokensNotBefore',
+      updateCalls[0][0].data.deletedAt,
+    );
 
     // Active grants are revoked inline (revokedAt + actor + audit note).
     const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
@@ -963,6 +968,8 @@ describe('UsersService', () => {
         sessionEpoch: { increment: 1 },
         mcpCredentialEpoch: { increment: 1 },
       });
+      // OIDC mode: a reactivation must not revive the IdP sessions held before it (#1715).
+      expect(arg.data.oidcTokensNotBefore).toBeInstanceOf(Date);
     });
 
     it('does not bump sessionEpoch on reactivation, a repeat deactivation, or a profile edit', async () => {
@@ -989,6 +996,7 @@ describe('UsersService', () => {
       for (const [arg] of user.update.mock.calls as UpdateCall[]) {
         expect(arg.data).not.toHaveProperty('sessionEpoch');
         expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
+        expect(arg.data).not.toHaveProperty('oidcTokensNotBefore');
       }
     });
   });
@@ -2500,6 +2508,71 @@ describe('UsersService', () => {
         ],
         deletedAt: null,
       });
+    });
+
+    // Issue #1659: an explicit id lookup resolves offboarded people too, so history shows their name.
+    it('an id lookup in resolver mode includes soft-deleted users (no deletedAt clause + escape hatch)', async () => {
+      const ids = ['11111111-1111-4111-8111-111111111111'];
+      user.findMany.mockResolvedValue([
+        { id: ids[0], deletedAt: new Date('2026-10-01T00:00:00Z') },
+      ]);
+      user.count.mockResolvedValue(1);
+
+      const page = await service.findPage(
+        { ids, includeOffboarded: true },
+        { limit: 1, offset: 0, deleted: 'active' },
+      );
+
+      expect(user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ids } },
+          includeSoftDeleted: true,
+        }),
+      );
+      expect(user.count).toHaveBeenCalledWith({
+        where: { id: { in: ids } },
+        includeSoftDeleted: true,
+      });
+      // The offboarded row keeps its deletedAt: that is the marker the web reads.
+      expect(page.items[0]).toEqual(
+        expect.objectContaining({
+          id: ids[0],
+          deletedAt: new Date('2026-10-01T00:00:00Z'),
+        }),
+      );
+    });
+
+    it('resolver mode never widens the open list (no ids → live-only)', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { includeOffboarded: true },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[Record<string, unknown>]>
+      )[0][0];
+      expect(call.where).toEqual({ deletedAt: null });
+      expect(call).not.toHaveProperty('includeSoftDeleted');
+    });
+
+    it('an id lookup without resolver mode stays live-only', async () => {
+      const ids = ['11111111-1111-4111-8111-111111111111'];
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { ids },
+        { limit: 1, offset: 0, deleted: 'active' },
+      );
+
+      const call = (
+        user.findMany.mock.calls as Array<[Record<string, unknown>]>
+      )[0][0];
+      expect(call.where).toEqual({ id: { in: ids }, deletedAt: null });
+      expect(call).not.toHaveProperty('includeSoftDeleted');
     });
 
     it('honors an allowlisted sort and rejects an unknown one (400)', async () => {

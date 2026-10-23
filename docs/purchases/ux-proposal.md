@@ -3,7 +3,7 @@ title: "Purchases — UX proposal"
 tags: [purchases, research, ux, design]
 status: draft
 created: 2026-10-01
-updated: 2026-10-04
+updated: 2026-10-22
 ---
 
 # Purchases in lazyit: UX proposal
@@ -35,10 +35,15 @@ updated: 2026-10-04
 >   purchase* without one) — never the supplier or another purchase detail.
 > - The extraction review (§3.b) does not block saving on a missing supplier or currency and has no
 >   "n fields still marked check — save anyway?" step; a PDF opens in a new tab instead of being framed.
-> - Not built: *Receive delivery* across lines, the *Overdue only* toggle and the *created within 90 days*
->   chip, the dashboard *Pending deliveries* tile, purchases in global search, *Suggest
->   purchases*, *Map a custom field to suppliers*, the warranty replacement action, the XLSX export, and
->   proposing a new line price to linked assets. Tracked as #1495.
+> - Not built: *Suggest purchases*, *Map a custom field to suppliers*, the warranty replacement action and the
+>   XLSX export. Tracked as #1495. Built since: the XLSX export of the purchases list and the asset
+>   inventory (2026-10-22, #1501; [[0103-data-export-streaming-path|ADR-0103]] §11), purchases in global
+>   search (2026-10-03, #1499), *Receive
+>   delivery* across lines (2026-10-21, #1497), and on 2026-10-22 the dashboard *Pending deliveries* row
+>   (#1498), the supplier's yearly totals (#1500), proposing a new line price to linked assets with *Apply
+>   purchase value* on the asset (#1502), the *Overdue only* toggle and the *created within 90 days* chip
+>   (#1503 — shipped as *near the order date*, ±90 days around the order date, else the invoice date, else the
+>   day the purchase was recorded).
 > - Starting from a document (§3.b): there is no drop zone with a *Fill from this document* button. Picking
 >   a file with *New purchase from a document*, or dropping one anywhere on *New purchase* or the Purchases
 >   list (2026-10-03, #1516), creates a draft purchase holding it and opens the review, which reads it at once
@@ -836,7 +841,11 @@ The asset list and asset detail work as today (Viewers already read assets and c
   dot decimal.
 - Files are UTF-8 with a BOM, and dates are written as ISO `YYYY-MM-DD`, which Excel parses in any
   locale.
-- XLSX comes in Phase 2 when the export surface grows.
+- XLSX comes in Phase 2 when the export surface grows. *Built 2026-10-22 (#1501, ADR-0103 §11):* the
+  purchases list and the asset inventory offer **CSV or Excel (.xlsx)**, with typed cells (numbers, amounts
+  in `#,##0.00`, real dates in UTC). The asset XLSX is for reading only: the importer still takes CSV,
+  which stays the round trip. As built, the CSV is not locale-dependent (always `,` and a dot decimal,
+  [[0103-data-export-streaming-path|ADR-0103]]); the XLSX is what removes the delimiter question.
 
 **Read access, and the role-level limit:**
 - Permissions are per role, not per person (Manual, *Permission configuration*). Granting *View

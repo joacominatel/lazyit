@@ -37,7 +37,8 @@ export const SMTP_SECRET_KEY_ENV = 'SMTP_SECRET_KEY';
  * operator who assigned a device wants the "they confirmed receipt" signal in their inbox, not only in
  * the app — PLUS the targeted new-AI-agent-connection notice (`mcp.client_connected`, ADR-0097,
  * security §6.3): local mode has no MFA, so "an agent was just connected to your account" must reach the
- * owner's inbox when SMTP is configured. Two types stay bell-only (not inbox-worthy): the per-user vault-setup nudge
+ * owner's inbox when SMTP is configured — a security notice that ignores the per-user opt-out
+ * ({@link SECURITY_NOTICE_NOTIFICATION_TYPES}, #1699). Two types stay bell-only (not inbox-worthy): the per-user vault-setup nudge
  * (`secret.vault_setup`) and the new-access-request alert (`access_request.created`). No per-event
  * rules engine: this flat allowlist + the single global on/off IS the
  * routing (one line before fifty).
@@ -61,6 +62,26 @@ export const EMAIL_NOTIFICATION_TYPES = [
 /** O(1) membership set for the allowlist. */
 export const EMAIL_NOTIFICATION_TYPE_SET: ReadonlySet<NotificationType> =
   new Set(EMAIL_NOTIFICATION_TYPES);
+
+/**
+ * The emailable types that are SECURITY NOTICES (#1699, CEO decision on #1344 Q5): emailed to their
+ * recipient whenever outbound email is on, IGNORING the per-user opt-out (`notificationEmailOptOutTypes`).
+ * A notice that tells the account owner "an AI agent just started acting as you" is only useful if it
+ * cannot be silenced from inside a session that may already be compromised. An opt-out entry stored for
+ * one of these before the rule is left in the column (no migration) and ignored on every read; the next
+ * preferences save drops it. Every entry must also be on {@link EMAIL_NOTIFICATION_TYPES}.
+ */
+export const SECURITY_NOTICE_NOTIFICATION_TYPES = [
+  'mcp.client_connected',
+] as const satisfies readonly (typeof EMAIL_NOTIFICATION_TYPES)[number][];
+
+const SECURITY_NOTICE_NOTIFICATION_TYPE_SET: ReadonlySet<NotificationType> =
+  new Set(SECURITY_NOTICE_NOTIFICATION_TYPES);
+
+/** True when this type is a security notice — emailed regardless of the recipient's opt-out. */
+export function isSecurityNoticeType(type: NotificationType): boolean {
+  return SECURITY_NOTICE_NOTIFICATION_TYPE_SET.has(type);
+}
 
 /** True when this notification type is routed to email (subject to the global on/off + SMTP config). */
 export function isEmailableNotificationType(type: NotificationType): boolean {

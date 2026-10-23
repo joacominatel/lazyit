@@ -5,7 +5,8 @@ import { z } from "zod";
  *
  * `GET /instance/version` — the running build's version identity, baked at IMAGE BUILD time from the
  * git checkout (`--build-arg APP_VERSION/GIT_SHA` → `ENV`, see infra/docker/*.Dockerfile) and read
- * from env at runtime. Authenticated read (no permission gate); displayed on Settings → Instance.
+ * from env at runtime. Authenticated read (no permission gate); displayed on Settings → General &
+ * version.
  *
  *   - `current` — `git describe --tags --always` at build: a clean release reads `v1.4.2`; an
  *     off-tag rebuild honestly reads `v1.4.2-3-gabc1234`; a non-image dev run falls back to `"dev"`.

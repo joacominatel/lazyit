@@ -1,5 +1,6 @@
 import type {
   ApplyLicense,
+  PurchaseApplyField,
   CancelRemainingUnits,
   CreatePurchaseFromAssets,
   CreatePurchaseOrder,
@@ -20,6 +21,7 @@ import {
 import {
   addPurchaseOrderLine,
   applyLicense,
+  applyToLinkedAssets,
   cancelRemainingUnits,
   createPurchaseFromAssets,
   createPurchaseOrder,
@@ -28,12 +30,15 @@ import {
   getAssetPurchase,
   getExtractionStatus,
   getLicenseProposal,
+  getLinkedPreview,
   getLinkPreview,
   getPendingLines,
+  getPendingSummary,
   getPurchaseOrder,
   getPurchaseOrderEvents,
   getPurchaseOrders,
   linkAssetsToLine,
+  type PendingLineFilters,
   type PurchaseOrderListParams,
   receiveFromLine,
   receiveStockFromLine,
@@ -48,7 +53,9 @@ import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
 import { consumableKeys } from "./use-consumables";
 import { invalidateDashboard } from "./use-dashboard";
+import { supplierKeys } from "./use-suppliers";
 import { invalidateSuggestions } from "../query-keys";
+import { applyInChunks } from "@/lib/purchases/linked-update";
 
 /** Activity-log page size. */
 const EVENTS_PAGE_SIZE = 50;
@@ -63,12 +70,17 @@ export const purchaseOrderKeys = {
   list: (params: PurchaseOrderListParams) => [...purchaseOrderKeys.all, "list", params] as const,
   detail: (id: string) => [...purchaseOrderKeys.all, "detail", id] as const,
   events: (id: string) => [...purchaseOrderKeys.all, "detail", id, "events"] as const,
-  pending: (params: { supplierId?: string; limit?: number; offset?: number }) =>
+  pending: (params: PendingLineFilters & { limit?: number; offset?: number }) =>
     [...purchaseOrderKeys.all, "pending", params] as const,
+  /** The dashboard's pending-deliveries counts for the viewer's day (#1498); refreshed by any purchase write. */
+  pendingSummary: (expectedBefore: string) =>
+    [...purchaseOrderKeys.all, "pending-summary", expectedBefore] as const,
   /** Every open line, read to the end (the *From purchase* picker). */
   openLines: () => [...purchaseOrderKeys.all, "pending", "all"] as const,
   linkPreview: (lineId: string, assetIds: readonly string[]) =>
     [...purchaseOrderKeys.all, "link-preview", lineId, assetIds] as const,
+  linkedPreview: (lineId: string, previousUnitPrice: number | null) =>
+    [...purchaseOrderKeys.all, "linked-preview", lineId, previousUnitPrice] as const,
   /** An asset's provenance lives under the purchase keys, so any purchase write refreshes it. */
   provenance: (assetId: string) => [...purchaseOrderKeys.all, "provenance", assetId] as const,
   /** Whether document extraction can be offered to this caller (#1477). */
@@ -111,11 +123,15 @@ export function usePurchaseOrderEvents(id: string | undefined) {
   });
 }
 
-/** Every purchase write refreshes the purchase reads and the smart-entry suggestions. */
+/**
+ * Every purchase write refreshes the purchase reads, the supplier reads (a supplier's yearly totals are
+ * derived from its purchases, #1500) and the smart-entry suggestions.
+ */
 function useInvalidatePurchases() {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+    void queryClient.invalidateQueries({ queryKey: supplierKeys.all });
     void invalidateSuggestions(queryClient);
   };
 }
@@ -191,13 +207,25 @@ export function useRemovePurchaseOrderLine() {
 
 /** Lines still waiting for units, oldest purchase first. Idle unless `enabled` (callers gate on permission). */
 export function usePendingLines(
-  params: { supplierId?: string; limit?: number; offset?: number } = {},
+  params: PendingLineFilters & { limit?: number; offset?: number } = {},
   { enabled = true }: { enabled?: boolean } = {},
 ) {
   return useQuery({
     queryKey: purchaseOrderKeys.pending(params),
     queryFn: ({ signal }) => getPendingLines(params, signal),
     placeholderData: keepPreviousData,
+    enabled,
+  });
+}
+
+/**
+ * The dashboard's *Pending deliveries* counts (#1498). Idle unless `enabled` — the caller gates on
+ * `purchaseOrder:read`, so a viewer without it never makes the request.
+ */
+export function usePendingSummary(expectedBefore: string, { enabled }: { enabled: boolean }) {
+  return useQuery({
+    queryKey: purchaseOrderKeys.pendingSummary(expectedBefore),
+    queryFn: ({ signal }) => getPendingSummary(expectedBefore, signal),
     enabled,
   });
 }
@@ -284,6 +312,47 @@ export function useUnlinkAssets() {
     mutationFn: ({ id, lineId, assetIds }: { id: string; lineId: string; assetIds: string[] }) =>
       unlinkAssetsFromLine(id, lineId, assetIds),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * The linked assets' diff after a line price edit (#1502), compared against the price the edit replaced.
+ * Idle until a target is given. Not refetched on focus: the dialog's choices must not reset under the person.
+ */
+export function useLinkedPreview(
+  target: { purchaseOrderId: string; lineId: string; previousUnitPrice: number | null } | null,
+) {
+  return useQuery({
+    queryKey: purchaseOrderKeys.linkedPreview(target?.lineId ?? "", target?.previousUnitPrice ?? null),
+    queryFn: ({ signal }) =>
+      getLinkedPreview(target!.purchaseOrderId, target!.lineId, { previousUnitPrice: target!.previousUnitPrice }, signal),
+    enabled: target !== null,
+    refetchOnWindowFocus: false,
+    // A one-off comparison for the edit just made: never served from an earlier edit's cache.
+    gcTime: 0,
+  });
+}
+
+/**
+ * Re-apply a line's values to assets already linked to it (#1502) — in chunks of at most 200 ids, one after
+ * the other. Assets and their history change on success or partial success, so both sides are refreshed even
+ * when a later chunk failed.
+ */
+export function useApplyToLinked() {
+  const invalidate = useInvalidateFlows();
+  return useMutation({
+    mutationFn: ({
+      id,
+      lineId,
+      assetIds,
+      fields,
+    }: {
+      id: string;
+      lineId: string;
+      assetIds: string[];
+      fields: PurchaseApplyField[];
+    }) => applyInChunks(assetIds, (chunk) => applyToLinkedAssets(id, lineId, { assetIds: chunk, fields })),
+    onSettled: invalidate,
   });
 }
 

@@ -48,11 +48,31 @@
       },
       "sessions": {
         "title": "Sessions",
-        "local": "Signing out ends every session you have — this browser, your other computers and your phone, including sessions kept with \"Keep me signed in\". Connected AI apps and personal tokens stay connected; revoke them in AI & connected apps.",
+        "local": "Signing out ends every session you have — this browser, your other computers and your phone, including sessions kept with \"Keep me signed in\". Connected AI apps and personal tokens stay connected; to cut them off too, use Sign out everywhere and disconnect AI apps below, or revoke them one by one in AI & connected apps.",
         "identityProvider": "Signing out ends your session in this browser. Your sign-in provider manages your sessions elsewhere.",
         "unknown": "Signing out ends your session in this browser.",
         "signOutEverywhere": "Sign out on all devices",
         "signOut": "Sign out"
+      },
+      "disconnectAll": {
+        "title": "Sign out everywhere and disconnect AI apps",
+        "description": {
+          "local": "Ends every session you have, on every device, and disconnects every AI app and personal token connected to your account. Use it if you think someone else may be using your account.",
+          "identityProvider": "Signs you out of lazyit in this browser and on your other devices, and disconnects every AI app and personal token connected to your account. Your session at your sign-in provider stays open — sign out there too if someone else may have used it.",
+          "unknown": "Signs you out and disconnects every AI app and personal token connected to your account."
+        },
+        "button": "Sign out & disconnect",
+        "confirm": {
+          "title": "Sign out everywhere and disconnect AI apps?",
+          "description": {
+            "local": "You'll be signed out on every device, this one included. Every connected AI app and personal token stops working at once and has to be connected again. This can't be undone.",
+            "identityProvider": "You'll be signed out of lazyit on every device, this one included, and every connected AI app and personal token stops working at once and has to be connected again. lazyit can't end your session at your sign-in provider — sign out there separately. This can't be undone.",
+            "unknown": "You'll be signed out, and every connected AI app and personal token stops working at once and has to be connected again. This can't be undone."
+          },
+          "cancel": "Cancel",
+          "confirm": "Sign out and disconnect"
+        },
+        "error": "Couldn't sign out everywhere. Nothing was changed — please try again."
       },
       "devices": {
         "title": "Your sessions",
@@ -118,7 +138,9 @@
     },
     "toast": {
       "saveError": "Couldn't save your notification preferences"
-    }
+    },
+    "mandatory": "Security notice — always emailed, can't be turned off.",
+    "mandatoryAria": "{type} — security notice, always emailed"
   },
   "types": {
     "critical_app_access": {

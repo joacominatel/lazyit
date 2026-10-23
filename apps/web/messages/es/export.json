@@ -2,6 +2,14 @@
   "button": "Exportar CSV",
   "busy": "Exportando…",
   "title": "Descarga como CSV todas las filas que coinciden con los filtros actuales, no solo esta página",
+  "menu": {
+    "button": "Exportar",
+    "title": "Descarga todas las filas que coinciden con los filtros actuales, no solo esta página, como CSV o como libro de Excel",
+    "formats": {
+      "csv": "CSV (.csv)",
+      "xlsx": "Excel (.xlsx)"
+    }
+  },
   "overCap": "Esta vista coincide con {total, number} filas, más de las {cap, number} que admite una exportación. Acota los filtros y vuelve a intentarlo.",
   "errors": {
     "overCap": "Hay demasiadas filas para exportar. Acota los filtros y vuelve a intentarlo.",

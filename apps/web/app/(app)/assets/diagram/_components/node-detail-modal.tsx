@@ -105,6 +105,7 @@ import {
   type RelinkProgress,
 } from "./relink-sequence";
 import { NodeChangesTab } from "./node-changes-tab";
+import { NodeLifecycleBadges, NodeLifecycleMenu } from "./node-lifecycle";
 import { NodeEdgesManager } from "./node-edges-manager";
 import { nodeSectionKey } from "./node-detail-keys";
 import { planNodeDetailTabs, type NodeDetailTabId } from "./node-detail-tabs";
@@ -280,6 +281,8 @@ function ModalBody({
               status={node.status}
             />
           ) : null}
+          {/* Retired / alerts snoozed (#1701). Nothing for an active, unsnoozed node. */}
+          <NodeLifecycleBadges node={node} />
         </div>
         {node.assetName ? (
           <p className="text-xs text-muted-foreground">
@@ -492,6 +495,9 @@ function GeneralTab({
 
           {/* Status toggle (write — gated). */}
           {canManage ? <StatusSection node={node} /> : null}
+
+          {/* Retire / snooze (#1701, write — gated). */}
+          {canManage ? <LifecycleSection node={node} /> : null}
         </div>
 
         <div className="space-y-5">
@@ -795,6 +801,26 @@ function StatusSection({ node }: { node: InfraNodeDetail }) {
       </Select>
       <p className="mt-1.5 text-xs text-muted-foreground">
         {t("panel.statusDescription")}
+      </p>
+    </Section>
+  );
+}
+
+/**
+ * Retire / snooze (#1701). Retired = gone, not offline: the node stays here with its history but is no
+ * longer watched for liveness, and its Asset is untouched. A snooze keeps the OFFLINE flip and only
+ * withholds the notification. The menu is the same one the review tray and the fleet table use.
+ */
+function LifecycleSection({ node }: { node: InfraNodeDetail }) {
+  const t = useTranslations("infra");
+  return (
+    <Section title={t("lifecycle.menu")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <NodeLifecycleMenu node={node} />
+        <NodeLifecycleBadges node={node} />
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        {t("lifecycle.sectionDescription")}
       </p>
     </Section>
   );

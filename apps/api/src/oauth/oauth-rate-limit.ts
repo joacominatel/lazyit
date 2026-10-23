@@ -6,6 +6,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { isIP } from 'node:net';
 import type { User } from '../../generated/prisma/client';
 import {
   CONSENT_DECISION_RATE_LIMIT,
@@ -75,6 +76,53 @@ function clientIp(request: Request): string {
   return request.ip || request.socket?.remoteAddress || 'unknown';
 }
 
+/**
+ * The rate-limit key of an address for `POST /oauth/register` (#1683): an IPv4 address as is, an IPv6
+ * address by its /64 prefix. One host on IPv6 normally holds a whole /64 and can pick a fresh address
+ * per request from it, so keying on the full address would hand it ~2^64 budgets. An IPv4-mapped IPv6
+ * address (`::ffff:192.0.2.1`, what a dual-stack socket reports) is keyed as the IPv4 it carries, and a
+ * zone index (`fe80::1%eth0`) is ignored. Anything that is not an IP is returned unchanged.
+ */
+export function registrationRateKey(ip: string): string {
+  const address = ip.split('%')[0];
+  const version = isIP(address);
+  if (version !== 6) return version === 4 ? address : ip;
+  const groups = expandIpv6(address);
+  if (!groups) return ip;
+  if (
+    groups.slice(0, 5).every((group) => group === 0) &&
+    groups[5] === 0xffff
+  ) {
+    return `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`;
+  }
+  return `${groups
+    .slice(0, 4)
+    .map((group) => group.toString(16))
+    .join(':')}::/64`;
+}
+
+/** The eight 16-bit groups of a valid IPv6 address (`::` expanded, an embedded dotted IPv4 converted). */
+function expandIpv6(address: string): number[] | null {
+  let text = address.toLowerCase();
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number);
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<string>(missing).fill('0'), ...tail].map(
+    (group) => parseInt(group, 16),
+  );
+  return groups.every((group) => Number.isInteger(group) && group <= 0xffff)
+    ? groups
+    : null;
+}
+
 function tooMany(): HttpException {
   return new HttpException(
     {
@@ -88,20 +136,32 @@ function tooMany(): HttpException {
 abstract class IpRateLimitGuard implements CanActivate {
   protected abstract readonly limiter: FixedWindowRateLimiter;
 
+  /** The bucket a client address counts against: the address itself unless a guard says otherwise. */
+  protected keyOf(ip: string): string {
+    return ip;
+  }
+
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    if (!this.limiter.hit(clientIp(request))) throw tooMany();
+    if (!this.limiter.hit(this.keyOf(clientIp(request)))) throw tooMany();
     return true;
   }
 }
 
-/** `POST /oauth/register`: 10 registrations per IP per hour (unauthenticated endpoint, DCR abuse). */
+/**
+ * `POST /oauth/register`: 10 registrations per hour per IPv4 address or per IPv6 /64 (unauthenticated
+ * endpoint, DCR abuse; {@link registrationRateKey}).
+ */
 @Injectable()
 export class RegisterRateLimitGuard extends IpRateLimitGuard {
   protected readonly limiter = new FixedWindowRateLimiter(
     REGISTER_RATE_LIMIT.max,
     REGISTER_RATE_LIMIT.windowMs,
   );
+
+  protected override keyOf(ip: string): string {
+    return registrationRateKey(ip);
+  }
 }
 
 /** `POST /oauth/token`: per IP. */

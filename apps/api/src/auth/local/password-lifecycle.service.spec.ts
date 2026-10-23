@@ -44,7 +44,14 @@ interface UserRow {
   mustChangePassword: boolean;
 }
 
+/**
+ * The hash "stored" for the last user built: the step-up verifier reads it by id through the dedicated
+ * credential read (ADR-0105 global omit), never off the principal, so the Prisma mock answers it.
+ */
+let storedHash: string | null = null;
+
 function makeUser(overrides: Partial<UserRow> = {}): UserRow {
+  storedHash = overrides.passwordHash ?? null;
   return {
     id: VALID_ID,
     email: 'alice@example.com',
@@ -105,7 +112,14 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
     (renderPasswordResetEmail as jest.Mock).mockClear();
 
     credentials = new LocalCredentialService();
-    userFindFirst = jest.fn();
+    storedHash = null;
+    // The credential read (`select: { passwordHash }`) answers the stored hash; any other read is
+    // configured per test.
+    userFindFirst = jest.fn((args?: { select?: { passwordHash?: boolean } }) =>
+      Promise.resolve(
+        args?.select?.passwordHash ? { passwordHash: storedHash } : undefined,
+      ),
+    );
     userUpdate = jest.fn().mockResolvedValue({ id: VALID_ID, sessionEpoch: 1 });
     tokDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     tokCount = jest.fn().mockResolvedValue(0);
@@ -351,7 +365,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
     });
 
     it('backs off repeated wrong current passwords with a 429, even for the right one (AUD-013)', async () => {
-      const stepUp = new PasswordStepUpVerifier(credentials);
+      const stepUp = new PasswordStepUpVerifier(credentials, prisma as never);
       stepUp.now = () => 1_000_000;
       service = new PasswordLifecycleService(
         prisma as never,
@@ -773,7 +787,11 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       resolveConfig.mockResolvedValue(null);
       await expect(
         service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
-      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      ).rejects.toMatchObject({
+        reason: 'smtp-not-configured',
+        // #1536: points the admin at the current Settings → Email page, not the pre-#1533 location.
+        message: expect.stringContaining('Settings → Email') as unknown,
+      });
       expect(tokCreate).not.toHaveBeenCalled();
       expect(sendMail).not.toHaveBeenCalled();
     });

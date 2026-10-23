@@ -12,12 +12,8 @@ import { Reflector } from '@nestjs/core';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  Prisma,
-  Role,
-  type ServiceAccount,
-  type User,
-} from '../../generated/prisma/client';
+import { Prisma, Role } from '../../generated/prisma/client';
+import type { ServiceAccountRow, UserRow } from '../prisma/prisma-omit';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import type { Principal } from './principal';
 import {
@@ -35,6 +31,7 @@ import {
   type SessionClaims,
 } from './local/local-credential.service';
 import { UserSessionStore } from './local/user-session.store';
+import { issuedBeforeOidcCutoff } from './oidc-cutoff';
 
 // A hung IdP would otherwise hold a first sign-in for undici's ~300s headers timeout (AUD-036).
 const IDP_FETCH_TIMEOUT_MS = 5_000;
@@ -87,8 +84,9 @@ interface ProfileClaims {
  *
  * OIDC mode (production default) — validates Bearer JWT against the JWKS endpoint of
  *   OIDC_ISSUER. JIT-provisions a User on first login (externalId = sub). Missing/invalid
- *   token → 401 UnauthorizedException. On the JIT path the guard enriches the profile from the
- *   standard OIDC userinfo endpoint (ADR-0038): an OAuth access token carries authorization, not
+ *   token → 401 UnauthorizedException, and so is a token older than the user's
+ *   `oidcTokensNotBefore` cutoff (#1715, see `oidc-cutoff.ts`). On the JIT path the guard
+ *   enriches the profile from the standard OIDC userinfo endpoint (ADR-0038): an OAuth access token carries authorization, not
  *   identity, so email/name claims must be fetched from userinfo. The userinfo endpoint is located
  *   via OIDC Discovery (BYOI-safe; no vendor path hardcoding) and the lookup is fail-soft — any
  *   discovery/userinfo failure falls back to the token's claims, never breaking login.
@@ -144,8 +142,8 @@ export class JwtAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<
       Request & {
-        user?: User;
-        serviceAccount?: ServiceAccount;
+        user?: UserRow;
+        serviceAccount?: ServiceAccountRow;
         principal?: Principal;
       }
     >();
@@ -218,8 +216,8 @@ export class JwtAuthGuard implements CanActivate {
    */
   private async handleDelegated(
     request: Request & {
-      user?: User;
-      serviceAccount?: ServiceAccount;
+      user?: UserRow;
+      serviceAccount?: ServiceAccountRow;
       principal?: Principal;
     },
   ): Promise<boolean> {
@@ -267,8 +265,8 @@ export class JwtAuthGuard implements CanActivate {
    */
   private async handleServiceAccount(
     request: Request & {
-      user?: User;
-      serviceAccount?: ServiceAccount;
+      user?: UserRow;
+      serviceAccount?: ServiceAccountRow;
       principal?: Principal;
     },
     bearer: string,
@@ -283,7 +281,7 @@ export class JwtAuthGuard implements CanActivate {
   // ---------- shim mode -----------------------------------------------------
 
   private async handleShim(
-    request: Request & { user?: User },
+    request: Request & { user?: UserRow },
   ): Promise<boolean> {
     const rawId = (request.headers['x-user-id'] as string | undefined)?.trim();
     if (!rawId) {
@@ -329,7 +327,7 @@ export class JwtAuthGuard implements CanActivate {
    * session is remember-me, for a route that re-mints the token); the principal mirror happens in canActivate.
    */
   private async handleLocal(
-    request: Request & { user?: User; localSession?: LocalSessionContext },
+    request: Request & { user?: UserRow; localSession?: LocalSessionContext },
   ): Promise<boolean> {
     const bearer = this.extractBearer(request);
     if (!bearer) {
@@ -374,7 +372,7 @@ export class JwtAuthGuard implements CanActivate {
   // ---------- OIDC mode -----------------------------------------------------
 
   private async handleOidc(
-    request: Request & { user?: User },
+    request: Request & { user?: UserRow },
   ): Promise<boolean> {
     const authHeader = request.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -434,6 +432,14 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Account disabled');
     }
 
+    // The OIDC cutoff (#1715): lazyit mints no web session in this mode, so "Sign out everywhere", a
+    // deactivation or an offboarding cannot bump an epoch the IdP token carries. They stamp
+    // `oidcTokensNotBefore` instead, and a token issued — or authenticated — before it is refused with the
+    // SAME 401 as an expired token, so the web signs that device out. Null (every user until then) = no cutoff.
+    if (issuedBeforeOidcCutoff(payload, user.oidcTokensNotBefore)) {
+      throw new UnauthorizedException('Invalid or expired Bearer token');
+    }
+
     request.user = user;
     return true;
   }
@@ -461,7 +467,7 @@ export class JwtAuthGuard implements CanActivate {
     sub: string,
     accessToken: string,
     claims: JWTPayload,
-  ): Promise<User> {
+  ): Promise<UserRow> {
     // includeSoftDeleted: bypass the soft-delete read filter so an offboarded user is still seen
     // here. Without it the filtered findFirst returns null and the guard would JIT-re-provision a
     // brand-new row, resurrecting the account. The flag is a custom arg the Prisma extension strips
@@ -677,7 +683,7 @@ export class JwtAuthGuard implements CanActivate {
    * `Admin User` (case-insensitive) so a real operator name is never silently overwritten. The role
    * is always preserved regardless — only the display name may be refreshed.
    */
-  private looksLikeSeedPlaceholder(user: User): boolean {
+  private looksLikeSeedPlaceholder(user: UserRow): boolean {
     return (
       user.firstName.trim().toLowerCase() === 'admin' &&
       user.lastName.trim().toLowerCase() === 'user'

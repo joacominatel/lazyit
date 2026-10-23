@@ -35,7 +35,9 @@ un usuario y, al crear el activo, queda registrado como su responsable actual en
 Dejarlo vacío mantiene el flujo clásico — de lo contrario, la asignación es un paso aparte que haces
 una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assignments-history)). Si la
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
-responsable desde el activo.
+responsable desde el activo. Al elegir al responsable también ves lo que ya tiene y puedes marcar lo que
+devuelve; se libera justo después de crear y asignar el activo (ver
+[Entregar un reemplazo](/help/assets-assignments-history#entregar-un-reemplazo-lo-que-la-persona-ya-tiene)).
 
 ¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
 espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre
@@ -253,7 +255,7 @@ llevan, aunque el modelo no esté en el nombre.
 - **Empresa** — acota a una empresa (la etiqueta de agrupación de arriba). Solo aparecen las empresas en uso.
 - **Responsable** — muestra solo los activos asignados actualmente a una persona concreta. Empieza a
   escribir un nombre para elegirla; la lista mostrará únicamente las asignaciones vigentes de esa
-  persona.
+  persona. Solo aparece si tu rol puede ver el directorio de usuarios.
 - **Responsabilidad** — filtra según si el activo tiene algún responsable actual (*Con responsables*
   / *Sin responsables*), sin importar quién.
 - **Garantía** — acota a los activos cuya **garantía está por vencer** (*Por vencer ≤ 90d*) o ya
@@ -272,8 +274,8 @@ forma rápida de ver "qué más es este modelo exacto" frente a "qué más hay e
 
 ### Exportar el inventario
 
-El botón **Exportar CSV** en la parte superior de la página de Activos descarga un **CSV** del
-inventario que coincide con tus **filtros actuales** — todo el conjunto de resultados, no solo la
+El botón **Exportar** en la parte superior de la página de Activos descarga un **CSV** o un archivo de
+**Excel (.xlsx)** del inventario que coincide con tus **filtros actuales** — todo el conjunto de resultados, no solo la
 página que tienes delante. Ajusta primero el estado, la categoría, la ubicación, la empresa, el
 responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
 garantía*) y exporta solo esa porción. El archivo lleva una fila por activo con su nombre, etiqueta de
@@ -284,7 +286,10 @@ compra** (como un número simple con punto decimal, para que una hoja de cálcul
 **referencia de compra** y los **números de factura** del activo, como últimas columnas. Sin ese permiso
 esas tres columnas no aparecen en el archivo. Es seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
 versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
-Los límites, el registro de auditoría y cómo abrir el archivo en Excel están en [Exportar datos](/help/notifications-activity-data-export).
+Elige **CSV** para editar el inventario y volver a cargarlo con la [importación masiva](/help/assets-bulk-import);
+el archivo de **Excel** tiene celdas con tipo (números, importes y fechas de verdad) para leer y ordenar,
+pero no se puede importar. Los límites, el registro de auditoría y las diferencias entre los dos archivos
+están en [Exportar datos](/help/notifications-activity-data-export).
 
 ### Elegir qué columnas mostrar
 
@@ -351,9 +356,11 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
   usados. Complétalo antes de subir, o ponlo, cámbialo o quítalo después con el lápiz del documento. Se
   ve junto al nombre del archivo.
 
-> **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
-> **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el
-> soporte de copias, conserva una copia independiente de todo lo irremplazable.
+> **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor. La copia de
+> seguridad de lazyit archiva ese volumen junto con cada copia de la base de datos (salvo que tu
+> administrador haya desactivado ese archivo), así que una restauración recupera los documentos con sus
+> registros. Consulta
+> [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Editar, clonar y desactivar
 

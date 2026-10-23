@@ -622,12 +622,20 @@ const purchasePendingLines = defineTool({
   description:
     'The lines still waiting for units (the Pending units tab): countable lines with units pending on ' +
     'ordered purchases (not DRAFT, not CANCELLED), oldest purchase first, each with its purchase header. ' +
-    'Use it for "what is pending from <supplier>?" (pass supplierId).',
+    'Use it for "what is pending from <supplier>?" (pass supplierId), and for "what is overdue?" (pass ' +
+    "expectedBefore = the user's today).",
   domain: 'purchases',
   class: 'read',
   idempotent: true,
   input: z.strictObject({
     supplierId: supplierId.optional(),
+    expectedBefore: z.iso
+      .date()
+      .optional()
+      .describe(
+        "Only the overdue lines: purchases expected on a day BEFORE this date (YYYY-MM-DD) — pass the user's " +
+          'today. Due today is not late; a purchase with no expected date is never overdue.',
+      ),
     limit: pageSize,
     offset,
   }),
@@ -638,6 +646,7 @@ const purchasePendingLines = defineTool({
       await rt.call(PurchaseOrdersController, 'findPendingLines', {
         query: {
           supplierId: input.supplierId,
+          expectedBefore: input.expectedBefore,
           limit: String(at.limit),
           offset: String(at.offset),
         },
@@ -1214,7 +1223,7 @@ const purchaseLineAdd = defineTool({
         field: 'action',
         ...afterPhrase(
           phrase('purchase_line_add.action', {
-            line: clip(input.line.description),
+            line: input.line.description,
             purchase: label,
           }),
         ),
@@ -2635,6 +2644,19 @@ export const purchasesToolset: AiToolset = {
       PurchaseOrdersController,
       ['export', 'exportPendingLines'],
       'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      PurchaseOrdersController,
+      ['pendingSummary'],
+      "The dashboard's Pending deliveries count (#1498), a web widget; purchase_pending_lines answers the same " +
+        'question (pass expectedBefore for the overdue ones) with the lines themselves.',
+    ),
+    unexposed(
+      PurchaseOrdersController,
+      ['linkedPreview', 'applyToLinked'],
+      'Re-applying a line price to its linked assets (#1502) is the follow-up confirmation of a price edit, ' +
+        'reviewed asset by asset on the purchase or asset page; a CEO decision keeps it out of the AI tools ' +
+        '(2026-10-21). It changes asset money (ADR-0099 §11, D11).',
     ),
     unexposed(
       PurchaseOrdersController,

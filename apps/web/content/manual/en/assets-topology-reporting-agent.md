@@ -393,8 +393,12 @@ On Windows, from an elevated PowerShell:
 & ([scriptblock]::Create((irm https://your-instance/install.ps1))) -Uninstall
 ```
 
-It stops and removes what runs the agent — the timer and both systemd units on Linux, the scheduled
-task on Windows — then the binary, the agent's local state and its configuration file, including
+It stops what runs the agent — the timer and both systemd units on Linux, the scheduled task on
+Windows — then **tells lazyit this machine is going away**, so its node is **retired** instead of
+turning offline a few minutes later and setting off an alert (see **Retired servers and snoozed
+alerts** below). The uninstall prints whether lazyit confirmed it. If lazyit could not be reached, or
+your instance is older than this feature, it says so and carries on, and you can retire the node by
+hand. Then it removes the binary, the agent's local state and its configuration file, including
 **the token**, which is destroyed whichever options you use. On Windows it also takes its
 directory back off the machine PATH, so nothing is left pointing at a folder that no longer exists.
 It's safe to run twice, and safe on a half-finished install.
@@ -407,10 +411,52 @@ decommissioned. (`--keep-token`, further down, is the opposite operation and bel
 combining it with `--uninstall` is refused rather than ignored, so nobody finishes an uninstall
 believing the credential survived.)
 
-Two things uninstalling does **not** do, deliberately. The server's entry in lazyit stays exactly as
-it is: discard it from the Servers view if you want it off the map. And the token is only removed
-*from that host* — if no other machine uses it, revoke the service account in
+The containers and virtual machines the server reported are retired with it, so they do not each set
+off an offline alert once the server stops listing them. Nodes you drew by hand are never touched.
+
+Two things uninstalling does **not** do, deliberately. The server's node in lazyit is retired, not
+deleted: it keeps its history and its asset, and you can discard it from the Servers view if you want
+it off the map. And the token is only removed *from that host* — if no other machine uses it, revoke the service account in
 [Service accounts](/help/users-permissions-service-accounts).
+
+## Retired servers and snoozed alerts
+
+"Offline" and "gone" are different things. A server that crashed and a server you decommissioned both
+stop reporting, and both used to sit on the map as **Offline** forever, setting off an **Agent
+offline** notification on the way. Two actions tell lazyit which one it is looking at.
+
+**Retire** a server that is gone for good. A retired node:
+
+- stays on the map, in the Servers view and in the Agents view, with a **Retired** badge, its history,
+  its connections and its linked asset all intact. Retiring a server does not dispose of the hardware:
+  the asset is not touched.
+- is no longer watched. It is never marked offline and never announced, so it stops filling the bell.
+- is left out of the Agents view's counts (it is not "behind" or "not reporting", it is gone) and gets
+  its own **retired** filter there. It is also left out of software watch results.
+- **comes back by itself if it reports again.** If the machine was not really gone, its next report
+  un-retires it, and the node's **Changes** tab records when that happened.
+
+Uninstalling the agent retires the node for you (see **Removing the agent** above), so you only need
+to retire by hand a server whose agent you could not uninstall, or one that was never reported by an
+agent at all.
+
+**Snooze offline alerts** for planned maintenance: a reboot window, a hardware swap, a datacenter
+move. While a node is snoozed it still turns **Offline** when it stops reporting (the map stays true),
+but nobody is notified, in the bell or by email. You can snooze for 4 hours, 1 day, 3 days, 1 week or
+30 days (90 days is the longest lazyit accepts), and end a snooze early at any time. Two things to know:
+
+- What counts is **when lazyit marks the server Offline**, not when it actually went quiet. If that
+  happens while the snooze is running, nobody is notified, and nobody is notified later either when the
+  window ends: the Offline status is already on the map. If the server is only marked Offline after
+  the window has ended, the alert goes out as usual.
+- A snooze is not a mute switch. For a server that should never alert again, retire it.
+
+**Where to find them.** Every node has a **Lifecycle** menu: in the node's details on the map
+(**Lifecycle** section), on each row of the **Pending review** tray, and on each row of the **Agents**
+view. It has **Retire** (or **Un-retire**), **Snooze offline alerts** and, while a snooze is running,
+**End snooze now**. Retiring shows an **Undo** right away. These actions need the
+**Manage topology** (`infra:manage`) permission, and only a person can take them, never a service
+account. The one exception is the agent retiring its own node when it is uninstalled.
 
 ## Pending review
 
@@ -661,6 +707,15 @@ When two machines are found:
 - You get **one notification** in the bell (not one per check-in). Its title names both hosts; its
   summary opens with the command that fixes it (the bell shortens long summaries to one line — hover
   the row to read it in full). The row links to the topology map.
+- The new host's **containers are tracked under its own entry**. They arrive in Pending review like
+  any container, grouped under the new host, and they **never touch the containers of the server that
+  was already there**. They are **not** auto-confirmed by your rules, even one that would normally
+  match: a host lazyit suspects of being a clone is for you to look at. One exception: if two clones
+  also share a **serial number**, they end up on one entry, and once lazyit has seen a second machine
+  there it stops tracking that entry's containers until the identity is fixed, rather than let the two
+  machines take turns marking each other's containers offline.
+- A **hypervisor** host in this situation does **not** report its virtual machines or LXC guests until
+  its identity is fixed.
 
 The fix is on the machines, not in lazyit — and **the command differs by platform**, which is why the
 notification names the one for the host that reported:
@@ -673,7 +728,9 @@ notification names the one for the host that reported:
 
 Fix the template too, or every future clone repeats it. Once a clone has a real ID of its own it
 simply reports as a new host — confirm it, or use **Merge into…** to fold it onto the entry lazyit
-created for it in the meantime.
+created for it in the meantime. Its containers report again under the new host too. The entry lazyit
+created for the clone, and the containers under it, stop checking in and go **offline**; discard them
+once you have confirmed or merged the new host.
 
 All of this needs the hardware details a **current** agent sends — and it needs that agent to actually
 have them. Two things leave a host out of the check, and both are silent:
@@ -910,7 +967,9 @@ What you can set there, in three groups:
   second how long lazyit waits before calling a host offline. The second must be longer than the first,
   or a perfectly healthy host gets marked offline between two of its own reports — the editor will not
   let you save a value that would do that, and it says so under the sentence rather than after you press
-  Save.
+  Save. That wait is also counted from when lazyit itself last started: after an upgrade, a restart or
+  an outage of lazyit, no host is marked offline until it has had that much time to report again, so
+  coming back does not turn the whole map offline and fill the bell with false alarms.
 - **What agents collect** — a grid of checkboxes, one per collector: hardware, disks, network
   interfaces, installed software, containers and hypervisor guests, plus a hard cap on how many packages
   a host may report. **A collector that is off is never run**, on
@@ -1081,6 +1140,10 @@ that ever raises a colour is the *major version behind* tier, exactly as the bad
 
 The view is read-only in the strongest sense: **lazyit never sends anything to a host.** It tells you
 what it knows and gives you a command to run yourself.
+
+The view has a second section, **Software watchlist**, in the switch at its top: the same hosts,
+counted by the packages they run instead of by agent version. It has a section of its own below —
+[Software watchlist](#software-watchlist).
 
 ### The update command
 
@@ -1274,6 +1337,73 @@ disappear from your inventory and look like an outage, while a stale field never
 this version onwards": instances older than this release still refuse a report that mentions anything
 they don't recognise, so if you plan to run agents that update on their own schedule, upgrade the
 instance first.
+
+## Software watchlist
+
+Every agent sends the list of packages installed on its host, and each host's **Software** tab shows
+that list. The **software watchlist** answers the question one host at a time can't: *across the whole
+estate, which versions of `openssl` are out there, and where is it missing?*
+
+Open **Assets › Topology › Agents** and switch to **Software watchlist** at the top of the view. Add the
+packages your team keeps an eye on — typically the 10 to 30 you check every Patch Tuesday — and each one
+gets a card:
+
+> **openssl** — across 17 agent-reported hosts: 11 on `3.0.13`, 2 on `1.1.1w`, 1 missing, 3 unknown.
+
+- **The versions**, each with how many hosts carry it. A host with two versions installed (two
+  kernels, two runtimes side by side) counts in both, so the versions can add up to more than the hosts
+  that have the package. A package the agent listed without a version has its own line, *No version
+  reported*.
+- **Missing** — hosts whose last package list does **not** name the package.
+- **Unknown** — hosts lazyit can't speak for. They are counted apart from *missing* on purpose (see
+  below).
+
+Every number opens the hosts behind it, a page at a time, each linking to its node on the map. A host's
+row also says how old the package list it is judged on is — an offline host still counts, by its last
+list. A **retired** host does not count at all: it is gone, so it neither runs a version nor is
+missing one (see [Retired servers and snoozed alerts](#retired-servers-and-snoozed-alerts)).
+
+**It is a distribution, nothing more.** lazyit counts versions; it does not judge them. There is no
+"outdated", no end-of-life flag and no vulnerability matching — lazyit has no feed to check against, and
+works fully offline. The versions are listed by **how many hosts carry each one**, not in version order:
+the top line is the most common version, not the newest.
+
+**Names are matched exactly.** Type the package name as the agent reports it. Spacing and capitals
+don't matter (`OpenSSL` and `openssl` are the same watch), but nothing else is folded together: there
+are no wildcards, and `libssl3` and `libssl3:amd64`, or a Windows program whose name includes its
+version, are different names. Copy the name from a host's **Software** tab when in doubt.
+
+### Missing is not the same as unknown
+
+**Missing** is only ever said about a host whose agent actually listed its packages and left this one
+out. A host lazyit can't speak for is **unknown**, with the reason on its row:
+
+- **No package list** — the host stores no list at all. That is what **turning software collection
+  off** leaves: in **Settings → Reporting agents**, or on the host itself
+  (`LAZYIT_COLLECT_SOFTWARE=false`). It is also the state of a host that has not sent a list yet.
+- **Excluded by the agent settings** — the name matches a package exclusion pattern in the agent
+  settings, so the agent was told not to report it.
+
+So switching software collection off for a group of hosts never makes every watched package look
+missing on them — they simply move to unknown.
+
+Things that can still make a host read **missing** without the package being gone: a **package limit**
+low enough to cut it off the list, or an exclusion set only in a host's own config file or for one
+service account — lazyit can't see those. If a missing host surprises you, open its **Software** tab.
+
+### Who can see and change it
+
+- **Seeing it** needs the same permission as seeing the topology — the watchlist only adds up what
+  each host's **Software** tab already shows to the same people.
+- **Adding and removing** a package needs permission to manage the topology, and must be done by a
+  person signed in to lazyit: a service account's token can't change the list. Removing a package only
+  takes it off the list — nothing about any host changes, and you can add it back at any time. The list
+  holds up to 100 packages.
+
+> **Treat this view as sensitive.** A list of which versions run on which machines is exactly the map
+> an attacker would want. Everyone who can see the topology can see it. If a group of hosts must stay
+> out of it, turn software collection off for them in the agent settings: their packages are no longer
+> collected or stored, and here they show as unknown.
 
 ## What's next
 

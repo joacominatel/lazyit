@@ -14,11 +14,16 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import { type AccessGrant, type Application, isSafeApplicationUrl } from "@lazyit/shared";
+import {
+  type AccessGrant,
+  type Application,
+  type ApplicationGrantStatus,
+  isSafeApplicationUrl,
+} from "@lazyit/shared";
 import { useLocale, useNow, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useMemo, useReducer, useState } from "react";
+import { type ReactNode, useMemo, useReducer } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailPanel, DetailSkeleton } from "@/components/detail-panel";
@@ -49,14 +54,13 @@ import { useRevokeGrant } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useAccessRequests } from "@/lib/api/hooks/use-access-requests";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
-import { useApplication, useApplicationGrants } from "@/lib/api/hooks/use-applications";
-import { useUserNames } from "@/lib/api/hooks/use-users";
 import {
-  grantExpiryCounts,
-  grantStatusCounts,
-  type GrantStatusFilter,
-  seatState,
-} from "@/lib/applications/grant-view";
+  useApplication,
+  useApplicationGrantPage,
+  useApplicationGrantSummary,
+} from "@/lib/api/hooks/use-applications";
+import { useUserNames } from "@/lib/api/hooks/use-users";
+import { grantAttention, seatState } from "@/lib/applications/grant-view";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { expiryState, GRANT_EXPIRING_WITHIN_DAYS } from "@/lib/record/record-state";
@@ -69,10 +73,9 @@ import { ApplicationAccessTab } from "./application-access-tab";
 import { ApplicationActivityTab } from "./application-activity-tab";
 import { ApplicationAutomationTab } from "./application-automation-tab";
 import { ApplicationRequestsTab } from "./application-requests-tab";
+import { useGrantListParams } from "./use-grant-list-params";
 
 type ApplicationTab = "access" | "requests" | "automation" | "activity" | "about";
-
-const ALL_GRANTS = { activeOnly: false };
 
 /** isSafeApplicationUrl guarantees scheme-less or http(s); make scheme-less hosts absolute (SEC-008). */
 function toHref(url: string): string {
@@ -117,12 +120,17 @@ export function ApplicationDetailView({ id }: { id: string }) {
   const canReadRequests = useCan("accessRequest:read");
   const canReadWorkflows = useCan("workflow:read");
   const canReadLogs = useCan("logs:read");
+  // A person search reads names and emails, so it needs user:read on top of accessGrant:read (#1660).
+  const canSearchPeople = useCan("user:read");
   // The server-render instant, then a per-minute tick (#1448): server and client agree on expiry.
   const now = useNow({ updateInterval: 60 * 1000 }).getTime();
 
   const { data: application, isLoading, isError, error, refetch } = useApplication(id);
-  const grantsQuery = useApplicationGrants(canReadGrants ? id : undefined, ALL_GRANTS);
-  const grants = grantsQuery.data;
+  // The Access tab reads one page of grants and a summary over all of them, both server-side (#1660).
+  const grantList = useGrantListParams({ canSearchPeople });
+  const grantPageQuery = useApplicationGrantPage(canReadGrants ? id : undefined, grantList.params);
+  const grantPage = grantPageQuery.data;
+  const { data: grantSummary } = useApplicationGrantSummary(canReadGrants ? id : undefined);
   const { data: pendingPage } = useAccessRequests(
     { applicationId: id, status: "PENDING", limit: 1 },
     { enabled: canReadRequests },
@@ -131,16 +139,16 @@ export function ApplicationDetailView({ id }: { id: string }) {
   const revokeGrant = useRevokeGrant();
   const deleteApplication = useDeleteApplication();
 
-  // Grantees and the people who granted or revoked, so every row and "by …" line resolves.
+  // The page's grantees and the people who granted or revoked, so every row and "by …" line resolves.
   const personIds = useMemo(() => {
     const ids: string[] = [];
-    for (const grant of grants ?? []) {
+    for (const grant of grantPage?.items ?? []) {
       ids.push(grant.userId);
       if (grant.grantedById) ids.push(grant.grantedById);
       if (grant.revokedById) ids.push(grant.revokedById);
     }
     return ids;
-  }, [grants]);
+  }, [grantPage]);
   const userById = useUserNames(personIds);
 
   const tabs = useMemo<ApplicationTab[]>(() => {
@@ -153,7 +161,6 @@ export function ApplicationDetailView({ id }: { id: string }) {
     return visible;
   }, [canReadGrants, canReadRequests, canReadWorkflows, canReadLogs]);
   const [tab, setTab] = useRecordTab(tabs, tabs[0]);
-  const [grantStatus, setGrantStatus] = useState<GrantStatusFilter>("active");
 
   const [dialog, dispatchDialog] = useReducer(dialogReducer, {
     grantOpen: false,
@@ -173,8 +180,6 @@ export function ApplicationDetailView({ id }: { id: string }) {
     ),
     [tList, application?.name],
   );
-
-  const counts = useMemo(() => grantStatusCounts(grants ?? [], now), [grants, now]);
 
   if (isLoading) {
     return (
@@ -202,17 +207,15 @@ export function ApplicationDetailView({ id }: { id: string }) {
     : undefined;
   const seats = seatState(application);
   const renewal = expiryState(application.renewalDate, now, GRANT_EXPIRING_WITHIN_DAYS);
-  const expiry = grantExpiryCounts(grants ?? [], now);
+  const counts = grantSummary?.counts;
+  const expiry = counts ? grantAttention(counts) : { expired: 0, expiringSoon: 0 };
   const pendingCount = pendingPage?.total;
-  const deactivatedHolders = new Set(
-    (grants ?? [])
-      .filter((g) => g.revokedAt === null && userById.get(g.userId)?.deletedAt != null)
-      .map((g) => g.userId),
-  ).size;
+  // Offboarded people who still hold an active grant; `null` (no user:read) hides the warning.
+  const offboardedHolders = grantSummary?.offboardedHolders ?? 0;
 
-  function openGrants(status: GrantStatusFilter) {
-    setGrantStatus(status);
+  function openGrants(status: ApplicationGrantStatus) {
     setTab("access");
+    grantList.setStatus(status);
   }
 
   function personName(userId: string): string {
@@ -245,17 +248,20 @@ export function ApplicationDetailView({ id }: { id: string }) {
       </AttentionItem>,
     );
   }
-  if (expiry.expiring > 0) {
+  if (expiry.expiringSoon > 0) {
     attentionItems.push(
       <AttentionItem key="expiring" tone="warning" icon={ClockIcon}>
-        {t("attention.expiringGrants", { count: expiry.expiring, days: GRANT_EXPIRING_WITHIN_DAYS })}
+        {t("attention.expiringGrants", {
+          count: expiry.expiringSoon,
+          days: grantSummary?.expiringWithinDays ?? GRANT_EXPIRING_WITHIN_DAYS,
+        })}
       </AttentionItem>,
     );
   }
-  if (deactivatedHolders > 0) {
+  if (offboardedHolders > 0) {
     attentionItems.push(
       <AttentionItem key="deactivated" tone="warning" icon={UserMinusIcon}>
-        {t("attention.deactivatedHolders", { count: deactivatedHolders })}
+        {t("attention.deactivatedHolders", { count: offboardedHolders })}
       </AttentionItem>,
     );
   }
@@ -274,11 +280,11 @@ export function ApplicationDetailView({ id }: { id: string }) {
       mono
       value={<span className="text-xl tracking-tight">{seats.used}</span>}
       sub={
-        grants
-          ? expiry.expired + expiry.expiring > 0
+        counts
+          ? counts.expiring > 0
             ? t("facts.grantsAttention", {
                 count: counts.active,
-                expiring: expiry.expired + expiry.expiring,
+                expiring: counts.expiring,
               })
             : t("facts.grants", { count: counts.active })
           : undefined
@@ -390,7 +396,7 @@ export function ApplicationDetailView({ id }: { id: string }) {
                 {canReadGrants ? (
                   <TabsTrigger value="access" className="group/tab">
                     {t("tabs.access")}
-                    <TabCount value={grants ? counts.active : undefined} />
+                    <TabCount value={counts?.active} />
                   </TabsTrigger>
                 ) : null}
                 {canReadRequests ? (
@@ -413,15 +419,16 @@ export function ApplicationDetailView({ id }: { id: string }) {
               <TabsContent value="access" className="pt-2">
                 <ApplicationAccessTab
                   applicationId={application.id}
-                  grants={grants}
-                  isError={grantsQuery.isError}
-                  error={grantsQuery.error}
-                  onRetry={() => grantsQuery.refetch()}
-                  counts={counts}
+                  page={grantPage}
+                  isFetching={grantPageQuery.isFetching}
+                  isError={grantPageQuery.isError}
+                  error={grantPageQuery.error}
+                  onRetry={() => grantPageQuery.refetch()}
+                  summary={grantSummary}
+                  list={grantList}
+                  canSearchPeople={canSearchPeople}
                   userById={userById}
                   now={now}
-                  status={grantStatus}
-                  onStatusChange={setGrantStatus}
                   canGrant={canGrant}
                   canReadWorkflows={canReadWorkflows}
                   onGrant={() => dispatchDialog({ type: "setGrantOpen", open: true })}

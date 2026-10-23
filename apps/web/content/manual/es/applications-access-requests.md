@@ -71,6 +71,9 @@ cargó en nombre de alguien, quién la cargó.
   historial de acceso de la aplicación).
 - **Rechazar** pide un **motivo**, que es obligatorio. El motivo se muestra a quien solicitó, para que
   sepa por qué.
+- Si la persona fue **desactivada o dada de baja** después de cargar la solicitud, lazyit se niega a
+  aprobarla y la solicitud sigue pendiente. Recházala con un motivo, o reactiva antes a la persona si
+  debe recibir el acceso.
 
 Revisar la cola requiere el permiso de lectura de solicitudes de acceso; aprobar o rechazar requiere el
 mismo permiso que otorgar acceso. Ver [Roles y permisos](/help/permissions).
@@ -86,6 +89,10 @@ su **Exportar CSV** descarga las solicitudes del estado seleccionado.
 
 Abrí tu **Perfil** para ver **Mis solicitudes de acceso** —cada solicitud que creaste y su estado
 actual (**Pendiente**, **Aprobada** o **Rechazada**)—. Una solicitud rechazada muestra el motivo que
-dio quien aprobó, y una que cargó un aprobador para vos lo indica. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
+dio quien aprobó, y una que cargó un aprobador para vos lo indica. Una solicitud aprobada cuyo acceso
+sigue vigente muestra además si tu cuenta en la aplicación ya está configurada —**Sin automatización**,
+**Configuración en curso**, **Configurada** o **Esperando a IT**— (ver
+[Estado de configuración de tu cuenta](/help/getting-started-your-profile#estado-de-configuración-de-tu-cuenta)).
+Cuando ese acceso se revoca o vence, la solicitud deja de mostrar un estado. lazyit además te avisa en cuanto se toma una decisión —en tu campana y por correo,
 salvo que lo desactives—, así que esta lista es el historial completo, no la única forma de enterarte
 del resultado.

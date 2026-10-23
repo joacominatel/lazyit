@@ -94,8 +94,9 @@ function storedScopes(values: readonly string[]): OAuthScope[] {
 
 /**
  * Tokens of the authorization server (ADR-0097 decision 8; mcp-and-oauth.md §5.2; INV-AI-9):
- *   - the `authorization_code` grant (single use, PKCE S256, exact redirect, RFC 8707 audience) which
- *     creates the grant — the "connected app";
+ *   - the `authorization_code` grant (single use, PKCE S256, exact redirect, RFC 8707 audience, the
+ *     credential epoch seen at consent) which creates the grant — the "connected app" — and links the code
+ *     to it, so a valid replay of the code revokes the grant (#1683);
  *   - the `refresh_token` grant, rotated on every use with reuse detection that revokes the grant;
  *   - revocation (RFC 7009 and the connected-apps UI);
  *   - {@link verifyAccessToken}, the resource-server check `/mcp` runs on every request (W3-2).
@@ -148,12 +149,20 @@ export class OAuthTokenService {
 
     // SINGLE USE, atomically, BEFORE any other check: a code presented with a wrong verifier or client is
     // compromised and must not stay redeemable. Two concurrent redemptions: exactly one wins the update.
+    // A code that was already redeemed is a replay: refused, and its grant revoked when the request is
+    // otherwise valid (OAuth 2.1 "Reuse of Authorization Codes"; #1683).
     const now = new Date();
-    const consumed = await this.prisma.oAuthAuthorizationCode.updateMany({
-      where: { id: row.id, usedAt: null, expiresAt: { gt: now } },
-      data: { usedAt: now },
-    });
-    if (consumed.count !== 1) throw invalidGrant();
+    const consumed =
+      row.usedAt === null
+        ? await this.prisma.oAuthAuthorizationCode.updateMany({
+            where: { id: row.id, usedAt: null, expiresAt: { gt: now } },
+            data: { usedAt: now },
+          })
+        : { count: 0 };
+    if (consumed.count !== 1) {
+      await this.revokeOnCodeReplay(row.id, params, ctx);
+      throw invalidGrant();
+    }
 
     if (row.client.clientId !== client_id) throw invalidGrant();
     // EXACT match against the redirect the code was issued for — no normalization at all.
@@ -178,6 +187,15 @@ export class OAuthTokenService {
 
     const user = await this.subjects.loadEligible(row.userId);
     if (!user) throw invalidGrant();
+    // The credential epoch seen at consent must still hold: a password change, reset, deactivation or
+    // "revoke sessions" between consent and exchange kills the code too (#1683). A code issued before the
+    // column existed carries null and skips this check until it expires (60 s).
+    if (
+      row.mcpCredentialEpoch !== null &&
+      row.mcpCredentialEpoch !== user.mcpCredentialEpoch
+    ) {
+      throw invalidGrant();
+    }
 
     const scopes = storedScopes(row.scopes);
     const access = mintOpaqueToken(OAUTH_ACCESS_TOKEN_PREFIX);
@@ -195,6 +213,11 @@ export class OAuthTokenService {
           mcpCredentialEpoch: user.mcpCredentialEpoch,
           lastUsedAt: now,
         },
+      });
+      // Link the code to the grant it produced, so a replay of the code revokes this grant (#1683).
+      await tx.oAuthAuthorizationCode.updateMany({
+        where: { id: row.id, grantId: null },
+        data: { grantId: grant.id },
       });
       await tx.oAuthToken.createMany({
         data: [
@@ -237,6 +260,43 @@ export class OAuthTokenService {
     return this.tokenResponse(access.value, refresh.value, scopes);
   }
 
+  /**
+   * An authorization code presented after it was redeemed (#1683). RFC 6749 §4.1.2 and OAuth 2.1 §4.1.3:
+   * the request is denied and the tokens issued from the code SHOULD be revoked — but only when the replayed
+   * request is otherwise VALID (same client, exact redirect, correct PKCE verifier), so someone holding a
+   * leaked code without its verifier cannot revoke the legitimate client's grant (OAuth 2.1 "Reuse of
+   * Authorization Codes"). The row is re-read so a redemption that just won the race is seen; a code burned
+   * by a failed exchange, or issued before the link existed, has no grant to revoke.
+   */
+  private async revokeOnCodeReplay(
+    codeId: string,
+    params: Record<string, string>,
+    ctx: OAuthRequestContext,
+  ): Promise<void> {
+    const row = await this.prisma.oAuthAuthorizationCode.findUnique({
+      where: { id: codeId },
+      include: { client: true },
+    });
+    if (!row?.grantId || row.usedAt === null) return;
+    const { client_id, redirect_uri, code_verifier } = params;
+    if (
+      row.client.clientId !== client_id ||
+      row.redirectUri !== redirect_uri ||
+      !verifyPkceS256(code_verifier, row.codeChallenge)
+    ) {
+      return;
+    }
+    this.logger.warn(
+      `oauth.code_replay grant=${row.grantId} client=${row.client.clientId}: an already-redeemed authorization code was presented again; revoking its grant.`,
+    );
+    await this.revokeGrant(row.grantId, 'code_replay', null, {
+      codeReplay: true,
+      clientId: row.client.clientId,
+      userId: row.userId,
+      ip: ctx.ip,
+    });
+  }
+
   /* ── refresh_token ──────────────────────────────────────────────────────────────────────────── */
 
   async refresh(
@@ -258,6 +318,8 @@ export class OAuthTokenService {
     const row = await this.prisma.oAuthToken.findUnique({
       where: { tokenHash: presentedHash },
       include: { grant: { include: { client: true } } },
+      // Re-compared below in constant time; globally omitted otherwise (ADR-0105 opt-in).
+      omit: { tokenHash: false },
     });
     if (
       !row ||
@@ -417,6 +479,7 @@ export class OAuthTokenService {
       userId?: string | null;
       ip?: string | null;
       reuseDetected?: boolean;
+      codeReplay?: boolean;
       personal?: boolean;
     } = {},
   ): Promise<boolean> {
@@ -438,6 +501,12 @@ export class OAuthTokenService {
       if (audit.reuseDetected) {
         await this.audit.record(
           { ...base, action: 'REFRESH_REUSE_DETECTED', detail: { reason } },
+          tx,
+        );
+      }
+      if (audit.codeReplay) {
+        await this.audit.record(
+          { ...base, action: 'CODE_REUSE_DETECTED', detail: { reason } },
           tx,
         );
       }
@@ -480,6 +549,8 @@ export class OAuthTokenService {
     const row = await this.prisma.oAuthToken.findUnique({
       where: { tokenHash: presentedHash },
       include: { grant: { include: { client: true } } },
+      // Re-compared below in constant time; globally omitted otherwise (ADR-0105 opt-in).
+      omit: { tokenHash: false },
     });
     if (
       !row ||

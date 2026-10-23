@@ -31,7 +31,9 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
   cerrar sesión. Con cuentas locales dice **Cerrar sesión en todos los dispositivos**, porque cerrar
   sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)), y
   debajo **Tus sesiones** lista cada dispositivo con la sesión iniciada para que puedas cerrar solo uno
-  (ver [Tus sesiones](#tus-sesiones)).
+  (ver [Tus sesiones](#tus-sesiones)). Toda cuenta tiene además **Cerrar sesión en todos lados y
+  desconectar las apps de IA**, que cierra tu sesión *y* corta tus apps de IA y tus tokens personales (ver
+  [Cerrar sesión en todos lados y desconectar las apps de IA](#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia)).
 - **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Mirá
   [Tu idioma y tu tema en todos tus dispositivos](#tu-idioma-y-tu-tema-en-todos-tus-dispositivos).
 
@@ -49,9 +51,28 @@ conectadas** te permite pasar de una a otra sin volver al menú.
   completa del activo.
 - **Mi acceso a aplicaciones** — las aplicaciones a las que podés acceder ahora, cada una con su nivel
   de acceso y, cuando corresponde, su fecha de vencimiento. Si una concesión venció, se marca como
-  **Vencido**.
+  **Vencido**. Cada una muestra además si tu cuenta en esa aplicación ya está configurada (ver
+  [Estado de configuración de tu cuenta](#estado-de-configuración-de-tu-cuenta)).
 - **Accesos anteriores** — un historial de las aplicaciones a las que *tenías* acceso, con cuándo
   empezó cada concesión y cuándo se revocó. Esta sección aparece solo si tenés accesos pasados.
+
+## Estado de configuración de tu cuenta
+
+Recibir acceso en lazyit y tener una cuenta que funcione en la aplicación son dos pasos. Algunas
+aplicaciones las configura lazyit automáticamente cuando recibís el acceso; otras las configura IT a
+mano. Cada aplicación de **Mi acceso a aplicaciones**, y cada solicitud aprobada de
+**Mis solicitudes de acceso** cuyo acceso sigue vigente, muestra uno de cuatro estados:
+
+- **Sin automatización** — lazyit no configura esta aplicación por su cuenta. IT crea tu cuenta a mano;
+  consultales si todavía no podés entrar.
+- **Configuración en curso** — lazyit está creando tu cuenta en este momento. Suele tardar segundos.
+- **Configurada** — tu cuenta se creó automáticamente.
+- **Esperando a IT** — configurar tu cuenta necesita que IT termine un paso, o la configuración
+  automática tuvo un problema. IT lo ve y lo termina; no tenés que hacer nada.
+
+Pasá el puntero sobre un estado para leer qué significa. Solo ves este estado general: los detalles de
+cómo se configura tu cuenta quedan para los administradores. Recargá la página para ver un estado más
+reciente.
 
 ## Editar tu nombre
 
@@ -115,6 +136,41 @@ Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseñ
 > seguís con la sesión iniciada lo define tu proveedor de identidad, y cerrar sesión termina tu sesión
 > en este navegador.
 
+Cerrar sesión —en todos los dispositivos o solo en este— **no desconecta tus apps de IA ni tus tokens
+personales**. Son de tu cuenta, no de una sesión del navegador. Para cortarlos también, usá la acción de
+abajo.
+
+### Cerrar sesión en todos lados y desconectar las apps de IA
+
+**Cuenta → Contraseña y sesiones → Cerrar sesión en todos lados y desconectar las apps de IA** es el botón
+para "puede que otra persona esté usando mi cuenta". lazyit te pide confirmación antes, porque no se puede
+deshacer. Después, todo a la vez:
+
+- **Terminan todas tus sesiones** —este navegador, tus otras computadoras y tu teléfono, incluidas las que
+  mantuviste con **Mantener la sesión iniciada**— y quedás en la pantalla de inicio de sesión.
+- **Todas las apps de IA y los tokens personales conectados dejan de funcionar** y desaparecen de
+  [Apps conectadas](/help/ai-assistant-connected-apps). Para volver a usar uno, conectalo de nuevo
+  (aprobá la app o creá un token nuevo).
+- Lo que el asistente de IA estaba haciendo por vos en el chat se detiene.
+
+Tu contraseña **no** cambia. Si creés que alguien la conoce, cambiala también (cuentas locales) — ver
+[Cambiar tu contraseña](#cambiar-tu-contraseña).
+
+También funciona con inicio de sesión único: se cierra tu sesión de lazyit en este navegador **y en tus
+otros dispositivos** (cada uno vuelve a la pantalla de inicio de sesión la próxima vez que se comunica con
+lazyit), y se desconectan todas las apps de IA y los tokens personales. Volver a iniciar sesión funciona
+como siempre. Lo que lazyit no puede cerrar es tu sesión en el propio proveedor de inicio de sesión, así
+que cerrá sesión ahí también si alguien más pudo haberla usado; si no, un navegador que siga con la sesión
+iniciada en el proveedor podría volver a entrar a lazyit.
+
+> **Para administradores con inicio de sesión único:** esto depende de que los tokens de acceso de tu
+> proveedor incluyan el claim estándar `iat`, y preferentemente `auth_time`. Sin `auth_time`, un
+> dispositivo que estuvo inactivo el tiempo suficiente como para renovar su token de acceso antes de
+> volver a comunicarse con lazyit no se desconecta. Desactivar o dar de baja a una persona también cierra
+> la sesión de lazyit en todos sus dispositivos.
+
+El **Cerrar sesión** de siempre no cambia: termina tus sesiones y deja conectadas tus apps de IA.
+
 ### Tus sesiones
 
 En instancias con cuentas locales, **Cuenta → Contraseña y sesiones** muestra **Tus sesiones**: cada
@@ -134,7 +190,9 @@ otros dispositivos. Para cerrarlas todas a la vez, usá **Cerrar sesión en todo
 > **Cerrar una sesión no alcanza si perdiste un dispositivo o te lo robaron.** Solo cierra la sesión de
 > lazyit de ese dispositivo en el navegador. Si perdiste un dispositivo o te lo robaron, **cambiá tu
 > contraseña**: eso cierra la sesión en todos los dispositivos y además desconecta tus apps de IA y tus
-> tokens personales (ver [Apps conectadas](/help/ai-assistant-connected-apps)).
+> tokens personales (ver [Apps conectadas](/help/ai-assistant-connected-apps)). Con inicio de sesión
+> único, usá [Cerrar sesión en todos lados y desconectar las apps de IA](#cerrar-sesión-en-todos-lados-y-desconectar-las-apps-de-ia) y cambiá tu contraseña en
+> tu proveedor de inicio de sesión.
 
 Si iniciaste sesión en este dispositivo **antes de que tu instancia se actualizara** para listar las
 sesiones, vas a ver una entrada que dice *Este dispositivo — sesión iniciada antes de la actualización*.

@@ -7,7 +7,8 @@ import type { Prisma, User } from '../../generated/prisma/client';
  * `manager` (resolved from `managerId`/`managerName`, ADR-0058) is added by the serializer.
  *
  * Never listed: `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`,
- * `mustChangePassword` (credentials and revocation counters, ADR-0086/0097), the raw manager columns,
+ * `oidcTokensNotBefore`, `mustChangePassword` (credentials and revocation state, ADR-0086/0097), the raw
+ * manager columns,
  * `notificationEmailOptOutTypes` (served by its own self-service endpoint) and the AD reconcile keys
  * `directorySourceId` / `directoryOffboardedAt` / `directoryReenabledAt` (ADR-0091).
  *
@@ -38,6 +39,31 @@ export const PUBLIC_USER_SELECT = {
 } as const satisfies Prisma.UserSelect;
 
 export type PublicUserColumns = Pick<User, keyof typeof PUBLIC_USER_SELECT>;
+
+/**
+ * The owner columns EVERY `asset:read` holder sees on an asset read (#1636, #1685): who holds the item
+ * and how to reach them — id, name, email — plus `deletedAt` for the departed-owner affordance. The rest
+ * of {@link PUBLIC_USER_SELECT} (role, `legajo`, `username`, `directoryAttrs`, …) is directory data and
+ * needs `user:read`; pick the projection per caller with {@link assetOwnerUserSelect}.
+ */
+export const ASSET_OWNER_USER_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  deletedAt: true,
+} as const satisfies Prisma.UserSelect;
+
+/**
+ * The owner projection an asset read inlines for a caller (#1685): the full public allowlist when the
+ * caller holds `user:read`, otherwise only {@link ASSET_OWNER_USER_SELECT}. An explicit `select` chosen
+ * up front, so the directory columns are never even read for a caller who may not see them.
+ */
+export function assetOwnerUserSelect(
+  canReadUsers: boolean,
+): typeof PUBLIC_USER_SELECT | typeof ASSET_OWNER_USER_SELECT {
+  return canReadUsers ? PUBLIC_USER_SELECT : ASSET_OWNER_USER_SELECT;
+}
 
 const PUBLIC_USER_KEYS = Object.keys(
   PUBLIC_USER_SELECT,

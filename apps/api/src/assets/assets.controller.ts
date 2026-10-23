@@ -31,6 +31,7 @@ import {
   AssetListPageSchema,
   AssetSchema,
   AssetStatusSchema,
+  AssetAcquiredWindowQuerySchema,
   AssetWarrantyFilterSchema,
   AssetWithRelationsSchema,
   BatchAssetStatusSchema,
@@ -52,7 +53,12 @@ import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
-import { ExportService } from '../common/export';
+import {
+  EXPORT_FORMAT_QUERY,
+  ExportService,
+  parseExportFormat,
+  XLSX_CONTENT_TYPE,
+} from '../common/export';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
@@ -143,7 +149,7 @@ export class AssetsController {
     name: 'assignedToUserId',
     required: false,
     description:
-      'Restrict to assets currently assigned (live, releasedAt null) to this user (a User uuid). Invalid uuid → 400.',
+      'Restrict to assets currently assigned (live, releasedAt null) to this user (a User uuid). Needs user:read (403 otherwise, #1685). Invalid uuid → 400.',
   })
   @ApiQuery({
     name: 'limit',
@@ -203,6 +209,18 @@ export class AssetsController {
       'Exact (case-sensitive) serial numbers, comma-separated, at most 200 (#1387). A value cannot contain a comma. Over 200 → 400.',
   })
   @ApiQuery({
+    name: 'acquiredFrom',
+    required: false,
+    description:
+      'Acquisition-date window start (#1503), ISO datetime, inclusive: the purchase date, or the creation date when the asset has none. Invalid, or after acquiredTo → 400.',
+  })
+  @ApiQuery({
+    name: 'acquiredTo',
+    required: false,
+    description:
+      'Acquisition-date window end (#1503), ISO datetime, inclusive (see acquiredFrom).',
+  })
+  @ApiQuery({
     name: 'purchaseOrderLineId',
     required: false,
     description:
@@ -253,6 +271,8 @@ export class AssetsController {
     @Query('purchaseLinked') purchaseLinked?: string,
     @CurrentPrincipal() principal?: Principal,
     @Query('statusLabelId') statusLabelId?: string,
+    @Query('acquiredFrom') acquiredFrom?: string,
+    @Query('acquiredTo') acquiredTo?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -279,8 +299,17 @@ export class AssetsController {
         warranty,
         assetTags,
         serials,
+        acquiredFrom,
+        acquiredTo,
       }),
     };
+    // Listing a named person's assets is directory-relational: it needs user:read (#1685).
+    if (filters.assignedToUserId !== undefined) {
+      await this.assets.authorizePersonFilter(
+        filters.assignedToUserId,
+        principal,
+      );
+    }
     filters.purchase = await this.parsePurchaseFilters(
       { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
       principal,
@@ -338,7 +367,19 @@ export class AssetsController {
     /** Exact values, comma-separated (#1387). */
     assetTags?: string;
     serials?: string;
+    /** The acquisition window (#1503), ISO datetimes. */
+    acquiredFrom?: string;
+    acquiredTo?: string;
   }) {
+    const window = AssetAcquiredWindowQuerySchema.safeParse({
+      acquiredFrom: raw.acquiredFrom || undefined,
+      acquiredTo: raw.acquiredTo || undefined,
+    });
+    if (!window.success) {
+      throw new BadRequestException(
+        'Invalid acquiredFrom / acquiredTo: ISO datetimes, acquiredFrom not after acquiredTo',
+      );
+    }
     let parsedStatus: AssetStatus | undefined;
     if (raw.status !== undefined) {
       const result = AssetStatusSchema.safeParse(raw.status);
@@ -384,6 +425,8 @@ export class AssetsController {
       warranty: parsedWarranty,
       assetTags: parseExactValuesQuery(raw.assetTags, 'assetTags'),
       serials: parseExactValuesQuery(raw.serials, 'serials'),
+      acquiredFrom: window.data.acquiredFrom,
+      acquiredTo: window.data.acquiredTo,
     };
   }
 
@@ -402,10 +445,11 @@ export class AssetsController {
   // STATIC route declared BEFORE the `:id` param route so `/assets/export` never resolves as an id.
   @Get('export')
   @RequirePermission('asset:read')
-  @ApiProduces('text/csv')
+  @ApiProduces('text/csv', XLSX_CONTENT_TYPE)
+  @ApiQuery(EXPORT_FORMAT_QUERY)
   @ApiOperation({
     summary:
-      'CSV export of the WHOLE filtered asset inventory (issue #872, ADR-0103), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort, purchase filters included with their purchaseOrder:read check) and streams every matching asset newest-first: UTF-8 BOM, the `# lazyit` provenance line the importer reads, CRLF rows, formula-guarded text cells. `deleted=only` (archived) is ADMIN-only (403). Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`). `specs` is not included. Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only for a caller holding purchaseOrder:read (ADR-0099 §8).',
+      'CSV export (or XLSX with format=xlsx: same columns, typed cells, no provenance line, not importable) of the WHOLE filtered asset inventory (issue #872, ADR-0103), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort, purchase filters included with their purchaseOrder:read check) and streams every matching asset newest-first: UTF-8 BOM, the `# lazyit` provenance line the importer reads, CRLF rows, formula-guarded text cells. `deleted=only` (archived) is ADMIN-only (403). Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export is recorded in the audit log (source `export`). `specs` is not included. Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only for a caller holding purchaseOrder:read (ADR-0099 §8).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'modelId', required: false })
@@ -418,7 +462,11 @@ export class AssetsController {
   })
   @ApiQuery({ name: 'statusLabelId', required: false })
   @ApiQuery({ name: 'q', required: false })
-  @ApiQuery({ name: 'assignedToUserId', required: false })
+  @ApiQuery({
+    name: 'assignedToUserId',
+    required: false,
+    description: 'Needs user:read (403 otherwise, #1685).',
+  })
   @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
   @ApiQuery({
     name: 'warranty',
@@ -427,6 +475,8 @@ export class AssetsController {
   })
   @ApiQuery({ name: 'assetTags', required: false })
   @ApiQuery({ name: 'serials', required: false })
+  @ApiQuery({ name: 'acquiredFrom', required: false })
+  @ApiQuery({ name: 'acquiredTo', required: false })
   @ApiQuery({
     name: 'purchaseOrderLineId',
     required: false,
@@ -451,7 +501,7 @@ export class AssetsController {
       'Soft-delete slice. active (default) = live assets; only = archived — ADMIN only (403 otherwise).',
   })
   @ApiOkResponse({
-    description: 'The filtered asset inventory as CSV (text/csv).',
+    description: 'The filtered asset inventory as CSV (text/csv) or XLSX.',
   })
   async export(
     @CurrentPrincipal() principal: Principal,
@@ -473,7 +523,11 @@ export class AssetsController {
     @Query('purchaseOrderLineId') purchaseOrderLineId?: string,
     @Query('purchaseOrderId') purchaseOrderId?: string,
     @Query('purchaseLinked') purchaseLinked?: string,
+    @Query('acquiredFrom') acquiredFrom?: string,
+    @Query('acquiredTo') acquiredTo?: string,
+    @Query('format') format?: string | string[],
   ): Promise<StreamableFile> {
+    const fileFormat = parseExportFormat(format);
     const filters: AssetFilters = this.parseAssetFilters({
       categoryId,
       modelId,
@@ -487,18 +541,28 @@ export class AssetsController {
       warranty,
       assetTags,
       serials,
+      acquiredFrom,
+      acquiredTo,
     });
     // Reuse parsePageQuery ONLY for its `deleted` validation (the export is unpaginated); an invalid
     // slice → 400, then gate the privileged archived slice ADMIN-only exactly like the list (ADR-0041).
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
+    // The same by-person gate as the list (#1685).
+    if (filters.assignedToUserId !== undefined) {
+      await this.assets.authorizePersonFilter(
+        filters.assignedToUserId,
+        principal,
+      );
+    }
     filters.purchase = await this.parsePurchaseFilters(
       { purchaseOrderLineId, purchaseOrderId, purchaseLinked },
       principal,
     );
 
     const { purchase, ...rest } = filters;
-    return this.exports.exportCsv({
+    return this.exports.exportFile({
+      format: fileFormat,
       resource: 'ASSETS',
       principal,
       response,
@@ -566,18 +630,19 @@ export class AssetsController {
   @Get(':id')
   @RequirePermission('asset:read')
   @ApiOperation({
-    summary: 'Get an asset by id (expanded with its relations)',
+    summary:
+      "Get an asset by id (expanded with its relations). Each active owner carries id, name, email and deletedAt; the owner's other user fields (role, legajo, username, directoryAttrs, …) only with user:read (#1685).",
   })
   @ApiOkResponse({ type: AssetWithRelationsDto })
-  findOne(@Param('id') id: string) {
-    return this.assets.findOne(id);
+  findOne(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+    return this.assets.findOne(id, principal);
   }
 
   @Get(':id/assignments')
   @RequirePermission('asset:read')
   @ApiOperation({
     summary:
-      "List an asset's ownership assignments, each with its user (active-only by default)",
+      "List an asset's ownership assignments, each with its user (active-only by default). The user carries id, name, email and deletedAt; its other fields only with user:read (#1685).",
   })
   @ApiQuery({
     name: 'activeOnly',
@@ -589,12 +654,15 @@ export class AssetsController {
   async findAssignments(
     @Param('id') id: string,
     @Query('activeOnly') activeOnly?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     await this.assets.assertExists(id); // 404 if the asset is missing or soft-deleted
     return this.assignments.findAll({
       assetId: id,
       activeOnly: parseBooleanQuery(activeOnly, true),
       includeUser: true,
+      // The owner's directory columns only for a caller holding user:read (#1685).
+      fullUser: await this.assets.canReadOwnerDetails(principal),
     });
   }
 

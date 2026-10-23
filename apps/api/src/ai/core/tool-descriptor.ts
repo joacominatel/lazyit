@@ -148,6 +148,13 @@ export interface AiToolDescriptor<
   /** Default: every channel; a `navigate` tool is chat-only. */
   channels?: readonly AiChannel[];
   /**
+   * Only a person may call it, whatever the bound route admits (#1688): core never lists it to, nor lets
+   * it be invoked, proposed or approved by, a Service Account — on any channel, before anything is
+   * recorded. For a tool whose route lets a Service Account through but whose AI use must not (workflow
+   * authoring, INV-AI-15 / INV-AI-17, is reachable over MCP, where an SA token can carry `elevated`).
+   */
+  humanOnly?: boolean;
+  /**
    * A chat write that is never approved automatically, whatever the conversation's auto-approve mode: the
    * user decides its card every time (#1478 — every purchase change, ADR-0099 §11, UX decision D11). Core
    * enforces it at approve time from the registered descriptor; the tool cannot be talked out of it.

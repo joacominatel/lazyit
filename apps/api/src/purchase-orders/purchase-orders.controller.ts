@@ -34,7 +34,13 @@ import {
   CancelRemainingUnitsSchema,
   LinkAssetsResultSchema,
   LinkAssetsToLineSchema,
+  ApplyToLinkedAssetsResultSchema,
+  ApplyToLinkedAssetsSchema,
+  PendingExpectedBeforeSchema,
   PendingPurchaseLinePageSchema,
+  PendingPurchaseSummarySchema,
+  PurchaseLinkedPreviewRequestSchema,
+  PurchaseLinkedPreviewSchema,
   PurchaseLinkPreviewRequestSchema,
   PurchaseLinkPreviewSchema,
   ReceiveFromLineResultSchema,
@@ -68,7 +74,12 @@ import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
-import { ExportService } from '../common/export';
+import {
+  EXPORT_FORMAT_QUERY,
+  ExportService,
+  parseExportFormat,
+  XLSX_CONTENT_TYPE,
+} from '../common/export';
 import { PURCHASE_ORDER_EXPORT_COLUMNS } from './purchase-orders-export';
 import { PENDING_LINE_EXPORT_COLUMNS } from './pending-lines-export';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -101,6 +112,19 @@ class PurchaseLinkPreviewRequestDto extends createZodDto(
   PurchaseLinkPreviewRequestSchema,
 ) {}
 class PurchaseLinkPreviewDto extends createZodDto(PurchaseLinkPreviewSchema) {}
+class PendingPurchaseSummaryDto extends createZodDto(
+  PendingPurchaseSummarySchema,
+) {}
+class PurchaseLinkedPreviewRequestDto extends createZodDto(
+  PurchaseLinkedPreviewRequestSchema,
+) {}
+class PurchaseLinkedPreviewDto extends createZodDto(
+  PurchaseLinkedPreviewSchema,
+) {}
+class ApplyToLinkedAssetsDto extends createZodDto(ApplyToLinkedAssetsSchema) {}
+class ApplyToLinkedAssetsResultDto extends createZodDto(
+  ApplyToLinkedAssetsResultSchema,
+) {}
 class LinkAssetsToLineDto extends createZodDto(LinkAssetsToLineSchema) {}
 class LinkAssetsResultDto extends createZodDto(LinkAssetsResultSchema) {}
 class UnlinkAssetsFromLineDto extends createZodDto(
@@ -149,6 +173,26 @@ function parseReceiptQuery(
   }
   return parsed.data;
 }
+
+/** The `expectedBefore` day (the viewer's today, `YYYY-MM-DD`), or a 400 that says the format (#1503). */
+function parseExpectedBeforeQuery(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (!PendingExpectedBeforeSchema.safeParse(value).success) {
+    throw new BadRequestException(
+      'Invalid expectedBefore: expected a calendar date (YYYY-MM-DD)',
+    );
+  }
+  return value;
+}
+
+const EXPECTED_BEFORE_QUERY = {
+  name: 'expectedBefore',
+  required: false,
+  description:
+    "The viewer's today (YYYY-MM-DD): only lines of purchases expected on an earlier day — the overdue ones. Due today is not late; a purchase with no expected date never matches. Invalid date → 400.",
+} as const;
 
 /**
  * Purchases (ADR-0099). `purchaseOrder:read` (ADMIN + MEMBER; VIEWER denied by default) to see them,
@@ -251,11 +295,12 @@ export class PurchaseOrdersController {
   // STATIC route declared BEFORE `:id` so `/purchase-orders/export` never resolves as an id.
   @Get('export')
   @RequirePermission('purchaseOrder:read')
-  @ApiProduces('text/csv')
+  @ApiProduces('text/csv', XLSX_CONTENT_TYPE)
   @ApiOperation({
     summary:
-      'CSV export of every purchase matching the list filters, one row per purchase (ADR-0103): same permission, filters and rows as GET /purchase-orders, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+      'CSV (default) or XLSX (format=xlsx) export of every purchase matching the list filters, one row per purchase (ADR-0103): same permission, filters, rows and columns as GET /purchase-orders, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited, the format recorded. deleted=only is ADMIN only (403 otherwise).',
   })
+  @ApiQuery(EXPORT_FORMAT_QUERY)
   @ApiQuery({ name: 'q', required: false })
   @ApiQuery({
     name: 'status',
@@ -270,7 +315,9 @@ export class PurchaseOrdersController {
     enum: [...PurchaseOrderReceiptFilterSchema.options],
   })
   @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
-  @ApiOkResponse({ description: 'The filtered purchases as CSV (text/csv).' })
+  @ApiOkResponse({
+    description: 'The filtered purchases as CSV (text/csv) or XLSX.',
+  })
   export(
     @CurrentPrincipal() principal: Principal,
     @Res({ passthrough: true }) res: Response,
@@ -280,7 +327,9 @@ export class PurchaseOrdersController {
     @Query('receipt') receipt?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
+    @Query('format') format?: string | string[],
   ): Promise<StreamableFile> {
+    const fileFormat = parseExportFormat(format);
     const { deleted: slice } = parsePageQuery({ deleted });
     assertCanListDeleted(slice, user);
     const filters = {
@@ -289,7 +338,8 @@ export class PurchaseOrdersController {
       supplierId: parseCuidQuery(supplierId, 'supplierId'),
       receipt: parseReceiptQuery(receipt),
     };
-    return this.exports.exportCsv({
+    return this.exports.exportFile({
+      format: fileFormat,
       resource: 'PURCHASE_ORDERS',
       principal,
       response: res,
@@ -308,6 +358,7 @@ export class PurchaseOrdersController {
       'Lines still waiting for units (the Pending units tab): countable lines with pending > 0 on live purchases that are neither DRAFT nor CANCELLED, oldest purchase first, each with its purchase header.',
   })
   @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery(EXPECTED_BEFORE_QUERY)
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -317,10 +368,34 @@ export class PurchaseOrdersController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('page') page?: string,
+    @Query('expectedBefore') expectedBefore?: string,
   ) {
     return this.receiving.findPendingLines(
-      { supplierId: parseCuidQuery(supplierId, 'supplierId') },
+      {
+        supplierId: parseCuidQuery(supplierId, 'supplierId'),
+        expectedBefore: parseExpectedBeforeQuery(expectedBefore),
+      },
       parsePageQuery({ limit, offset, page }),
+    );
+  }
+
+  // STATIC route declared BEFORE `:id` (see pending-lines).
+  @Get('pending-summary')
+  @RequirePermission('purchaseOrder:read')
+  @ApiOperation({
+    summary:
+      "The dashboard's Pending deliveries row: over exactly the Pending units rows, the purchases with a pending line, the units pending on them, and the overdue purchases among them (expected on a day before expectedBefore, else before the server's UTC today).",
+  })
+  @ApiQuery({
+    name: 'expectedBefore',
+    required: false,
+    description:
+      "The viewer's today (YYYY-MM-DD) for the overdue count: due today is not late. Omitted → the server's UTC today. Invalid date → 400.",
+  })
+  @ApiOkResponse({ type: PendingPurchaseSummaryDto })
+  pendingSummary(@Query('expectedBefore') expectedBefore?: string) {
+    return this.receiving.pendingSummary(
+      parseExpectedBeforeQuery(expectedBefore),
     );
   }
 
@@ -333,13 +408,18 @@ export class PurchaseOrdersController {
       'CSV export of every line on the Pending units tab, one row per line (ADR-0103): same permission, filter and rows as GET /purchase-orders/pending-lines, newest line first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited.',
   })
   @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery(EXPECTED_BEFORE_QUERY)
   @ApiOkResponse({ description: 'The pending lines as CSV (text/csv).' })
   exportPendingLines(
     @CurrentPrincipal() principal: Principal,
     @Res({ passthrough: true }) res: Response,
     @Query('supplierId') supplierId?: string,
+    @Query('expectedBefore') expectedBefore?: string,
   ): Promise<StreamableFile> {
-    const filters = { supplierId: parseCuidQuery(supplierId, 'supplierId') };
+    const filters = {
+      supplierId: parseCuidQuery(supplierId, 'supplierId'),
+      expectedBefore: parseExpectedBeforeQuery(expectedBefore),
+    };
     return this.exports.exportCsv({
       resource: 'PENDING_UNITS',
       principal,
@@ -620,6 +700,37 @@ export class PurchaseOrdersController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.receiving.linkAssets(id, lineId, dto, principal);
+  }
+
+  @Post(':id/lines/:lineId/linked-preview')
+  @RequirePermission('purchaseOrder:read', 'asset:read')
+  @ApiOperation({
+    summary:
+      "What re-applying the line's current values would do to the live assets already linked to it (a read with a body) — the follow-up of a unit price edit. Per asset: the per-field diff, whether its cost is still the previous purchase value (previousUnitPrice / previousCurrency in the body), and the fields to pre-check. Writes nothing.",
+  })
+  @ApiCreatedResponse({ type: PurchaseLinkedPreviewDto })
+  linkedPreview(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: PurchaseLinkedPreviewRequestDto,
+  ) {
+    return this.receiving.linkedPreview(id, lineId, dto);
+  }
+
+  @Post(':id/lines/:lineId/apply-to-linked')
+  @RequirePermission('purchaseOrder:write', 'asset:write')
+  @ApiOperation({
+    summary:
+      "Copy the line's current values onto assets already linked to it: the listed fields, where they fill or replace (never a clear; cost and currency together). One transaction; partial success ({ updated, unchanged, failed[], line }). Each changed asset records UPDATED with the purchase as source; the purchase records LINKED_VALUES_APPLIED.",
+  })
+  @ApiCreatedResponse({ type: ApplyToLinkedAssetsResultDto })
+  applyToLinked(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: ApplyToLinkedAssetsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.receiving.applyToLinked(id, lineId, dto, principal);
   }
 
   @Post(':id/lines/:lineId/unlink-assets')

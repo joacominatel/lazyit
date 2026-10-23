@@ -303,6 +303,21 @@ describe("SEC-077 — optional version preconditions", () => {
     expect(CreateWorkflowVersionSchema.safeParse({ steps }).success).toBe(true);
     expect(CreateWorkflowVersionSchema.safeParse({ steps, baseVersion: 1.5 }).success).toBe(false);
   });
+  test("#1688: both take an optional boolean expectedEnabled precondition", () => {
+    const steps = [
+      {
+        kind: "MANUAL",
+        key: "m",
+        prompt: "Do it",
+        inputFields: [{ name: "ok", label: "OK", type: "boolean" }],
+      },
+    ];
+    expect(CreateWorkflowVersionSchema.safeParse({ steps, expectedEnabled: false }).success).toBe(true);
+    expect(CreateWorkflowVersionSchema.safeParse({ steps, expectedEnabled: "no" }).success).toBe(false);
+    const update = UpdateApplicationWorkflowSchema.safeParse({ name: "X", expectedEnabled: false });
+    expect(update.success && update.data.expectedEnabled).toBe(false);
+    expect(UpdateApplicationWorkflowSchema.safeParse({ expectedEnabled: 1 }).success).toBe(false);
+  });
 });
 
 describe("WorkflowStepsSchema — discriminated steps + unique keys", () => {

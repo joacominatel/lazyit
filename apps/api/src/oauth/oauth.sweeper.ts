@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AUTHORIZATION_CODE_RETENTION_MS,
   DCR_UNUSED_CLIENT_TTL_MS,
   OAUTH_SWEEP_INTERVAL_MS,
 } from './oauth.constants';
@@ -20,7 +21,9 @@ export interface OAuthSweepResult {
 /**
  * Collects the authorization server's PROTOCOL STATE — credential rows and throwaway registrations, not
  * domain data (the `PasswordResetToken` precedent, mcp-and-oauth.md §6), so they are hard-deleted:
- *   - authorization codes that expired or were used;
+ *   - authorization codes 15 minutes past their expiry, used or not: a redeemed code is kept that long so
+ *     a replay is still recognized and revokes the grant it produced (#1683). An expired code is never
+ *     redeemable, kept or not;
  *   - tokens past their expiry (a rotated refresh token is KEPT until then — it is what reuse detection
  *     recognizes);
  *   - DCR clients never used (no code exchanged) and older than 24 h, with no grant row at all — and, on
@@ -62,7 +65,11 @@ export class OAuthSweeper implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       const codes = await this.prisma.oAuthAuthorizationCode.deleteMany({
-        where: { OR: [{ expiresAt: { lt: now } }, { usedAt: { not: null } }] },
+        where: {
+          expiresAt: {
+            lt: new Date(now.getTime() - AUTHORIZATION_CODE_RETENTION_MS),
+          },
+        },
       });
       const tokens = await this.prisma.oAuthToken.deleteMany({
         where: { expiresAt: { lt: now } },

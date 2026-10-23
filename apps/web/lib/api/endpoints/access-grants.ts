@@ -4,6 +4,7 @@ import type {
   BatchResult,
   BatchRevokeGrants,
   CreateAccessGrant,
+  MyAccessGrantListPage,
   RevokeAccessGrant,
   UpdateAccessGrantExpiry,
   UpdateAccessGrantNotes,
@@ -74,17 +75,18 @@ export function getAccessGrants(
  * The CALLER's OWN access grants (`GET /access-grants/mine`, issue #947) — active + revoked history.
  * A SELF-SCOPE read: available to ANY authenticated human WITHOUT `accessGrant:read` (a VIEWER does
  * NOT hold it), scoped to the caller by the session, so it powers the self-service `/profile` page.
- * Returns the same `Page<AccessGrant>` envelope as {@link getAccessGrants}; `limit` defaults to the
+ * Returns the `Page<AccessGrant>` envelope of {@link getAccessGrants} with each grant carrying the
+ * coarse `provisioning` status (#1700; absent from an API that predates it); `limit` defaults to the
  * API page size. History is included by default (the API defaults `activeOnly` to false here).
  */
 export function getMyGrants(
   { limit }: { limit?: number } = {},
   token?: string,
-): Promise<AccessGrantListPage> {
+): Promise<MyAccessGrantListPage> {
   const params = new URLSearchParams();
   if (limit !== undefined) params.set("limit", String(limit));
   const qs = params.toString();
-  return apiFetch<AccessGrantListPage>(
+  return apiFetch<MyAccessGrantListPage>(
     qs ? `${BASE}/mine?${qs}` : `${BASE}/mine`,
     { token },
   );

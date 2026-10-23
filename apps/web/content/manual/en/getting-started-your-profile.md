@@ -30,7 +30,9 @@ account. Everyone can open it; it shows only what applies to you:
   a **Change password** shortcut on local-account instances, and a sign-out button. On local accounts it
   reads **Sign out on all devices**, because signing out already ends every session you have (see
   [Signing in and out](#signing-in-and-out)), and below it **Your sessions** lists every device you are
-  signed in on so you can end just one (see [Your sessions](#your-sessions)).
+  signed in on so you can end just one (see [Your sessions](#your-sessions)). Every account also has
+  **Sign out everywhere and disconnect AI apps**, which signs you out *and* cuts off your AI apps and
+  personal tokens (see [Sign out everywhere and disconnect AI apps](#sign-out-everywhere-and-disconnect-ai-apps)).
 - **Preferences** — your **language** and **theme** (light, dark or follow your device). See
   [Your language and theme on every device](#your-language-and-theme-on-every-device).
 
@@ -46,9 +48,28 @@ apps** lets you move between them without going back to the menu.
 - **My assets** — every asset **currently assigned to you** (a live assignment). Each row shows the
   asset's name, its model and location, and its status. Select **View** to open the full asset page.
 - **My application access** — the applications you can currently access, each with its access level and,
-  where set, an expiry date. If a grant has passed its expiry it's flagged as **Expired**.
+  where set, an expiry date. If a grant has passed its expiry it's flagged as **Expired**. Each one also
+  shows whether your account in that application has been set up (see
+  [Account setup status](#account-setup-status)).
 - **Past access** — a history of applications you *used* to have access to, showing when each grant
   started and when it was revoked. This section appears only if you have any past access.
+
+## Account setup status
+
+Getting access in lazyit and having a working account in the application are two steps. Some
+applications are set up automatically by lazyit when you get access; others are set up by IT by hand.
+Each application under **My application access**, and each approved request under
+**My access requests** whose access is still active, shows one of four statuses:
+
+- **No automation** — lazyit does not set up this application on its own. IT creates your account by
+  hand; ask them if you still can't sign in.
+- **Setup in progress** — lazyit is creating your account right now. It usually takes moments.
+- **Set up** — your account was created automatically.
+- **Waiting on IT** — setting up your account needs IT to finish a step, or the automatic setup ran into
+  a problem. IT can see it and finish it; nothing is needed from you.
+
+Hover a status to read what it means. You only ever see this coarse status: the details of how your
+account is set up stay with administrators. Reload the page to see a newer status.
 
 ## Editing your name
 
@@ -107,6 +128,39 @@ If your instance uses **local accounts** (a lazyit email/username and password):
 > **On single sign-on (SSO)**, there is no **Keep me signed in** box — how long you stay signed in is
 > governed by your identity provider, and signing out ends your session in this browser.
 
+Signing out — on every device or just this one — **does not disconnect your AI apps or personal
+tokens**. They belong to your account, not to a browser session. To cut those off too, use the action
+below.
+
+### Sign out everywhere and disconnect AI apps
+
+**Account → Password & sessions → Sign out everywhere and disconnect AI apps** is the one button for
+"someone else may be using my account". lazyit asks you to confirm first, because it can't be undone.
+Then, all at once:
+
+- **Every session ends** — this browser, your other computers and your phone, including sessions kept
+  with **Keep me signed in** — and you land on the sign-in screen.
+- **Every connected AI app and personal token stops working** and disappears from
+  [Connected apps](/help/ai-assistant-connected-apps). To use one again, connect it again (approve the
+  app, or create a new token).
+- Anything the AI assistant was doing for you in the chat stops.
+
+Your password is **not** changed. If you think someone knows it, change it too (local accounts) — see
+[Changing your password](#changing-your-password).
+
+It works on single sign-on too: you are signed out of lazyit in this browser **and on your other devices**
+(each one lands on the sign-in screen the next time it talks to lazyit), and every AI app and personal
+token is disconnected. Signing in again works as usual. What lazyit can't end is your session at the
+sign-in provider itself, so sign out there too if someone else may have used it — otherwise a browser
+still signed in at the provider may be able to sign in to lazyit again.
+
+> **For administrators on single sign-on:** this relies on your provider's access tokens carrying the
+> standard `iat` claim, and preferably `auth_time`. Without `auth_time`, a device that was idle long
+> enough to renew its access token before reaching lazyit again is not signed out. Deactivating or
+> offboarding a person also signs every device of theirs out of lazyit.
+
+The plain **Sign out** is unchanged: it ends your sessions and leaves your AI apps connected.
+
 ### Your sessions
 
 On local-account instances, **Account → Password & sessions** lists **Your sessions**: every device
@@ -125,7 +179,9 @@ use **Sign out on all devices**.
 > **Ending a session is not enough for a lost or stolen device.** It only signs that device out of
 > lazyit in the browser. If a device was lost or stolen, **change your password** instead: that signs out
 > every device and also disconnects your AI apps and personal tokens (see
-> [Connected apps](/help/ai-assistant-connected-apps)).
+> [Connected apps](/help/ai-assistant-connected-apps)). On single sign-on, use
+> [Sign out everywhere and disconnect AI apps](#sign-out-everywhere-and-disconnect-ai-apps) and change your
+> password at your sign-in provider.
 
 If you signed in on this device **before your instance was updated** to list sessions, you see one entry
 reading *This device — signed in before the update*. It cannot be ended on its own: **Sign out on all
