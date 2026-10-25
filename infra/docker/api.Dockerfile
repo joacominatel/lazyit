@@ -10,7 +10,7 @@
 
 # ---- Builder: Bun builds @lazyit/shared, generates the Prisma client, builds the API ----
 # oven/bun:1.4.2
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS builder
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS builder
 # No Prisma CLI ping to checkpoint.prisma.io during the build.
 ENV CHECKPOINT_DISABLE=1
 WORKDIR /app
@@ -75,7 +75,7 @@ RUN bun run --filter @lazyit/agent compile
 # --filter keeps the lockfile intact (so --production's implicit frozen check passes) while
 # excluding the web app's deps; --linker hoisted gives a flat node_modules for plain Node resolution.
 # oven/bun:1.4.2
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS prod-deps
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS prod-deps
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
