@@ -3,7 +3,7 @@ title: "ADR-0025: Containerization & image strategy"
 tags: [adr, infra, docker]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-09
+updated: 2026-11-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -47,7 +47,7 @@ Constraints discovered in the repo:
 - **Node for both build and runtime** — workable, but loses Bun's faster, repo-pinned install and
   the `bun test`/tooling parity used elsewhere. Build would drift from how developers build locally.
 - **Multi-stage: Bun tooling → application build → Node runtime** *(chosen)* — use the repo-pinned
-  `oven/bun:1.4.2` for install and workspace tooling. API compilation remains on that stage; the web
+  `oven/bun:1.4.4` for install and workspace tooling. API compilation remains on that stage; the web
   runs the Next.js CLI in a `node:26-trixie-slim` stage. Copy only built artifacts + production deps
   into a minimal `node:26-alpine` runtime. This preserves the scoped Bun decision without executing
   Next.js under Bun's Node compatibility runtime.
@@ -57,7 +57,7 @@ Constraints discovered in the repo:
 - **Per-app multi-stage Dockerfiles** in `infra/docker/` (`api.Dockerfile`, `web.Dockerfile`,
   `migrate.Dockerfile`), built with **context = repo root** and `-f infra/docker/<x>.Dockerfile .`
   (workspaces need the whole monorepo). Dockerfiles **read** app code via `COPY`; they never modify it.
-- **Tooling stage:** `oven/bun:1.4.2` (Debian/glibc). Installs with
+- **Tooling stage:** `oven/bun:1.4.4` (Debian/glibc). Installs with
   `bun install --frozen-lockfile`, builds `@lazyit/shared`, and runs `prisma generate` / `nest build`
   for the API.
 - **Web build stage:** `node:26-trixie-slim` (Debian/glibc), matching the tooling stage's OS family.
@@ -68,7 +68,7 @@ Constraints discovered in the repo:
 - **Web runtime:** `node:26-alpine`, runs the Next.js **standalone** server (`output: 'standalone'`).
   This needs a one-line change in `apps/web/next.config.ts` (application lane) — made as an
   **authorized cross-lane exception**, committed separately.
-- **Migrations + seed:** a **one-shot job** on `oven/bun:1.4.2` running
+- **Migrations + seed:** a **one-shot job** on `oven/bun:1.4.4` running
   `prisma migrate deploy && prisma db seed`. It runs after Postgres is healthy and before the API
   starts (`depends_on: condition: service_completed_successfully`). Bun is required for the seed;
   Debian (glibc) is required so the Prisma **schema engine** (used by `migrate deploy`) finds its

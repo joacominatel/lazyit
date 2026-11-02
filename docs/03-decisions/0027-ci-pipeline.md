@@ -3,7 +3,7 @@ title: "ADR-0027: CI on GitHub Actions; CD deferred"
 tags: [adr, infra, ci]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-21
+updated: 2026-11-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -23,7 +23,7 @@ customer), so CD is premature.
 
 Repo facts that shape the pipeline:
 
-- **Bun** is the pinned package manager (`bun@1.4.2`); install should be cached on `bun.lock`.
+- **Bun** is the pinned package manager (`bun@1.4.4`); install should be cached on `bun.lock`.
 - The API unit specs **mock the generated Prisma client** (`jest.mock('../../generated/prisma/client')`)
   → **the unit suite needs no database**. But the generated client must **exist** for compilation, so
   `prisma generate` must run **before** typecheck/test ([[0012-testing-strategy]]). The one exception
@@ -46,7 +46,7 @@ Repo facts that shape the pipeline:
 `.github/workflows/ci.yml`, triggered on `pull_request` and `push` to `master` and `dev`:
 
 - **Job `verify`** (ordered): checkout (`fetch-depth: 0`, for the diff-lint merge-base) →
-  setup-bun `1.4.2` → cache `~/.bun/install/cache` (key on `bun.lock`) →
+  setup-bun `1.4.4` → cache `~/.bun/install/cache` (key on `bun.lock`) →
   `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`** (in `apps/api`)
   → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; the
   **Postgres-backed API suite**; shared, web and agent with `bun test --isolate`) → `turbo build` →

@@ -5,9 +5,9 @@
 # Rationale: ADR-0025. Runs on Bun (the seed is `bun prisma/seed.ts`); Debian/glibc so the
 # Prisma schema engine used by `migrate deploy` finds its binary (avoids the Alpine/musl pitfall).
 
-# oven/bun:1.4.2 — pinned by digest (ADR-0025 follow-up). Re-pin after a deliberate bump:
-# docker buildx imagetools inspect oven/bun:1.4.2 --format '{{.Manifest.Digest}}'.
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS runtime
+# oven/bun:1.4.4 — pinned by digest (ADR-0025 follow-up). Re-pin after a deliberate bump:
+# docker buildx imagetools inspect oven/bun:1.4.4 --format '{{.Manifest.Digest}}'.
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS runtime
 # No Prisma CLI ping to checkpoint.prisma.io: lazyit sends no telemetry.
 ENV CHECKPOINT_DISABLE=1
 WORKDIR /app

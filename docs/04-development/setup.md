@@ -3,7 +3,7 @@ title: Local Setup
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-11-02
 ---
 
 # Local Setup
@@ -12,7 +12,7 @@ Get lazyit running on your machine. Verified against the repo as of 2026-05-30.
 
 ## Prerequisites
 
-- **Bun** `1.4.x` (repo pins `bun@1.4.2`) — package manager and runtime.
+- **Bun** `1.4.x` (repo pins `bun@1.4.4`) — package manager and runtime.
 - **Docker** + Docker Compose — for the PostgreSQL dev database.
 - **Node** available on PATH — some CLIs still expect it (see [[stack]]).
 
