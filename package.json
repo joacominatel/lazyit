@@ -2,7 +2,7 @@
   "name": "lazyit",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.4",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
@@ -15,10 +15,10 @@
     "dev:up": "bun scripts/dev-setup.ts --up"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.282",
-    "@types/bun": "^1.4.2",
-    "shadcn": "^4.21.0",
-    "turbo": "^2.11.4"
+    "@anthropic-ai/claude-code": "^2.1.316",
+    "@types/bun": "^1.4.4",
+    "shadcn": "^4.23.0",
+    "turbo": "^2.11.10"
   },
   "peerDependencies": {
     "typescript": "^6"

@@ -3,26 +3,29 @@ title: Tech Stack
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-11-02
 ---
 
 # Tech Stack
 
-Versions below are **verified against the repository** as of 2026-09-02, not just planned.
+Versions below are **verified against the repository** as of 2026-11-02, not just planned.
 
 | Layer | Choice | Version | Notes |
 | --- | --- | --- | --- |
-| Package manager / runtime | **Bun** | `1.4.2` | Workspaces; default runtime — see [[0001-monorepo-bun-turborepo]] |
-| Monorepo orchestration | **Turborepo** | `^2.9` | `turbo dev` / `turbo build` / `turbo lint` |
-| Frontend | **Next.js** (App Router) | `16.3.0` | React `19.2.8`, Tailwind v4, shadcn/ui, TypeScript |
-| Backend | **NestJS** | `12.0.1` | `@nestjs/platform-express`, TypeScript strict. v12 ships the core packages as **ESM**; the app stays CommonJS (Node loads them via `require(esm)`) and the Jest suite transpiles them — see [[0096-jest-commonjs-against-esm-nestjs]] |
-| ORM | **Prisma** | `7.8.0` | `prisma-client` generator → `apps/api/generated/prisma` |
+| Package manager / runtime | **Bun** | `1.4.4` | Workspaces; default runtime — see [[0001-monorepo-bun-turborepo]] |
+| Monorepo orchestration | **Turborepo** | `^2.11.10` | `turbo dev` / `turbo build` / `turbo lint` |
+| Frontend | **Next.js** (App Router) | `16.4.4` | React `19.3.1`, Tailwind v4, shadcn/ui, TypeScript |
+| Backend | **NestJS** | `12.3.2` | `@nestjs/platform-express`, TypeScript strict. v12 ships the core packages as **ESM**; the app stays CommonJS (Node loads them via `require(esm)`) and the Jest suite transpiles them — see [[0096-jest-commonjs-against-esm-nestjs]] |
+| ORM | **Prisma** | `7.10.1` | `prisma-client` generator → `apps/api/generated/prisma` |
 | Database | **PostgreSQL** | `18-alpine` | Docker Compose for dev — see [[0003-prisma-orm]] |
-| Search engine | **Meilisearch** | `v1.12.3` | Article/asset full-text search — see [[0035-search-architecture]] |
+| Search engine | **Meilisearch** | `v1.53.2` | Article/asset full-text search — see [[0035-search-architecture]] |
 | Queue broker | **Valkey** (Redis-compatible) | `8-alpine` | Backs BullMQ; AOF persistence — see [[0053-async-workers-bullmq-valkey]] |
 | Async workers | **BullMQ** + `@nestjs/bullmq` | — | ioredis client; sandboxed processors for heavy/untrusted jobs |
 | Shared types | **`@lazyit/shared`** | `0.0.0` | `packages/shared`; zod schemas/types shared front↔back |
-| Node (runtime image) | Node | `26-alpine` | Digest-pinned base for the prod images — see [[0025-containerization-strategy]]; `@types/node` is `^24.0.0` in both api and web |
+| Node (runtime image) | Node | `26-alpine` | Digest-pinned base for the prod images — see [[0025-containerization-strategy]]; `@types/node` is `^26.6.6` in both api and web |
+
+Dependency compatibility and changelog review: [[dependency-upgrade-2026-11]].
+TypeScript remains on `6.0.3` until its compiler-API consumers support v7; Prisma stays on the stable v7 line.
 
 ## Ports
 
@@ -71,7 +74,7 @@ Two workloads ride this substrate today:
 
 ## Search
 
-lazyit runs a dedicated **full-text search engine — Meilisearch** (`getmeili/meilisearch:v1.12.3`,
+lazyit runs a dedicated **full-text search engine — Meilisearch** (`getmeili/meilisearch:v1.53.2`,
 digest-pinned) alongside Postgres, indexing the knowledge-base articles and assets. The API talks to it
 through the official `meilisearch` client in `apps/api/src/search/`; **PostgreSQL stays the system of
 record** and the Meili index is a **rebuildable projection** of it. The search is **fail-soft**: when

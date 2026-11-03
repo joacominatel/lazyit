@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-22
+updated: 2026-11-02
 ---
 
 # Deployment
@@ -47,7 +47,7 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
   [[stack]]). No identity provider ships in the stack: authentication is local accounts or your own
   OIDC IdP, running outside it ([[0102-remove-bundled-zitadel]]; see *Identity & authorization* below).
-- **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.4.2, and
+- **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.4.4, and
   application runtimes on Node (`node:26-alpine`). The API compiles in its Bun builder and runs
   `node dist/src/main`; the web runs `next build` under a real Node 26 Debian build stage and serves
   the resulting standalone bundle on Node. The migrate job runs on Bun (the seed needs it). Details:

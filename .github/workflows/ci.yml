@@ -36,7 +36,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       # Node is needed to run Jest: jest@30's NodeEnvironment does not initialize under Bun's
       # runtime, so the API test step below invokes jest with Node, not `bun run`.
@@ -339,7 +339,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       # jest@30 does not initialize under Bun's runtime — same as the verify job's API tests.
       - name: Set up Node
