@@ -6,7 +6,7 @@ description: >-
   ADRs/decisions, conventions, runbooks, the shared contract), the reasoning path for any
   task (read docs/ before touching code, find the relevant ADR, ask the user when a
   decision is missing), how to split backend/frontend work into separate hc workers, the
-  file-by-file commit convention, and the docs/-update process. Invoke before implementing
+  by responsibility commit convention, and the docs/-update process. Invoke before implementing
   a feature, adding an endpoint/entity/model, wiring the frontend, or making any technical
   decision in this repo.
 ---
@@ -122,7 +122,7 @@ Summaries only — the linked doc is authoritative.
   Prisma + Jest (don't "Bun-ify" it). Concretely: don't swap NestJS/Express for `Bun.serve`,
   Prisma for `Bun.sql`, or Jest for `bun test` in the apps. → [[0009-bun-first-vs-app-stack]]
 - **Commits & branches** — work on an **issue branch off `dev`** (`<prefix>/issue-<n>-<slug>`),
-  commit **file-by-file** (docs may be grouped) with prefixes `feat · fix · chore · del · updt ·
+  commit **by responsibility** (docs may be grouped) with prefixes `feat · fix · chore · del · updt ·
   docs`, push, then **open a PR to `dev` only after the user's OK**. Agents never merge.
   → [[git-workflow]], [[claude-workflow]]
 
@@ -165,7 +165,7 @@ Shows the path works from zero:
 6. **Jest tests** for the service/controller; cover the core logic thoroughly.
 7. If this introduces/changes the `Ticket` model or rules → **update [[ticket]] and any ADR**.
 8. **On a branch off `dev`** (`feat/issue-<n>-add-tickets-endpoint` after finding/opening the
-   issue), **commit file-by-file**: `feat: add ticket zod schema to shared`, `feat: add tickets
+   issue), **commit by responsibility**: `feat: add ticket zod schema to shared`, `feat: add tickets
    module`, `docs: document Ticket fields`, etc. Push as you go.
 9. **Hand off**: summarize for the user and wait; on their OK, `gh pr create --base dev`. You
    don't merge — the user does. → [[git-workflow]]
