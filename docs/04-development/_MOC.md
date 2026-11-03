@@ -3,7 +3,7 @@ title: Development — MOC
 tags: [moc, development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-17
+updated: 2026-11-02
 ---
 
 # Development — Map of Content
@@ -12,6 +12,7 @@ Everything a developer needs to work on lazyit.
 
 - [[claude-workflow]] — **how we develop** (context-first, ask-don't-assume, subagents,
   commits, docs-sync). The default operating procedure for every change.
+- [[dependency-upgrade-2026-11]] — November dependency audit, compatibility exceptions and changelog review.
 - [[setup]] — get the repo running locally (Bun, Docker, Prisma).
 - [[cloud-agents]] — bringing lazyit up in a **fresh disposable VM** (Cursor Cloud and similar):
   services and ports, Docker without systemd, the three env files, the `OIDC_ISSUER` boot
