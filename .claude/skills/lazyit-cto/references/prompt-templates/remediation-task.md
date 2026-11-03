@@ -104,7 +104,7 @@ Standard git workflow:
 3. File-by-file commits with `fix:` prefix for code, `docs:` for moved findings
 4. Push, open PR to `dev`
 
-**Reminder**: file-by-file may produce many commits for transversal fixes. That's expected. Do not group them with `add -A`.
+**Delivery**: follow the charter and the global `git-delivery` skill for commit scope and staging.
 
 ## Reporting
 

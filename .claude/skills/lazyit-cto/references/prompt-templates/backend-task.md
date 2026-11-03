@@ -100,7 +100,7 @@ Relevant references:
 Standard git workflow applies:
 1. Create or claim issue (it may already exist as #<N>; verify with `gh issue list`)
 2. Branch from `dev`: `feat/issue-<N>-<slug>` (or `fix/`, `chore/`, etc.)
-3. Commit file-by-file with appropriate prefixes
+3. Commit by responsibility with appropriate prefixes
 4. Push and open PR to `dev` with `Closes #<N>` in body
 5. Pause and report; do not merge
 

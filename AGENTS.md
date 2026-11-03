@@ -33,8 +33,13 @@ Anything that could be critical — the data model, authorization, delete or mig
 security, irreversible actions — is escalated **before** acting. A wrong assumption costs more
 than a question.
 
-**3. Split front and back.** When work spans both, dispatch separate agents, one per side, each
-with its lane from the charter. The contract between them lives in `packages/shared`.
+**3. Split front and back.** When work spans both, dispatch separate workers through the global
+`hc` skill, one per side, each with its lane from the charter and its own worktree. The contract
+between them lives in `packages/shared`. Herdr Core owns worker lifecycle; use interactive Codex
+with `--no-daemon`, following the global harness. Report each terminal address and worktree.
+
+Codex must explicitly read the applicable `.claude/rules/` files; their `paths:` metadata is for
+Claude Code. Native subagents and detached task APIs are not this project's execution surface.
 
 **4. Documentation stays in sync.** Any change to behavior — especially core logic — reviews
 and updates the affected notes in the same change. Before committing, verify nothing references
