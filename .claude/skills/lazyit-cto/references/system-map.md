@@ -21,7 +21,7 @@ This file is structured for **scanning, not reading end-to-end**. The CTO opens 
 > **Shared**: `packages/shared` (zod schemas, types, utilities) + **`packages/fetch-cli`** (headless SA secret-retrieval CLI + client-side decrypt — ADR-0080)
 > **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts. **Now also `valkey`** (Redis-compatible; backs BullMQ — ADR-0053).
 > **Docs**: `docs/` (Obsidian vault — **81 ADRs (0001–0081) as of 2026-07-01**; ADR-0055 & ADR-0079 are *proposed*, 0013/0065/0071 *superseded*) + `docs/06-security/INVARIANTS.md` (the 7 auth non-negotiables + INV-8 [ADMIN immutable/full] + INV-SA-1..4 Service-Account guardrails + **INV-9** [KB folder ACL, ADR-0060] + **INV-10** [Secret Manager: server never decrypts, ADR-0061])
-> **Skills**: `.claude/skills/` (cto, navigator, devops, sentinel, remediator) — these are **skills loaded by general-purpose worktree agents**, not distinct Agent-tool agentTypes (see `agents-roster.md`)
+> **Skills**: `.claude/skills/` (cto, navigator, devops, sentinel, remediator) — these are **skills loaded by interactive hc workers**, not launch template names (see `agents-roster.md`)
 
 Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · Meilisearch → `:7700` (loopback) · **Valkey → `:6379` (loopback, dev only)**. In prod only Caddy publishes ports (8080/8443 by default); db/api/web/zitadel/valkey stay internal.
 

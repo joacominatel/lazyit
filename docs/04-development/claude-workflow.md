@@ -1,12 +1,12 @@
 ---
-title: Working with Claude Code — Development Workflow
+title: Development Workflow — Herdr Core, Codex and Claude Code
 tags: [development]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-11-02
 ---
 
-# Working with Claude Code — Development Workflow
+# Development Workflow — Herdr Core, Codex and Claude Code
 
 How development happens on lazyit. This is the **default operating procedure for every
 change** — human or AI. It is important enough to also live (condensed) in the root
@@ -30,13 +30,20 @@ Before writing or changing **anything**:
 - Anything that **could be critical** (data model, auth, deletion/migration semantics,
   security, irreversible actions) → **consult the user before acting**.
 
-## 3. Front and back via separate subagents
+## 3. Front and back through Herdr Core
 
 When a task spans **both frontend and backend**:
 
-- Delegate to **separate subagents**: one owns the **frontend**, one owns the **backend**.
-- **Claude Code orchestrates** — it specifies the tasks, contracts and acceptance criteria
-  for each subagent; it does **not** implement both sides itself.
+- Delegate to **separate workers through `hc`**: one owns the **frontend**, one owns the **backend**.
+- The coordinator specifies the tasks, contracts and acceptance criteria. Each writer owns a
+  distinct worktree and Git index, even when workers execute serially on one issue.
+- Use the shared global `hc` skill and the installed `hc --skill` manual. Workers run interactive
+  `codex --no-daemon`; native subagents and detached task APIs are not the execution surface.
+- Report terminal addresses, roles and worktrees. Run long builds, tests and CI watches through
+  hc too, and collect actual results with `hc wait` / `hc read`. Herdr is presentation; change
+  tabs or panes only when requested.
+- Codex reads the applicable `.claude/rules/` files explicitly. Claude-specific path metadata
+  and hooks do not configure or enforce Codex. Keep Codex sandbox and approval boundaries.
 - The shared contract between them lives in [[shared-package]] (zod schemas / types).
 
 ## 4. Branches, commits & pull requests
@@ -54,8 +61,7 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
   **ask the user** if it isn't. Cut the branch **from `dev`**, named `<prefix>/issue-<n>-<slug>`
   — the prefix matches the commit prefix, so the branch announces the kind of change. Working on
   separate branches means parallel work no longer collides; conflicts are resolved at merge time.
-- **One file per commit** — small, well-defined, reviewable. (Documentation is the exception:
-  doc changes may be grouped.) **Message prefixes:** `feat` · `fix` · `chore` · `del` · `updt` ·
+- **One responsibility per commit** — small, well-defined, reviewable, as the charter specifies. **Message prefixes:** `feat` · `fix` · `chore` · `del` · `updt` ·
   `docs`. Example: `feat: add Asset model to prisma schema` · `updt: refine AssetAssignment
   rules` · `del: remove HealthCheck model` · `docs: document shared package contract`.
 - **Agents open the PR; the user merges it.** Push the branch and open the PR

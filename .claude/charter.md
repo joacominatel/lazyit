@@ -77,6 +77,13 @@ user-facing change writes it too. That overlap is intentional — see the Manual
 Cross-lane edits need explicit authorization in the dispatch prompt, and the commit message
 records it.
 
+## Execution
+
+The global harness owns execution procedures through its `hc` skill. Workers and long-running
+commands run in Herdr Core; Herdr supplies the UI and Codex is the interactive execution client.
+The frontend/backend split above uses separate writer worktrees. One owner performs Git staging
+and commits in each worktree. Claude-specific hooks do not enforce Codex operations.
+
 ## Shared critical files
 
 A unit touching any of these forces serial execution. No exceptions for convenience.
