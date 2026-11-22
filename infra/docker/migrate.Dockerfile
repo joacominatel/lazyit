@@ -7,7 +7,7 @@
 
 # oven/bun:1.4.2 — pinned by digest (ADR-0025 follow-up). Re-pin after a deliberate bump:
 # docker buildx imagetools inspect oven/bun:1.4.2 --format '{{.Manifest.Digest}}'.
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS runtime
+FROM oven/bun:1.4.5@sha256:3aa040e5445efa09d75bb428a64ba50db13e2b3ac9b6b0c7f145615f62b2ee18 AS runtime
 # No Prisma CLI ping to checkpoint.prisma.io: lazyit sends no telemetry.
 ENV CHECKPOINT_DISABLE=1
 WORKDIR /app
